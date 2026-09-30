@@ -1,0 +1,27 @@
+# .NET build and test output
+**/bin/
+**/obj/
+**/TestResults/
+coverage/
+*.user
+*.suo
+.vs/
+
+# Dashboard dependencies and output
+**/node_modules/
+**/dist/
+
+# Local editor and OS files
+.idea/
+.DS_Store
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.key
+
+# Logs
+*.log
