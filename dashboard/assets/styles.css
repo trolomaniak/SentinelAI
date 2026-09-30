@@ -1,0 +1,80 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  background: #101a2b;
+  color: #eaf0f9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem max(1.5rem, calc((100vw - 72rem) / 2));
+  border-bottom: 1px solid #314059;
+}
+
+.brand-mark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  background: #64d8bc;
+  color: #101a2b;
+  font-weight: 800;
+}
+
+.brand-name {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.main-content {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: clamp(2.5rem, 7vw, 5rem) 1.5rem;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #64d8bc;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0.5rem 0 2.5rem;
+  font-size: clamp(2.25rem, 5vw, 3.5rem);
+  line-height: 1.1;
+}
+
+.welcome-panel {
+  max-width: 42rem;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border: 1px solid #314059;
+  border-radius: 1rem;
+  background: #19263a;
+}
+
+.welcome-panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.35rem;
+}
+
+.welcome-panel p {
+  margin: 0;
+  color: #c4d0df;
+}
