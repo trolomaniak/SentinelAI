@@ -13,7 +13,8 @@
 - Use ASP.NET Core bearer authentication with a 15-minute token lifetime and process-local Data Protection keys. Tokens become invalid when Core restarts, and no signing or protection key is written to disk. Login attempts are rate-limited.
 - Keep TASK-002 integration checks in the existing executable Core test project. They exercise a real loopback server and temporary SQLite database without adding a test framework dependency.
 
-## 2026-10-01 — Standalone Windows Agent package
+## 2026-10-01 — TASK-003 provisional heartbeat
 
-- Package the Agent as a self-contained, single-file `win-x64` user-mode EXE. Bundle native runtime files into the EXE for extraction at launch, and leave trimming disabled to preserve future Agent compatibility.
-- Verify the published EXE on a Windows CI runner and upload it as a development artifact. Windows Service hosting and heartbeat remain TASK-003; a signed installer remains TASK-015.
+- Host the .NET Agent with `AddWindowsService` so one executable runs under the Windows Service Control Manager and as a console process for development. Persist a generated installation ID locally; it identifies an installation but does not authenticate it.
+- Until TASK-004 provides secure enrollment, allow Agent heartbeats only to a loopback Core origin, reject non-loopback heartbeat clients in Core, rate-limit the endpoint, and mark device records `unverified`. No administrator credential is stored in the Agent.
+- Use Core's server clock for `last_seen` and persist the last reported `reporting` state in the existing SQLite database. A consumer must use `last_seen` to determine freshness; TASK-003 does not define an online/offline threshold.

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\agent\SentinelAI.Agent.csproj" />
+    <ProjectReference Include="..\..\core\SentinelAI.Core.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

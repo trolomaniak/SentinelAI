@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.Extensions.DependencyInjection;
+using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 
@@ -27,6 +28,8 @@ try
     Environment.SetEnvironmentVariable("SENTINELAI_BOOTSTRAP_PASSWORD", password);
 
     string firstAccessToken;
+    var installationId = Guid.NewGuid();
+    DateTimeOffset lastHeartbeatUtc;
     await using (var app = CoreHost.Build([]))
     {
         Ensure(app.Services.GetService<IServer>() is not null, "The Core host did not register a web server.");
@@ -78,6 +81,41 @@ try
             var contents = await File.ReadAllBytesAsync(file);
             Ensure(contents.AsSpan().IndexOf(passwordBytes) < 0, "A Core data file contains the plaintext password.");
         }
+
+        var devices = app.Services.GetRequiredService<DeviceStore>();
+        Ensure(await devices.CountAsync() == 0, "The fresh Core database already contains devices.");
+
+        using (var invalidHeartbeat = await SendHeartbeatAsync(client, Guid.Empty))
+        {
+            Ensure(invalidHeartbeat.StatusCode == HttpStatusCode.BadRequest,
+                "The heartbeat endpoint accepted an empty installation ID.");
+        }
+        Ensure(await devices.CountAsync() == 0, "An invalid heartbeat created a device.");
+
+        var firstHeartbeat = await SendValidHeartbeatAsync(client, installationId);
+        Ensure(firstHeartbeat.HealthStatus == DeviceHealthStatus.Reporting,
+            "The first heartbeat did not report a healthy device.");
+        Ensure(firstHeartbeat.LastSeenUtc.Offset == TimeSpan.Zero,
+            "The heartbeat timestamp was not in UTC.");
+        Ensure(await devices.CountAsync() == 1, "The first heartbeat did not create exactly one device.");
+        var firstDevice = await devices.FindByInstallationIdAsync(installationId)
+            ?? throw new Exception("Core did not persist the first heartbeat.");
+        Ensure(firstDevice.LastSeenUtc == firstHeartbeat.LastSeenUtc,
+            "The persisted first heartbeat time differs from the response.");
+        Ensure(firstDevice.HealthStatus == DeviceHealthStatus.Reporting,
+            "The persisted device health status is incorrect.");
+        Ensure(firstDevice.EnrollmentStatus == "unverified",
+            "Heartbeat incorrectly treated a device as enrolled.");
+
+        await Task.Delay(100);
+        var secondHeartbeat = await SendValidHeartbeatAsync(client, installationId);
+        Ensure(secondHeartbeat.LastSeenUtc > firstHeartbeat.LastSeenUtc,
+            "A repeated heartbeat did not advance last_seen.");
+        Ensure(await devices.CountAsync() == 1, "A repeated heartbeat duplicated the device.");
+        var updatedDevice = await devices.FindByInstallationIdAsync(installationId);
+        Ensure(updatedDevice?.LastSeenUtc == secondHeartbeat.LastSeenUtc,
+            "Core did not persist the updated last_seen time.");
+        lastHeartbeatUtc = secondHeartbeat.LastSeenUtc;
     }
 
     // Existing installations must work without retaining the bootstrap secret in configuration.
@@ -87,6 +125,13 @@ try
     await using (var restartedApp = CoreHost.Build([]))
     {
         using var client = await StartCoreAsync(restartedApp);
+        var devices = restartedApp.Services.GetRequiredService<DeviceStore>();
+        var persistedDevice = await devices.FindByInstallationIdAsync(installationId);
+        Ensure(persistedDevice?.LastSeenUtc == lastHeartbeatUtc,
+            "The device heartbeat did not survive Core restart.");
+        Ensure(await devices.CountAsync() == 1,
+            "Core restart changed the number of persisted devices.");
+
         using (var oldToken = await GetAsBearerAsync(client, "/api/admin/me", firstAccessToken))
         {
             Ensure(oldToken.StatusCode == HttpStatusCode.Unauthorized, "A bearer token survived Core restart.");
@@ -132,6 +177,20 @@ static async Task<HttpClient> StartCoreAsync(WebApplication app)
 
 static Task<HttpResponseMessage> LoginAsync(HttpClient client, string username, string password) =>
     client.PostAsJsonAsync("/api/auth/login", new { username, password });
+
+static Task<HttpResponseMessage> SendHeartbeatAsync(HttpClient client, Guid installationId) =>
+    client.PostAsJsonAsync("/api/agent/heartbeat", new HeartbeatRequest(installationId));
+
+static async Task<HeartbeatResponse> SendValidHeartbeatAsync(HttpClient client, Guid installationId)
+{
+    using var response = await SendHeartbeatAsync(client, installationId);
+    Ensure(response.StatusCode == HttpStatusCode.OK, "Core rejected a valid heartbeat.");
+    var heartbeat = await response.Content.ReadFromJsonAsync<HeartbeatResponse>()
+        ?? throw new Exception("The heartbeat endpoint returned no response body.");
+    Ensure(heartbeat.InstallationId == installationId,
+        "The heartbeat response changed the installation ID.");
+    return heartbeat;
+}
 
 static async Task<string> GetAccessTokenAsync(HttpClient client, string username, string password)
 {

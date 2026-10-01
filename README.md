@@ -1,6 +1,6 @@
 # SentinelAI
 
-SentinelAI is a Windows-first, local-first cybersecurity platform. The Core service provides a local API with SQLite-backed administrator login. The Agent and dashboard are still scaffolds.
+SentinelAI is a Windows-first, local-first cybersecurity platform. Core provides a local API with SQLite-backed administrator login and endpoint heartbeat persistence. The Agent sends local heartbeats; the dashboard remains a scaffold.
 
 The backend uses .NET 10 and contains the Agent, Core web host, and shared contracts projects. The dashboard is a dependency-free static shell built with Node.js 20 or newer.
 
@@ -11,7 +11,7 @@ From the repository root, run:
 ./scripts/test.sh
 ```
 
-The build script restores and builds the .NET solution, then builds the dashboard. The test script runs the Agent scaffold check and Core API integration checks.
+The build script restores and builds the .NET solution, then builds the dashboard. The test script runs Agent and Core integration checks.
 
 To start Core for the first time, set a bootstrap administrator name and a password of at least 12 characters. The password is used only to create the initial administrator and is stored as a password hash in SQLite. Remove the password from the environment after the first successful start; later starts use the existing database.
 
