@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Data.Sqlite;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Core;
@@ -203,6 +204,7 @@ finally
     Environment.SetEnvironmentVariable("SENTINELAI_BOOTSTRAP_PASSWORD", originalPassword);
     if (Directory.Exists(dataDirectory))
     {
+        SqliteConnection.ClearAllPools();
         Directory.Delete(dataDirectory, recursive: true);
     }
 }

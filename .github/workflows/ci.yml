@@ -42,12 +42,6 @@ jobs:
             Write-Output "::error title=Windows Agent enrollment test::$message"
           }
           exit $testExitCode
-      - name: Upload failed Agent test diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SentinelAI.Agent-windows-test-log
-          path: ${{ runner.temp }}\sentinelai-agent-test.log
       - name: Publish standalone Agent EXE
         shell: bash
         run: ./scripts/publish-agent-windows.sh
