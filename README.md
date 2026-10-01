@@ -1,6 +1,6 @@
 # SentinelAI
 
-SentinelAI is a Windows-first, local-first cybersecurity platform. Core provides a local API with SQLite-backed administrator login and endpoint heartbeat persistence. The Agent sends local heartbeats; the dashboard remains a scaffold.
+SentinelAI is a Windows-first, local-first cybersecurity platform. Core provides a local API with SQLite-backed administrator login, endpoint heartbeats, and endpoint inventory. The Agent sends heartbeats and inventory to Core; the dashboard remains a scaffold.
 
 The backend uses .NET 10 and contains the Agent, Core web host, and shared contracts projects. The dashboard is a dependency-free static shell built with Node.js 20 or newer.
 
@@ -37,5 +37,7 @@ To enroll an Agent, log in as the Core administrator and call `POST /api/admin/e
 Core binds to loopback by default. For an Agent on another machine, configure a Core HTTPS listener and a certificate trusted by the Agent operating system, set `Agent__CoreUrl` to its HTTPS origin, and set `Agent__CoreCertificateSha256` to the SHA-256 fingerprint of the Core leaf certificate in DER form. The Agent requires TLS 1.3, normal certificate validation, and the configured fingerprint for LAN connections. Core rejects remote HTTP enrollment and Agent heartbeat traffic. Local loopback HTTP remains available for development and same-machine installations.
 
 The Agent protects its enrollment credential with Windows DPAPI under its service account; Unix test installations restrict the state file to mode `0600`. The state is bound to the configured Core origin and certificate fingerprint. An enrolled Agent authenticates every heartbeat with that credential. Legacy anonymous loopback heartbeats remain `unverified` and cannot update an enrolled endpoint. Core stores only hashes of enrollment tokens and Agent credentials in SQLite; `reporting` is the last observed health state, so consumers should use `last_seen` to assess freshness.
+
+After an enrolled heartbeat succeeds, the Agent reports hostname, OS name and version, architecture, CPU model and logical processor count, installed RAM, local fixed-disk capacities, and available Windows firewall profile settings. Unavailable fields are reported as unknown. Collection uses bounded system metadata calls and does not scan files or launch external commands. The Agent refreshes inventory every six hours and retries a failed inventory upload after five minutes. Core accepts inventory only from an enrolled Agent over the same trusted transport as heartbeats, validates and limits the report, and stores the most recently collected report in SQLite. Inventory upload failures do not interrupt heartbeats. Inventory is stored locally in Core; the device dashboard belongs to TASK-006.
 
 To install a manually published Windows EXE as a service, run `New-Service -Name SentinelAIAgent -BinaryPathName 'C:\SentinelAI\Agent\SentinelAI.Agent.exe' -StartupType Automatic` and then `Start-Service SentinelAIAgent` from an elevated PowerShell session. Keep the service account stable so it can decrypt its DPAPI state. A signed pilot installer belongs to TASK-015.

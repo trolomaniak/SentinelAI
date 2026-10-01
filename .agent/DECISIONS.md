@@ -25,3 +25,9 @@
 - Preserve the existing Devices table and installation IDs. Store the Core-assigned endpoint ID, organization/Core association, and a hash of a distinct 256-bit Agent credential in an additive EndpointEnrollments table. A repeated enrollment for the same installation returns `409` without creating a duplicate or rotating the credential.
 - Authenticate enrolled heartbeats with a separate `SentinelAgent` authorization scheme and reject anonymous updates to enrolled installations. Keep anonymous heartbeat limited to unverified loopback devices for TASK-003 compatibility. LAN enrollment and heartbeat require HTTPS; the Agent additionally requires TLS 1.3, normal certificate validation, and an explicit Core certificate SHA-256 fingerprint. Full mTLS certificate lifecycle management remains outside TASK-004.
 - Bind Agent enrollment state to its installation ID, Core origin, and certificate fingerprint. Protect the credential with Windows DPAPI under the service account; use private file permissions for Unix development tests. Do not log enrollment tokens or Agent credentials.
+
+## 2026-10-01 — TASK-005 endpoint inventory
+
+- Send inventory through a separate authenticated Agent API after an enrolled heartbeat succeeds. The Agent refreshes every six hours and retries inventory failures after five minutes without interrupting heartbeat delivery. Anonymous loopback Agents cannot submit inventory.
+- Keep only the newest report per Core-assigned endpoint ID in SQLite, ordered by Agent collection time. Validate field sizes and disk counts before storing reports; keep inventory separate from heartbeat freshness and health.
+- Limit Windows collection to bounded system metadata queries for host, OS, CPU, physical memory, fixed local disks, and available firewall profile settings. Represent unavailable values as unknown instead of failing the Agent. Do not inspect arbitrary file contents or launch external scanners.

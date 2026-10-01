@@ -18,6 +18,7 @@ public static class AgentHost
             AgentOptions.FromConfiguration(provider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()));
         builder.Services.AddSingleton<InstallationIdentityStore>();
         builder.Services.AddSingleton<EnrollmentStateStore>();
+        builder.Services.AddSingleton<InventoryCollector>();
         builder.Services.AddSingleton(provider =>
         {
             var options = provider.GetRequiredService<AgentOptions>();

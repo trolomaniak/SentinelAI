@@ -262,6 +262,29 @@ public sealed class EnrollmentStore(AdminStore admins)
             storedHash, SHA256.HashData(credentialBytes));
     }
 
+    public async Task<bool> AuthenticateEndpointAsync(
+        Guid endpointId,
+        string credential,
+        CancellationToken cancellationToken = default)
+    {
+        if (endpointId == Guid.Empty || !TryDecodeSecret(credential, out var credentialBytes))
+        {
+            return false;
+        }
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var query = connection.CreateCommand();
+        query.CommandText = """
+            SELECT CredentialHash FROM EndpointEnrollments
+            WHERE EndpointId = $endpointId;
+            """;
+        query.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
+        var storedHash = await query.ExecuteScalarAsync(cancellationToken) as byte[];
+        return storedHash is { Length: 32 } && CryptographicOperations.FixedTimeEquals(
+            storedHash, SHA256.HashData(credentialBytes));
+    }
+
     private static bool TryDecodeSecret(string? text, out byte[] bytes)
     {
         bytes = [];
