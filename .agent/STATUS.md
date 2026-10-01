@@ -3,31 +3,34 @@
 ## Completed
 
 - TASK-001 merged through PR #1; its GitHub Actions CI passed.
-- TASK-002 Core API and local authentication merged through PR #2: health, SQLite initialization, one bootstrap administrator, password hashing, login, a protected endpoint, configuration, and JSON structured logs.
-- A standalone, self-contained Windows x64 Agent EXE can be built with `scripts/publish-agent-windows.sh`. Windows CI publishes, starts, and uploads the single-file EXE. This packaging change is separate from TASK-003 service behavior.
-- Local `./scripts/build.sh`, `./scripts/test.sh`, and the Agent publish script passed on 2026-10-01. The branch CI build/test and Windows packaging jobs passed for `faa5b5a1b9de251cb1a1a310ae038746efe1f634`.
+- TASK-002 Core API and local administrator authentication merged through PR #2.
+- The standalone Windows x64 Agent EXE packaging merged through PR #3. TASK-003 Windows Service hosting, heartbeat retries, and SQLite device persistence merged through PR #4.
+- TASK-004 secure endpoint enrollment is implemented on `codex/task-004-secure-enrollment`: an administrator issues a ten-minute one-use token; Core assigns an endpoint ID and records its organization/Core association; the Agent stores its enrollment identity and authenticates subsequent heartbeats. Invalid, expired, consumed, or duplicate enrollment attempts fail as specified.
+- Local `./scripts/build.sh`, `./scripts/test.sh`, and `./scripts/publish-agent-windows.sh` passed on 2026-10-01 with zero build warnings or errors. Tests cover enrollment success and failure, token expiry and one-use behavior, concurrent claims, duplicate rejection, Agent state persistence across restart, authenticated heartbeat, and remote HTTP rejection.
+- GitHub Actions run `36914756583` passed on 2026-10-01: Linux build and tests; Windows Agent enrollment tests, single-file EXE publication, console startup, Windows Service startup, and artifact upload.
 
 ## Current architecture
 
-- Agent remains a .NET 10 console scaffold with no endpoint behavior. Its portable `win-x64` EXE includes the .NET runtime and is uploaded as a CI artifact.
-- Core is a .NET 10 ASP.NET Core service. It binds to loopback HTTP by default, supports standard Kestrel HTTPS configuration, and exposes `GET /api/health`, `POST /api/auth/login`, and authenticated `GET /api/admin/me`.
-- Core creates a local SQLite database on startup and creates one administrator from first-run environment variables. It stores an Identity PBKDF2 password hash. Bearer tokens last 15 minutes and are invalidated on restart.
-- Shared contracts are still empty. Dashboard remains a static shell. CI uses the root build and test scripts.
+- Agent is a .NET 10 user-mode background host that runs as a Windows Service or console process and can be published as a self-contained single-file EXE. It retains a stable installation ID, enrolls with a one-use token, persists its assigned endpoint ID and credential, and sends authenticated heartbeats with bounded retries. Windows enrollment state is protected with DPAPI under the service account. Remote Core connections require HTTPS, TLS 1.3, normal certificate validation, and an explicit certificate fingerprint.
+- Core is a .NET 10 ASP.NET Core service with administrator authentication and SQLite persistence. It stores one Core installation/organization identity, hashes of short-lived enrollment tokens and Agent credentials, endpoint enrollments, and device heartbeat state. Administrator token issuance requires authentication; remote enrollment and enrolled heartbeats require HTTPS. Legacy anonymous loopback heartbeats can update only unverified devices.
+- Shared contracts define heartbeat and enrollment requests/responses. The dashboard remains a static shell. CI builds/tests on Linux and tests Agent enrollment, EXE packaging, console startup, and Windows Service startup on Windows.
 
 ## Important decisions
 
-See `.agent/DECISIONS.md` for the local Core authentication decisions and the standalone Agent packaging choice.
+See `.agent/DECISIONS.md` for the enrollment token, endpoint credential, Core trust, and Agent state decisions.
 
 ## Known issues
 
-- Core has not yet been exercised on Windows. The Agent EXE is launched by Windows CI, but service hosting and heartbeat are still unimplemented until TASK-003.
+- A lost Agent enrollment state or lost first enrollment response requires an explicit administrator recovery workflow. TASK-004 rejects re-enrollment for an existing installation with `409` and does not silently create a duplicate.
+- Full certificate/mTLS lifecycle management remains future work; operators must provision the Core HTTPS certificate and Agent fingerprint for LAN enrollment.
+- `reporting` is the last observed health state and does not automatically become offline when heartbeats stop. Consumers should assess `last_seen`.
 - The Agent CI artifact is an unsigned development build; signed pilot installation belongs to TASK-015.
-- ASP.NET Core's unused key manager can log a generic warning about unencrypted key persistence. TASK-002 configures its repository in memory, and no Data Protection key file is written by Core.
+- ASP.NET Core's unused key manager can log a generic warning about unencrypted key persistence. Its repository is process-local and no Data Protection key file is written by Core.
 
 ## Next task
 
-TASK-003 — Agent Heartbeat and Windows Service hosting.
+TASK-005 — Endpoint inventory. Do not start it as part of TASK-004.
 
 ## Last verified commit
 
-`faa5b5a1b9de251cb1a1a310ae038746efe1f634` — Agent packaging passed local build/tests/publish and hosted Windows and Linux CI jobs.
+`669ffdced348d7e8388c56323ec5667e8b827449` — TASK-004 implementation passed local build, Agent/Core integration tests, single-file Windows Agent publication, and hosted Linux and Windows CI.
