@@ -7,9 +7,11 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
+using SentinelAI.Contracts.Inventory;
 using SentinelAI.Core.Persistence;
 
 namespace SentinelAI.Core;
@@ -38,6 +40,7 @@ public static class CoreHost
         builder.Services.AddSingleton<AdminStore>();
         builder.Services.AddSingleton<DeviceStore>();
         builder.Services.AddSingleton<EnrollmentStore>();
+        builder.Services.AddSingleton<InventoryStore>();
         builder.Services.AddHostedService<AdminInitializationService>();
 
         builder.Services.AddDataProtection()
@@ -73,6 +76,15 @@ public static class CoreHost
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = 20,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+            options.AddPolicy("inventory", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 30,
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0,
                     AutoReplenishment = true
@@ -172,6 +184,43 @@ public static class CoreHost
             .AllowAnonymous()
             .RequireRateLimiting("enrollment");
 
+        app.MapPost("/api/agent/inventory", async (
+                InventoryReport? report,
+                HttpContext context,
+                InventoryStore inventories,
+                EnrollmentStore enrollments,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (!IsValidInventory(report))
+                {
+                    return Results.BadRequest();
+                }
+
+                var authorization = context.Request.Headers.Authorization.ToString();
+                if (!TryReadAgentCredential(authorization, out var endpointId, out var credential) ||
+                    endpointId != report!.EndpointId)
+                {
+                    return Results.Unauthorized();
+                }
+
+                if (!await enrollments.AuthenticateEndpointAsync(
+                        endpointId, credential, cancellationToken))
+                {
+                    return Results.Unauthorized();
+                }
+
+                await inventories.RecordLatestAsync(report, cancellationToken);
+                return Results.NoContent();
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting("inventory")
+            .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
         app.MapPost("/api/auth/login", async (
                 LoginRequest? request,
                 AdminStore admins,
@@ -224,6 +273,40 @@ public static class CoreHost
     }
 
     private sealed record LoginRequest(string? Username, string? Password);
+
+    private static bool IsValidInventory(InventoryReport? report)
+    {
+        if (report is null || report.EndpointId == Guid.Empty ||
+            report.CollectedUtc.Offset != TimeSpan.Zero ||
+            report.CollectedUtc <= DateTimeOffset.UnixEpoch ||
+            report.CollectedUtc > DateTimeOffset.UtcNow.AddMinutes(5) ||
+            !IsValidText(report.AgentVersion, 64) ||
+            !IsValidText(report.Hostname, 255) ||
+            !IsValidText(report.OsName, 128) ||
+            !IsValidText(report.OsVersion, 128) ||
+            !IsValidText(report.Architecture, 32) ||
+            report.Cpu is null ||
+            report.Cpu.LogicalProcessorCount is < 1 or > 1024 ||
+            report.Cpu.Model is not null && !IsValidText(report.Cpu.Model, 256) ||
+            report.InstalledRamBytes is <= 0 ||
+            report.Disks is null or { Count: > 32 } ||
+            report.SecurityPosture is null)
+        {
+            return false;
+        }
+
+        return report.Disks.All(disk =>
+            disk is not null &&
+            IsValidText(disk.Name, 256) &&
+            disk.TotalBytes > 0 &&
+            disk.AvailableBytes >= 0 &&
+            disk.AvailableBytes <= disk.TotalBytes);
+    }
+
+    private static bool IsValidText(string? value, int maxLength) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Length <= maxLength &&
+        !value.Any(char.IsControl);
 
     private static bool IsLocalOrHttps(HttpContext context) =>
         context.Request.IsHttps || IsLoopback(context.Connection.RemoteIpAddress);

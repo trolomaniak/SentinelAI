@@ -12,6 +12,7 @@ public sealed class HeartbeatWorker(
     InstallationIdentityStore identityStore,
     EnrollmentStateStore enrollmentStateStore,
     AgentEnrollmentClient enrollmentClient,
+    InventoryCollector inventoryCollector,
     HttpClient httpClient,
     ILogger<HeartbeatWorker> logger) : BackgroundService
 {
@@ -26,6 +27,7 @@ public sealed class HeartbeatWorker(
         }
 
         var nextRetryDelay = options.RetryDelay;
+        var nextInventoryUtc = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {
             bool acknowledged;
@@ -80,6 +82,27 @@ public sealed class HeartbeatWorker(
                 acknowledged = false;
             }
 
+            if (acknowledged && enrollment is not null && DateTimeOffset.UtcNow >= nextInventoryUtc)
+            {
+                bool inventorySent;
+                try
+                {
+                    inventorySent = await SendInventoryAsync(enrollment, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    logger.LogWarning(exception, "Inventory collection or delivery failed");
+                    inventorySent = false;
+                }
+
+                nextInventoryUtc = DateTimeOffset.UtcNow +
+                    (inventorySent ? TimeSpan.FromHours(6) : TimeSpan.FromMinutes(5));
+            }
+
             var delay = acknowledged ? options.HeartbeatInterval : nextRetryDelay;
             nextRetryDelay = acknowledged ? options.RetryDelay : DoubleDelay(nextRetryDelay, options.MaxRetryDelay);
             try
@@ -132,4 +155,27 @@ public sealed class HeartbeatWorker(
         delay.Ticks >= maximum.Ticks / 2
             ? maximum
             : TimeSpan.FromTicks(delay.Ticks * 2);
+
+    private async Task<bool> SendInventoryAsync(
+        EnrollmentState enrollment,
+        CancellationToken cancellationToken)
+    {
+        var report = inventoryCollector.Collect(enrollment.EndpointId);
+        using var request = new HttpRequestMessage(HttpMethod.Post, options.InventoryUrl)
+        {
+            Content = JsonContent.Create(report)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue(
+            "SentinelAgent", $"{enrollment.EndpointId:D}.{enrollment.AgentCredential}");
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Inventory upload failed with HTTP {StatusCode}", (int)response.StatusCode);
+            return false;
+        }
+
+        logger.LogDebug("Inventory acknowledged for endpoint {EndpointId}", enrollment.EndpointId);
+        return true;
+    }
 }

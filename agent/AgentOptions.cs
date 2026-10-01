@@ -14,6 +14,7 @@ public sealed record AgentOptions(
 {
     public Uri HeartbeatUrl => new(CoreUrl, "/api/agent/heartbeat");
     public Uri EnrollmentUrl => new(CoreUrl, "/api/agent/enroll");
+    public Uri InventoryUrl => new(CoreUrl, "/api/agent/inventory");
     public override string ToString() => nameof(AgentOptions);
 
     public static AgentOptions FromConfiguration(IConfiguration configuration)

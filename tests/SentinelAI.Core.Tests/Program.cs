@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Data.Sqlite;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
+using SentinelAI.Contracts.Inventory;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 
@@ -35,6 +36,7 @@ try
     Guid endpointId;
     string agentCredential;
     CoreIdentity coreIdentity;
+    InventoryReport latestInventory;
     await using (var app = CoreHost.Build([]))
     {
         Ensure(app.Services.GetService<IServer>() is not null, "The Core host did not register a web server.");
@@ -122,6 +124,7 @@ try
             "Core did not persist the updated last_seen time.");
         (endpointId, agentCredential, coreIdentity, lastHeartbeatUtc) = await VerifyEnrollmentAsync(
             client, app, installationId, firstAccessToken, secondHeartbeat.LastSeenUtc, dataDirectory);
+        latestInventory = await VerifyInventoryAsync(client, app, endpointId, agentCredential);
     }
 
     // Existing installations must work without retaining the bootstrap secret in configuration.
@@ -146,6 +149,13 @@ try
         Ensure(await restartedApp.Services.GetRequiredService<EnrollmentStore>()
                    .GetCoreIdentityAsync() == coreIdentity,
             "Core restart changed the organization or Core installation ID.");
+        var persistedInventory = await restartedApp.Services.GetRequiredService<InventoryStore>()
+            .FindLatestAsync(endpointId);
+        Ensure(persistedInventory?.Hostname == latestInventory.Hostname &&
+               persistedInventory.CollectedUtc == latestInventory.CollectedUtc &&
+               persistedInventory.Cpu.Model == latestInventory.Cpu.Model &&
+               persistedInventory.Disks[0].TotalBytes == latestInventory.Disks[0].TotalBytes,
+            "Core restart lost the latest endpoint inventory.");
         using (var authenticatedHeartbeat = await SendAgentHeartbeatAsync(
                    client, installationId, endpointId, agentCredential))
         {
@@ -192,6 +202,12 @@ try
         {
             Ensure(heartbeat.StatusCode == HttpStatusCode.Forbidden,
                 "Core accepted an Agent credential over remote HTTP.");
+        }
+        using (var inventory = await SendInventoryAsync(
+                   client, CreateInventory(endpointId), endpointId, agentCredential))
+        {
+            Ensure(inventory.StatusCode == HttpStatusCode.Forbidden,
+                "Core accepted inventory and an Agent credential over remote HTTP.");
         }
     }
 
@@ -339,6 +355,165 @@ static async Task<(Guid EndpointId, string Credential, CoreIdentity CoreIdentity
         "Concurrent attempts reused a one-time enrollment token.");
 
     return (enrollment.EndpointId, enrollment.AgentCredential, coreIdentity, updatedDevice!.LastSeenUtc);
+}
+
+static async Task<InventoryReport> VerifyInventoryAsync(
+    HttpClient client,
+    WebApplication app,
+    Guid endpointId,
+    string credential)
+{
+    var inventories = app.Services.GetRequiredService<InventoryStore>();
+    var report = CreateInventory(endpointId);
+    Ensure(await inventories.FindLatestAsync(endpointId) is null,
+        "A fresh endpoint already has inventory.");
+
+    using (var anonymous = await client.PostAsJsonAsync("/api/agent/inventory", report))
+    {
+        Ensure(anonymous.StatusCode == HttpStatusCode.Unauthorized,
+            "Core accepted anonymous inventory.");
+    }
+    using (var wrongCredential = await SendInventoryAsync(
+               client, report, endpointId, new string('F', 64)))
+    {
+        Ensure(wrongCredential.StatusCode == HttpStatusCode.Unauthorized,
+            "Core accepted an invalid inventory credential.");
+    }
+    using (var wrongEndpoint = await SendInventoryAsync(
+               client, report with { EndpointId = Guid.NewGuid() }, endpointId, credential))
+    {
+        Ensure(wrongEndpoint.StatusCode == HttpStatusCode.Unauthorized,
+            "An Agent could report inventory for another endpoint.");
+    }
+    using (var wrongHeader = await SendInventoryAsync(
+               client, report, Guid.NewGuid(), credential))
+    {
+        Ensure(wrongHeader.StatusCode == HttpStatusCode.Unauthorized,
+            "Core accepted an inventory credential under another endpoint ID.");
+    }
+
+    var secondToken = await app.Services.GetRequiredService<EnrollmentStore>().IssueTokenAsync();
+    using (var secondEnrollment = await EnrollAsync(client, Guid.NewGuid(), secondToken.Token))
+    {
+        Ensure(secondEnrollment.StatusCode == HttpStatusCode.OK,
+            "Core could not enroll a second endpoint for credential isolation tests.");
+        var secondIdentity = await secondEnrollment.Content.ReadFromJsonAsync<EnrollmentResponse>()
+            ?? throw new Exception("The second enrollment returned no identity.");
+        using var swappedCredential = await SendInventoryAsync(
+            client, report, endpointId, secondIdentity.AgentCredential);
+        Ensure(swappedCredential.StatusCode == HttpStatusCode.Unauthorized,
+            "Another enrolled Agent's credential could overwrite endpoint inventory.");
+    }
+
+    using (var malformedJson = await client.PostAsync("/api/agent/inventory",
+               new StringContent("{", Encoding.UTF8, "application/json")))
+    {
+        Ensure(malformedJson.StatusCode == HttpStatusCode.BadRequest,
+            "Core accepted malformed inventory JSON.");
+    }
+    using (var missingHostname = await SendInventoryAsync(
+               client, report with { Hostname = " " }, endpointId, credential))
+    {
+        Ensure(missingHostname.StatusCode == HttpStatusCode.BadRequest,
+            "Core accepted an inventory without a hostname.");
+    }
+    using (var invalidCpu = await SendInventoryAsync(
+               client, report with { Cpu = new CpuInventory("Test CPU", 0) }, endpointId, credential))
+    {
+        Ensure(invalidCpu.StatusCode == HttpStatusCode.BadRequest,
+            "Core accepted an invalid logical processor count.");
+    }
+    using (var invalidDisk = await SendInventoryAsync(
+               client, report with { Disks = [new DiskInventory("C:\\", 1, 2)] },
+               endpointId, credential))
+    {
+        Ensure(invalidDisk.StatusCode == HttpStatusCode.BadRequest,
+            "Core accepted impossible disk capacity values.");
+    }
+    using (var futureTimestamp = await SendInventoryAsync(
+               client, report with { CollectedUtc = DateTimeOffset.UtcNow.AddHours(1) },
+               endpointId, credential))
+    {
+        Ensure(futureTimestamp.StatusCode == HttpStatusCode.BadRequest,
+            "Core accepted an inventory timestamp far in the future.");
+    }
+    using (var oversized = await SendInventoryAsync(
+               client, report with { Hostname = new string('X', 17_000) }, endpointId, credential))
+    {
+        Ensure(oversized.StatusCode == HttpStatusCode.RequestEntityTooLarge,
+            "Core did not limit the inventory request body.");
+    }
+    Ensure(await inventories.FindLatestAsync(endpointId) is null,
+        "Rejected inventory changed Core state.");
+
+    using (var accepted = await SendInventoryAsync(client, report, endpointId, credential))
+    {
+        Ensure(accepted.StatusCode == HttpStatusCode.NoContent,
+            "Core rejected a valid enrolled Agent inventory report.");
+    }
+    var stored = await inventories.FindLatestAsync(endpointId);
+    Ensure(stored?.CollectedUtc == report.CollectedUtc &&
+           stored.Hostname == report.Hostname &&
+           stored.AgentVersion == report.AgentVersion &&
+           stored.InstalledRamBytes == report.InstalledRamBytes &&
+           stored.Disks.Count == 1 &&
+           stored.SecurityPosture.DomainFirewallEnabled == true,
+        "Core did not persist the reported inventory fields.");
+
+    var older = report with
+    {
+        CollectedUtc = report.CollectedUtc.AddMinutes(-1),
+        Hostname = "stale-endpoint"
+    };
+    using (var stale = await SendInventoryAsync(client, older, endpointId, credential))
+    {
+        Ensure(stale.StatusCode == HttpStatusCode.NoContent,
+            "Core rejected an otherwise valid older inventory report.");
+    }
+    Ensure((await inventories.FindLatestAsync(endpointId))?.Hostname == report.Hostname,
+        "An older inventory report replaced the latest state.");
+
+    var newer = report with
+    {
+        CollectedUtc = report.CollectedUtc.AddTicks(1),
+        Hostname = "updated-endpoint"
+    };
+    using (var updated = await SendInventoryAsync(client, newer, endpointId, credential))
+    {
+        Ensure(updated.StatusCode == HttpStatusCode.NoContent,
+            "Core rejected the newer inventory report.");
+    }
+    Ensure((await inventories.FindLatestAsync(endpointId))?.Hostname == newer.Hostname,
+        "A newer inventory report did not replace the latest state.");
+    return newer;
+}
+
+static InventoryReport CreateInventory(Guid endpointId) => new(
+    endpointId,
+    DateTimeOffset.UtcNow,
+    "0.1.0-test",
+    "test-endpoint",
+    "Windows 11",
+    "10.0.26100",
+    "X64",
+    new CpuInventory("Test CPU", 8),
+    16L * 1024 * 1024 * 1024,
+    [new DiskInventory("C:\\", 512L * 1024 * 1024 * 1024, 256L * 1024 * 1024 * 1024)],
+    new SecurityPostureInventory(true, true, true));
+
+static async Task<HttpResponseMessage> SendInventoryAsync(
+    HttpClient client,
+    InventoryReport report,
+    Guid authorizationEndpointId,
+    string credential)
+{
+    using var request = new HttpRequestMessage(HttpMethod.Post, "/api/agent/inventory")
+    {
+        Content = JsonContent.Create(report)
+    };
+    request.Headers.Authorization = new AuthenticationHeaderValue(
+        "SentinelAgent", $"{authorizationEndpointId:D}.{credential}");
+    return await client.SendAsync(request);
 }
 
 static async Task<HttpClient> StartCoreAsync(WebApplication app)

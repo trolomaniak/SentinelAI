@@ -14,6 +14,7 @@ using Microsoft.Extensions.Hosting;
 using SentinelAI.Agent;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
+using SentinelAI.Contracts.Inventory;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 
@@ -27,6 +28,7 @@ Directory.CreateDirectory(testDirectory);
 
 try
 {
+    VerifyInventoryCollection();
     VerifyRemoteCoreTrustConfiguration();
     await VerifyRetryAndStableIdentityAsync(Path.Combine(testDirectory, "retry"));
     await VerifyAgentToCoreAsync(Path.Combine(testDirectory, "end-to-end"));
@@ -37,6 +39,36 @@ finally
 {
     SqliteConnection.ClearAllPools();
     Directory.Delete(testDirectory, recursive: true);
+}
+
+static void VerifyInventoryCollection()
+{
+    var endpointId = Guid.NewGuid();
+    var collectedBefore = DateTimeOffset.UtcNow;
+    var report = new InventoryCollector().Collect(endpointId);
+    Ensure(report.EndpointId == endpointId, "Inventory did not use the assigned endpoint ID.");
+    Ensure(report.CollectedUtc >= collectedBefore && report.CollectedUtc <= DateTimeOffset.UtcNow &&
+           report.CollectedUtc.Offset == TimeSpan.Zero,
+        "Inventory collection timestamp is invalid.");
+    Ensure(!string.IsNullOrWhiteSpace(report.AgentVersion) &&
+           report.Hostname == Environment.MachineName &&
+           !string.IsNullOrWhiteSpace(report.OsName) &&
+           !string.IsNullOrWhiteSpace(report.OsVersion) &&
+           !string.IsNullOrWhiteSpace(report.Architecture) &&
+           report.Cpu.LogicalProcessorCount > 0,
+        "Inventory is missing basic endpoint or CPU information.");
+    Ensure(report.Disks.Count <= 16 &&
+           report.Disks.All(disk => disk.TotalBytes > 0 &&
+                                    disk.AvailableBytes >= 0 &&
+                                    disk.AvailableBytes <= disk.TotalBytes),
+        "Inventory disk collection is unbounded or returned invalid sizes.");
+
+    if (OperatingSystem.IsWindows())
+    {
+        Ensure(report.OsName == "Windows" && report.InstalledRamBytes is > 0 &&
+               report.Disks.Count > 0,
+            "Windows inventory did not collect OS, physical RAM, and fixed disk metadata.");
+    }
 }
 
 static void VerifyRemoteCoreTrustConfiguration()
@@ -142,6 +174,12 @@ static async Task VerifyAgentEnrollmentAsync(string testDirectory)
                         core.Services.GetRequiredService<DeviceStore>(), installationId);
                     Ensure(device.EnrollmentStatus == DeviceEnrollmentStatus.Enrolled,
                         "The Agent did not send an authenticated heartbeat after enrollment.");
+                    var inventory = await WaitForInventoryAsync(
+                        core.Services.GetRequiredService<InventoryStore>(), state.EndpointId);
+                    Ensure(inventory.EndpointId == state.EndpointId &&
+                           inventory.Hostname == Environment.MachineName &&
+                           inventory.Cpu.LogicalProcessorCount > 0,
+                        "The enrolled Agent did not deliver endpoint inventory to Core.");
 
                     var stateFile = Path.Combine(agentDirectory, "enrollment-state");
                     if (!OperatingSystem.IsWindows())
@@ -170,7 +208,9 @@ static async Task VerifyAgentEnrollmentAsync(string testDirectory)
             var beforeRestart = await core.Services.GetRequiredService<DeviceStore>()
                 .FindByInstallationIdAsync(enrolledId)
                 ?? throw new Exception("Core lost the enrolled device.");
+            using var failingInventoryHandler = new RejectInventoryHandler();
             using (var restartedAgent = BuildAgent(agentDirectory, coreUrl,
+                       handler: failingInventoryHandler,
                        heartbeatInterval: "00:00:00.300", retryDelay: "00:00:00.050"))
             {
                 await restartedAgent.StartAsync();
@@ -179,6 +219,13 @@ static async Task VerifyAgentEnrollmentAsync(string testDirectory)
                     await WaitForLaterHeartbeatAsync(
                         core.Services.GetRequiredService<DeviceStore>(),
                         enrolledId, beforeRestart.LastSeenUtc);
+                    await WaitForInventoryRejectionAsync(failingInventoryHandler);
+                    var afterRejection = await core.Services.GetRequiredService<DeviceStore>()
+                        .FindByInstallationIdAsync(enrolledId)
+                        ?? throw new Exception("An inventory upload failure removed the enrolled device.");
+                    await WaitForLaterHeartbeatAsync(
+                        core.Services.GetRequiredService<DeviceStore>(),
+                        enrolledId, afterRejection.LastSeenUtc);
                     var stateStore = restartedAgent.Services.GetRequiredService<EnrollmentStateStore>();
                     var state = await stateStore.LoadAsync(enrolledId)
                         ?? throw new Exception("The Agent lost its enrollment state after restart.");
@@ -407,6 +454,39 @@ static async Task<DeviceRecord> WaitForDeviceAsync(DeviceStore devices, Guid ins
     throw new Exception("The Agent heartbeat did not create a Core device record.");
 }
 
+static async Task<InventoryReport> WaitForInventoryAsync(InventoryStore inventories, Guid endpointId)
+{
+    var deadline = DateTime.UtcNow.AddSeconds(10);
+    while (DateTime.UtcNow < deadline)
+    {
+        var inventory = await inventories.FindLatestAsync(endpointId);
+        if (inventory is not null)
+        {
+            return inventory;
+        }
+
+        await Task.Delay(50);
+    }
+
+    throw new Exception("The enrolled Agent did not deliver inventory to Core.");
+}
+
+static async Task WaitForInventoryRejectionAsync(RejectInventoryHandler handler)
+{
+    var deadline = DateTime.UtcNow.AddSeconds(10);
+    while (DateTime.UtcNow < deadline)
+    {
+        if (handler.Rejections > 0)
+        {
+            return;
+        }
+
+        await Task.Delay(50);
+    }
+
+    throw new Exception("The Agent did not attempt inventory upload after restart.");
+}
+
 static async Task WaitForLaterHeartbeatAsync(DeviceStore devices, Guid installationId,
     DateTimeOffset firstSeenUtc)
 {
@@ -440,6 +520,29 @@ static void Ensure(bool condition, string message)
 }
 
 internal sealed record HeartbeatObservation(Guid InstallationId, HttpMethod Method, string Path);
+
+internal sealed class RejectInventoryHandler : DelegatingHandler
+{
+    private int _rejections;
+
+    public RejectInventoryHandler() : base(new HttpClientHandler { UseProxy = false })
+    {
+    }
+
+    public int Rejections => Volatile.Read(ref _rejections);
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (request.RequestUri?.AbsolutePath == "/api/agent/inventory")
+        {
+            Interlocked.Increment(ref _rejections);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        }
+
+        return base.SendAsync(request, cancellationToken);
+    }
+}
 
 internal sealed class RecordingHeartbeatHandler(int failuresBeforeSuccess = 0) : HttpMessageHandler
 {
