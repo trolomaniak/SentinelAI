@@ -23,35 +23,23 @@ jobs:
       - name: Run backend tests
         run: ./scripts/test.sh
 
-  windows-service-smoke:
+  package-agent-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Publish Agent for Windows Service test
-        shell: pwsh
-        run: dotnet publish agent/SentinelAI.Agent.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -p:DebugSymbols=false --output "$env:RUNNER_TEMP\sentinelai-agent-service"
-      - name: Start Agent as a Windows Service without Core
+      - name: Publish standalone Agent EXE
+        shell: bash
+        run: ./scripts/publish-agent-windows.sh
+      - name: Verify Agent EXE starts
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $serviceName = 'SentinelAIAgent'
-          $exe = Join-Path $env:RUNNER_TEMP 'sentinelai-agent-service\SentinelAI.Agent.exe'
-          New-Service -Name $serviceName -BinaryPathName "`"$exe`"" -StartupType Manual
-          try {
-            Start-Service -Name $serviceName
-            Start-Sleep -Seconds 5
-            if ((Get-Service -Name $serviceName).Status -ne 'Running') {
-              throw 'Agent service stopped while Core was unavailable.'
-            }
-          }
-          finally {
-            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-            if ($service -and $service.Status -ne 'Stopped') {
-              Stop-Service -Name $serviceName
-            }
-            sc.exe delete $serviceName | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the temporary Agent service.' }
-          }
+          & ./artifacts/agent/win-x64/SentinelAI.Agent.exe
+          if ($LASTEXITCODE -ne 0) { throw "Agent EXE exited with code $LASTEXITCODE" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SentinelAI.Agent-win-x64
+          path: artifacts/agent/win-x64/SentinelAI.Agent.exe
+          if-no-files-found: error

@@ -26,16 +26,8 @@ Core listens at `http://127.0.0.1:5000` by default. Set `ASPNETCORE_URLS` to cha
 
 `GET /api/health` is public. `POST /api/auth/login` accepts JSON with `username` and `password` and returns a short-lived bearer access token when credentials are valid. Send it as `Authorization: Bearer <accessToken>` to `GET /api/admin/me`. Invalid credentials receive the same `401` response. Login attempts are rate-limited. Tokens expire after 15 minutes and are invalidated when Core restarts.
 
-## Endpoint Agent heartbeat
+## Standalone Windows Agent EXE
 
-The Agent runs through a .NET host that can operate as a Windows Service or as a console process during development. It generates a stable installation ID in `<LocalApplicationData>/SentinelAI/Agent/installation-id`, sends heartbeats to Core every 30 seconds, and retries with a bounded delay when Core is unavailable. Configure it with `Agent__CoreUrl`, `Agent__DataDirectory`, `Agent__HeartbeatInterval`, `Agent__RetryDelay`, and `Agent__MaxRetryDelay` environment variables. The default Core URL is `http://127.0.0.1:5000`.
+Run `./scripts/publish-agent-windows.sh` to produce `artifacts/agent/win-x64/SentinelAI.Agent.exe`. This is a self-contained, single-file Windows x64 build: the target does not need a separate .NET installation. The bundled native runtime is extracted when the EXE starts. CI verifies the EXE on Windows and uploads it as the `SentinelAI.Agent-win-x64` build artifact.
 
-For a manual Windows service smoke test, publish on a Windows machine and run these commands from an elevated PowerShell session with a writable target directory:
-
-```powershell
-dotnet publish agent/SentinelAI.Agent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -p:DebugSymbols=false -o C:\SentinelAI\Agent
-New-Service -Name SentinelAIAgent -BinaryPathName 'C:\SentinelAI\Agent\SentinelAI.Agent.exe' -StartupType Automatic
-Start-Service SentinelAIAgent
-```
-
-For TASK-003, Core accepts heartbeats only from the same machine and limits the endpoint to 30 requests per minute. `POST /api/agent/heartbeat` stores the server-observed `last_seen` timestamp and last reported `reporting` state in SQLite, with the device marked `unverified`. The stored state does not indicate whether the Agent is currently online; consumers must consider `last_seen`. Remote Agent enrollment and authenticated LAN communication belong to TASK-004. An installation ID is an identifier, not an authentication credential.
+The Agent currently exits without monitoring behavior. Windows Service hosting and heartbeat belong to TASK-003; a signed pilot installer belongs to TASK-015. This EXE runs in user mode and is not a kernel driver.
