@@ -6,6 +6,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Data.Sqlite;
+using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
@@ -30,6 +32,9 @@ try
     string firstAccessToken;
     var installationId = Guid.NewGuid();
     DateTimeOffset lastHeartbeatUtc;
+    Guid endpointId;
+    string agentCredential;
+    CoreIdentity coreIdentity;
     await using (var app = CoreHost.Build([]))
     {
         Ensure(app.Services.GetService<IServer>() is not null, "The Core host did not register a web server.");
@@ -115,7 +120,8 @@ try
         var updatedDevice = await devices.FindByInstallationIdAsync(installationId);
         Ensure(updatedDevice?.LastSeenUtc == secondHeartbeat.LastSeenUtc,
             "Core did not persist the updated last_seen time.");
-        lastHeartbeatUtc = secondHeartbeat.LastSeenUtc;
+        (endpointId, agentCredential, coreIdentity, lastHeartbeatUtc) = await VerifyEnrollmentAsync(
+            client, app, installationId, firstAccessToken, secondHeartbeat.LastSeenUtc, dataDirectory);
     }
 
     // Existing installations must work without retaining the bootstrap secret in configuration.
@@ -131,6 +137,21 @@ try
             "The device heartbeat did not survive Core restart.");
         Ensure(await devices.CountAsync() == 1,
             "Core restart changed the number of persisted devices.");
+        Ensure(persistedDevice?.EnrollmentStatus == DeviceEnrollmentStatus.Enrolled,
+            "Core restart lost the device enrollment status.");
+        var persistedEnrollment = await restartedApp.Services.GetRequiredService<EnrollmentStore>()
+            .FindByInstallationIdAsync(installationId);
+        Ensure(persistedEnrollment?.EndpointId == endpointId,
+            "Core restart changed the assigned endpoint ID.");
+        Ensure(await restartedApp.Services.GetRequiredService<EnrollmentStore>()
+                   .GetCoreIdentityAsync() == coreIdentity,
+            "Core restart changed the organization or Core installation ID.");
+        using (var authenticatedHeartbeat = await SendAgentHeartbeatAsync(
+                   client, installationId, endpointId, agentCredential))
+        {
+            Ensure(authenticatedHeartbeat.StatusCode == HttpStatusCode.OK,
+                "Core rejected the enrolled Agent after restart.");
+        }
 
         using (var oldToken = await GetAsBearerAsync(client, "/api/admin/me", firstAccessToken))
         {
@@ -146,6 +167,34 @@ try
         Ensure(authorized.StatusCode == HttpStatusCode.OK, "The persisted administrator could not log in after restart.");
     }
 
+    await using (var remoteHttpApp = CoreHost.Build([]))
+    {
+        // Exercise the request transport guard without exposing a test listener on the LAN.
+        remoteHttpApp.Use(async (context, next) =>
+        {
+            context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.10");
+            await next(context);
+        });
+        using var client = await StartCoreAsync(remoteHttpApp);
+        var accessToken = await GetAccessTokenAsync(client, username, password);
+        using (var issue = await PostAsBearerAsync(client, "/api/admin/enrollment-tokens", accessToken))
+        {
+            Ensure(issue.StatusCode == HttpStatusCode.Forbidden,
+                "Core issued an enrollment token over remote HTTP.");
+        }
+        using (var enroll = await EnrollAsync(client, Guid.NewGuid(), new string('0', 64)))
+        {
+            Ensure(enroll.StatusCode == HttpStatusCode.Forbidden,
+                "Core accepted remote HTTP enrollment traffic.");
+        }
+        using (var heartbeat = await SendAgentHeartbeatAsync(
+                   client, installationId, endpointId, agentCredential))
+        {
+            Ensure(heartbeat.StatusCode == HttpStatusCode.Forbidden,
+                "Core accepted an Agent credential over remote HTTP.");
+        }
+    }
+
     Console.WriteLine("Core integration tests passed.");
 }
 finally
@@ -155,8 +204,141 @@ finally
     Environment.SetEnvironmentVariable("SENTINELAI_BOOTSTRAP_PASSWORD", originalPassword);
     if (Directory.Exists(dataDirectory))
     {
+        SqliteConnection.ClearAllPools();
         Directory.Delete(dataDirectory, recursive: true);
     }
+}
+
+static async Task<(Guid EndpointId, string Credential, CoreIdentity CoreIdentity, DateTimeOffset LastSeenUtc)>
+    VerifyEnrollmentAsync(
+        HttpClient client,
+        WebApplication app,
+        Guid installationId,
+        string adminAccessToken,
+        DateTimeOffset previousLastSeenUtc,
+        string dataDirectory)
+{
+    var enrollments = app.Services.GetRequiredService<EnrollmentStore>();
+    var devices = app.Services.GetRequiredService<DeviceStore>();
+    using (var anonymousIssue = await client.PostAsync("/api/admin/enrollment-tokens", null))
+    {
+        Ensure(anonymousIssue.StatusCode == HttpStatusCode.Unauthorized,
+            "An anonymous caller could issue an enrollment token.");
+    }
+
+    var coreIdentity = await enrollments.GetCoreIdentityAsync();
+    EnrollmentTokenResponse issuedToken;
+    using (var issue = await PostAsBearerAsync(client, "/api/admin/enrollment-tokens", adminAccessToken))
+    {
+        Ensure(issue.StatusCode == HttpStatusCode.OK, "The administrator could not issue an enrollment token.");
+        Ensure(issue.Headers.CacheControl?.NoStore == true, "The enrollment token response permits caching.");
+        issuedToken = await issue.Content.ReadFromJsonAsync<EnrollmentTokenResponse>()
+            ?? throw new Exception("Core did not return an enrollment token.");
+    }
+    Ensure(issuedToken.Token.Length == 64 && issuedToken.ExpiresUtc > DateTimeOffset.UtcNow,
+        "The enrollment token was not long-lived enough for provisioning.");
+    Ensure(issuedToken.CoreInstallationId == coreIdentity.CoreInstallationId &&
+           issuedToken.OrganizationId == coreIdentity.OrganizationId,
+        "The enrollment token is not bound to this Core and organization.");
+
+    var tokenBytes = Encoding.ASCII.GetBytes(issuedToken.Token);
+    foreach (var file in Directory.EnumerateFiles(dataDirectory, "*", SearchOption.AllDirectories))
+    {
+        Ensure((await File.ReadAllBytesAsync(file)).AsSpan().IndexOf(tokenBytes) < 0,
+            "Core stored an enrollment token in plaintext.");
+    }
+
+    using (var invalid = await EnrollAsync(client, Guid.NewGuid(), new string('0', 64)))
+    {
+        Ensure(invalid.StatusCode == HttpStatusCode.Unauthorized,
+            "Core accepted an invalid enrollment token.");
+    }
+
+    var expiredToken = await enrollments.IssueTokenAsync(TimeSpan.FromMilliseconds(20));
+    await Task.Delay(70);
+    using (var expired = await EnrollAsync(client, Guid.NewGuid(), expiredToken.Token))
+    {
+        Ensure(expired.StatusCode == HttpStatusCode.Unauthorized,
+            "Core accepted an expired enrollment token.");
+    }
+
+    EnrollmentResponse enrollment;
+    using (var success = await EnrollAsync(client, installationId, issuedToken.Token))
+    {
+        Ensure(success.StatusCode == HttpStatusCode.OK, "Core rejected a valid enrollment token.");
+        Ensure(success.Headers.CacheControl?.NoStore == true, "The Agent credential response permits caching.");
+        enrollment = await success.Content.ReadFromJsonAsync<EnrollmentResponse>()
+            ?? throw new Exception("Core did not return an endpoint identity.");
+    }
+    Ensure(enrollment.InstallationId == installationId && enrollment.EndpointId != Guid.Empty &&
+           enrollment.AgentCredential.Length == 64 &&
+           enrollment.CoreInstallationId == coreIdentity.CoreInstallationId &&
+           enrollment.OrganizationId == coreIdentity.OrganizationId,
+        "Core returned an invalid endpoint identity or association.");
+    var persistedEnrollment = await enrollments.FindByInstallationIdAsync(installationId);
+    Ensure(persistedEnrollment?.EndpointId == enrollment.EndpointId &&
+           persistedEnrollment?.CoreInstallationId == coreIdentity.CoreInstallationId &&
+           persistedEnrollment?.OrganizationId == coreIdentity.OrganizationId,
+        "Core did not persist the endpoint identity and organization association.");
+    Ensure((await devices.FindByInstallationIdAsync(installationId))?.EnrollmentStatus ==
+           DeviceEnrollmentStatus.Enrolled,
+        "Enrollment did not mark the existing device as enrolled.");
+
+    using (var replay = await EnrollAsync(client, Guid.NewGuid(), issuedToken.Token))
+    {
+        Ensure(replay.StatusCode == HttpStatusCode.Unauthorized,
+            "A consumed enrollment token could enroll another endpoint.");
+    }
+
+    var duplicateToken = await enrollments.IssueTokenAsync();
+    using (var duplicate = await EnrollAsync(client, installationId, duplicateToken.Token))
+    {
+        Ensure(duplicate.StatusCode == HttpStatusCode.Conflict,
+            "Re-enrollment silently created a duplicate endpoint.");
+    }
+    Ensure((await enrollments.FindByInstallationIdAsync(installationId))?.EndpointId ==
+           enrollment.EndpointId,
+        "A repeated enrollment changed the assigned endpoint ID.");
+
+    using (var anonymousHeartbeat = await SendHeartbeatAsync(client, installationId))
+    {
+        Ensure(anonymousHeartbeat.StatusCode == HttpStatusCode.Unauthorized,
+            "An anonymous heartbeat updated an enrolled endpoint.");
+    }
+    using (var wrongCredential = await SendAgentHeartbeatAsync(
+               client, installationId, enrollment.EndpointId, new string('F', 64)))
+    {
+        Ensure(wrongCredential.StatusCode == HttpStatusCode.Unauthorized,
+            "Core accepted an invalid Agent credential.");
+    }
+    Ensure((await devices.FindByInstallationIdAsync(installationId))?.LastSeenUtc == previousLastSeenUtc,
+        "A rejected heartbeat changed last_seen.");
+
+    await Task.Delay(100);
+    using (var validHeartbeat = await SendAgentHeartbeatAsync(
+               client, installationId, enrollment.EndpointId, enrollment.AgentCredential))
+    {
+        Ensure(validHeartbeat.StatusCode == HttpStatusCode.OK,
+            "Core rejected the enrolled Agent heartbeat.");
+    }
+    var updatedDevice = await devices.FindByInstallationIdAsync(installationId);
+    Ensure(updatedDevice?.LastSeenUtc > previousLastSeenUtc &&
+           updatedDevice?.EnrollmentStatus == DeviceEnrollmentStatus.Enrolled,
+        "The enrolled Agent heartbeat did not update last_seen.");
+
+    var concurrentToken = await enrollments.IssueTokenAsync();
+    var firstCandidate = Guid.NewGuid();
+    var secondCandidate = Guid.NewGuid();
+    var concurrentAttempts = await Task.WhenAll(
+        EnrollAsync(client, firstCandidate, concurrentToken.Token),
+        EnrollAsync(client, secondCandidate, concurrentToken.Token));
+    using var firstAttempt = concurrentAttempts[0];
+    using var secondAttempt = concurrentAttempts[1];
+    Ensure(concurrentAttempts.Count(response => response.StatusCode == HttpStatusCode.OK) == 1 &&
+           concurrentAttempts.Count(response => response.StatusCode == HttpStatusCode.Unauthorized) == 1,
+        "Concurrent attempts reused a one-time enrollment token.");
+
+    return (enrollment.EndpointId, enrollment.AgentCredential, coreIdentity, updatedDevice!.LastSeenUtc);
 }
 
 static async Task<HttpClient> StartCoreAsync(WebApplication app)
@@ -180,6 +362,29 @@ static Task<HttpResponseMessage> LoginAsync(HttpClient client, string username, 
 
 static Task<HttpResponseMessage> SendHeartbeatAsync(HttpClient client, Guid installationId) =>
     client.PostAsJsonAsync("/api/agent/heartbeat", new HeartbeatRequest(installationId));
+
+static Task<HttpResponseMessage> EnrollAsync(HttpClient client, Guid installationId, string token) =>
+    client.PostAsJsonAsync("/api/agent/enroll", new EnrollmentRequest(installationId, token));
+
+static async Task<HttpResponseMessage> SendAgentHeartbeatAsync(
+    HttpClient client, Guid installationId, Guid endpointId, string credential)
+{
+    using var request = new HttpRequestMessage(HttpMethod.Post, "/api/agent/heartbeat")
+    {
+        Content = JsonContent.Create(new HeartbeatRequest(installationId))
+    };
+    request.Headers.Authorization = new AuthenticationHeaderValue(
+        "SentinelAgent", $"{endpointId:D}.{credential}");
+    return await client.SendAsync(request);
+}
+
+static async Task<HttpResponseMessage> PostAsBearerAsync(
+    HttpClient client, string path, string accessToken)
+{
+    using var request = new HttpRequestMessage(HttpMethod.Post, path);
+    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+    return await client.SendAsync(request);
+}
 
 static async Task<HeartbeatResponse> SendValidHeartbeatAsync(HttpClient client, Guid installationId)
 {

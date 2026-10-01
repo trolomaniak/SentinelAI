@@ -11,8 +11,9 @@ public sealed record DeviceRecord(
 
 public static class DeviceEnrollmentStatus
 {
-    // A heartbeat is local communication, not proof of secure enrollment.
+    // Legacy loopback heartbeats do not prove secure enrollment.
     public const string Unverified = "unverified";
+    public const string Enrolled = "enrolled";
 }
 
 public sealed class DeviceStore(AdminStore admins)
@@ -33,7 +34,53 @@ public sealed class DeviceStore(AdminStore admins)
         await create.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task<DeviceRecord> RecordHeartbeatAsync(
+    public async Task<DeviceRecord?> RecordHeartbeatAsync(
+        Guid installationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (installationId == Guid.Empty)
+        {
+            throw new ArgumentException("An installation ID is required.", nameof(installationId));
+        }
+
+        var utcTicks = DateTimeOffset.UtcNow.UtcDateTime.Ticks;
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var upsert = connection.CreateCommand();
+        upsert.CommandText = """
+            INSERT INTO Devices (InstallationId, LastSeenUtcTicks, HealthStatus, EnrollmentStatus)
+            SELECT $installationId, $lastSeenUtcTicks, $healthStatus, $enrollmentStatus
+            WHERE NOT EXISTS (
+                SELECT 1 FROM EndpointEnrollments WHERE InstallationId = $installationId
+            )
+            ON CONFLICT (InstallationId) DO UPDATE SET
+                LastSeenUtcTicks = MAX(LastSeenUtcTicks, excluded.LastSeenUtcTicks),
+                HealthStatus = excluded.HealthStatus
+            WHERE Devices.EnrollmentStatus = $enrollmentStatus
+              AND NOT EXISTS (
+                  SELECT 1 FROM EndpointEnrollments WHERE InstallationId = $installationId
+              )
+            RETURNING LastSeenUtcTicks, HealthStatus, EnrollmentStatus;
+            """;
+        upsert.Parameters.AddWithValue("$installationId", installationId.ToString("D"));
+        upsert.Parameters.AddWithValue("$lastSeenUtcTicks", utcTicks);
+        upsert.Parameters.AddWithValue("$healthStatus", DeviceHealthStatus.Reporting);
+        upsert.Parameters.AddWithValue("$enrollmentStatus", DeviceEnrollmentStatus.Unverified);
+
+        await using var reader = await upsert.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new DeviceRecord(
+            installationId,
+            new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
+            reader.GetString(1),
+            reader.GetString(2));
+    }
+
+    public async Task<DeviceRecord> RecordEnrolledHeartbeatAsync(
         Guid installationId,
         CancellationToken cancellationToken = default)
     {
@@ -51,25 +98,23 @@ public sealed class DeviceStore(AdminStore admins)
             VALUES ($installationId, $lastSeenUtcTicks, $healthStatus, $enrollmentStatus)
             ON CONFLICT (InstallationId) DO UPDATE SET
                 LastSeenUtcTicks = MAX(LastSeenUtcTicks, excluded.LastSeenUtcTicks),
-                HealthStatus = excluded.HealthStatus
+                HealthStatus = excluded.HealthStatus,
+                EnrollmentStatus = excluded.EnrollmentStatus
             RETURNING LastSeenUtcTicks, HealthStatus, EnrollmentStatus;
             """;
         upsert.Parameters.AddWithValue("$installationId", installationId.ToString("D"));
         upsert.Parameters.AddWithValue("$lastSeenUtcTicks", utcTicks);
         upsert.Parameters.AddWithValue("$healthStatus", DeviceHealthStatus.Reporting);
-        upsert.Parameters.AddWithValue("$enrollmentStatus", DeviceEnrollmentStatus.Unverified);
-
+        upsert.Parameters.AddWithValue("$enrollmentStatus", DeviceEnrollmentStatus.Enrolled);
         await using var reader = await upsert.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
         {
-            throw new InvalidOperationException("The device heartbeat was not persisted.");
+            throw new InvalidOperationException("The enrolled heartbeat was not persisted.");
         }
 
-        return new DeviceRecord(
-            installationId,
+        return new DeviceRecord(installationId,
             new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
-            reader.GetString(1),
-            reader.GetString(2));
+            reader.GetString(1), reader.GetString(2));
     }
 
     public async Task<DeviceRecord?> FindByInstallationIdAsync(

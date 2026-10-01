@@ -30,14 +30,57 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Run Agent enrollment tests on Windows
+        shell: pwsh
+        run: |
+          dotnet run --project tests/SentinelAI.Agent.Tests/SentinelAI.Agent.Tests.csproj --configuration Release *> "$env:RUNNER_TEMP\sentinelai-agent-test.log"
+          $testExitCode = $LASTEXITCODE
+          $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-agent-test.log" | Select-Object -Last 25
+          $tail
+          if ($testExitCode -ne 0) {
+            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows Agent enrollment test::$message"
+          }
+          exit $testExitCode
       - name: Publish standalone Agent EXE
         shell: bash
         run: ./scripts/publish-agent-windows.sh
       - name: Verify Agent EXE starts
         shell: pwsh
         run: |
-          & ./artifacts/agent/win-x64/SentinelAI.Agent.exe
-          if ($LASTEXITCODE -ne 0) { throw "Agent EXE exited with code $LASTEXITCODE" }
+          $agent = Start-Process -FilePath (Resolve-Path ./artifacts/agent/win-x64/SentinelAI.Agent.exe).Path -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            $agent.Refresh()
+            if ($agent.HasExited) { throw "Agent EXE exited early with code $($agent.ExitCode)" }
+          } finally {
+            $agent.Refresh()
+            if (-not $agent.HasExited) {
+              Stop-Process -Id $agent.Id -Force
+              $agent.WaitForExit(10000) | Out-Null
+            }
+          }
+      - name: Verify Agent runs as a Windows Service
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $serviceName = 'SentinelAIAgent'
+          $exe = (Resolve-Path ./artifacts/agent/win-x64/SentinelAI.Agent.exe).Path
+          New-Service -Name $serviceName -BinaryPathName "`"$exe`"" -StartupType Manual
+          try {
+            Start-Service -Name $serviceName
+            Start-Sleep -Seconds 5
+            if ((Get-Service -Name $serviceName).Status -ne 'Running') {
+              throw 'Agent service stopped while Core was unavailable.'
+            }
+          } finally {
+            $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if ($service -and $service.Status -ne 'Stopped') {
+              Stop-Service -Name $serviceName
+            }
+            sc.exe delete $serviceName | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the temporary Agent service.' }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: SentinelAI.Agent-win-x64

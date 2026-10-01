@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -9,13 +10,20 @@ namespace SentinelAI.Agent;
 public sealed class HeartbeatWorker(
     AgentOptions options,
     InstallationIdentityStore identityStore,
+    EnrollmentStateStore enrollmentStateStore,
+    AgentEnrollmentClient enrollmentClient,
     HttpClient httpClient,
     ILogger<HeartbeatWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var installationId = await identityStore.LoadOrCreateAsync(stoppingToken);
+        var enrollment = await enrollmentStateStore.LoadAsync(installationId, stoppingToken);
         logger.LogInformation("Agent installation {InstallationId} started", installationId);
+        if (enrollment is null && options.EnrollmentToken is null && !options.CoreUrl.IsLoopback)
+        {
+            logger.LogWarning("An enrollment token is required before connecting to a remote Core");
+        }
 
         var nextRetryDelay = options.RetryDelay;
         while (!stoppingToken.IsCancellationRequested)
@@ -23,7 +31,29 @@ public sealed class HeartbeatWorker(
             bool acknowledged;
             try
             {
-                acknowledged = await SendHeartbeatAsync(installationId, stoppingToken);
+                if (enrollment is null && options.EnrollmentToken is not null)
+                {
+                    var attempt = await enrollmentClient.EnrollAsync(installationId, stoppingToken);
+                    if (attempt.Response is null)
+                    {
+                        logger.LogWarning("Agent enrollment failed with HTTP {StatusCode}", attempt.StatusCode);
+                        acknowledged = false;
+                    }
+                    else
+                    {
+                        enrollment = await enrollmentStateStore.SaveAsync(attempt.Response, stoppingToken);
+                        logger.LogInformation("Agent endpoint {EndpointId} enrolled", enrollment.EndpointId);
+                        acknowledged = await SendHeartbeatAsync(installationId, enrollment, stoppingToken);
+                    }
+                }
+                else if (enrollment is null && !options.CoreUrl.IsLoopback)
+                {
+                    acknowledged = false;
+                }
+                else
+                {
+                    acknowledged = await SendHeartbeatAsync(installationId, enrollment, stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -63,12 +93,22 @@ public sealed class HeartbeatWorker(
         }
     }
 
-    private async Task<bool> SendHeartbeatAsync(Guid installationId, CancellationToken cancellationToken)
+    private async Task<bool> SendHeartbeatAsync(
+        Guid installationId,
+        EnrollmentState? enrollment,
+        CancellationToken cancellationToken)
     {
-        using var response = await httpClient.PostAsJsonAsync(
-            options.HeartbeatUrl,
-            new HeartbeatRequest(installationId),
-            cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Post, options.HeartbeatUrl)
+        {
+            Content = JsonContent.Create(new HeartbeatRequest(installationId))
+        };
+        if (enrollment is not null)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue(
+                "SentinelAgent", $"{enrollment.EndpointId:D}.{enrollment.AgentCredential}");
+        }
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {

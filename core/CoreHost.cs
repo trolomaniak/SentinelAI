@@ -1,11 +1,14 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Core.Persistence;
 
@@ -34,6 +37,7 @@ public static class CoreHost
         builder.Services.AddSingleton<IPasswordHasher<AdminRecord>, PasswordHasher<AdminRecord>>();
         builder.Services.AddSingleton<AdminStore>();
         builder.Services.AddSingleton<DeviceStore>();
+        builder.Services.AddSingleton<EnrollmentStore>();
         builder.Services.AddHostedService<AdminInitializationService>();
 
         builder.Services.AddDataProtection()
@@ -55,12 +59,24 @@ public static class CoreHost
                 policy.Window = TimeSpan.FromMinutes(1);
                 policy.QueueLimit = 0;
             });
-            options.AddFixedWindowLimiter("heartbeat", policy =>
-            {
-                policy.PermitLimit = 30;
-                policy.Window = TimeSpan.FromMinutes(1);
-                policy.QueueLimit = 0;
-            });
+            options.AddPolicy("heartbeat", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+            options.AddPolicy("enrollment", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 20,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
         });
 
         var app = builder.Build();
@@ -80,12 +96,62 @@ public static class CoreHost
                 HeartbeatRequest? request,
                 HttpContext context,
                 DeviceStore devices,
+                EnrollmentStore enrollments,
                 CancellationToken cancellationToken) =>
             {
-                var remoteAddress = context.Connection.RemoteIpAddress;
-                if (remoteAddress is null ||
-                    !IPAddress.IsLoopback(remoteAddress) &&
-                    !(remoteAddress.IsIPv4MappedToIPv6 && IPAddress.IsLoopback(remoteAddress.MapToIPv4())))
+                if (request is null || request.InstallationId == Guid.Empty)
+                {
+                    return Results.BadRequest();
+                }
+
+                DeviceRecord? device;
+                var authorization = context.Request.Headers.Authorization.ToString();
+                if (!string.IsNullOrEmpty(authorization))
+                {
+                    if (!IsLocalOrHttps(context))
+                    {
+                        return Results.StatusCode(StatusCodes.Status403Forbidden);
+                    }
+
+                    if (!TryReadAgentCredential(authorization, out var endpointId, out var credential) ||
+                        !await enrollments.AuthenticateAsync(
+                            request.InstallationId, endpointId, credential, cancellationToken))
+                    {
+                        return Results.Unauthorized();
+                    }
+
+                    device = await devices.RecordEnrolledHeartbeatAsync(request.InstallationId, cancellationToken);
+                }
+                else
+                {
+                    if (!IsLoopback(context.Connection.RemoteIpAddress))
+                    {
+                        return Results.StatusCode(StatusCodes.Status403Forbidden);
+                    }
+
+                    device = await devices.RecordHeartbeatAsync(request.InstallationId, cancellationToken);
+                    if (device is null)
+                    {
+                        return Results.Unauthorized();
+                    }
+                }
+
+                return Results.Ok(new HeartbeatResponse(
+                    device.InstallationId,
+                    device.LastSeenUtc,
+                    device.HealthStatus));
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting("heartbeat");
+
+        app.MapPost("/api/agent/enroll", async (
+                EnrollmentRequest? request,
+                HttpContext context,
+                EnrollmentStore enrollments,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
                 {
                     return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
@@ -95,14 +161,16 @@ public static class CoreHost
                     return Results.BadRequest();
                 }
 
-                var device = await devices.RecordHeartbeatAsync(request.InstallationId, cancellationToken);
-                return Results.Ok(new HeartbeatResponse(
-                    device.InstallationId,
-                    device.LastSeenUtc,
-                    device.HealthStatus));
+                var attempt = await enrollments.TryEnrollAsync(request, cancellationToken);
+                return attempt.Outcome switch
+                {
+                    EnrollmentOutcome.Enrolled => Results.Ok(attempt.Response),
+                    EnrollmentOutcome.AlreadyEnrolled => Results.Conflict(),
+                    _ => Results.Unauthorized()
+                };
             })
             .AllowAnonymous()
-            .RequireRateLimiting("heartbeat");
+            .RequireRateLimiting("enrollment");
 
         app.MapPost("/api/auth/login", async (
                 LoginRequest? request,
@@ -137,8 +205,56 @@ public static class CoreHost
                 Results.Ok(new { username = user.Identity?.Name, role = "administrator" }))
             .RequireAuthorization();
 
+        app.MapPost("/api/admin/enrollment-tokens", async (
+                HttpContext context,
+                EnrollmentStore enrollments,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                return Results.Ok(await enrollments.IssueTokenAsync(cancellationToken: cancellationToken));
+            })
+            .RequireAuthorization();
+
         return app;
     }
 
     private sealed record LoginRequest(string? Username, string? Password);
+
+    private static bool IsLocalOrHttps(HttpContext context) =>
+        context.Request.IsHttps || IsLoopback(context.Connection.RemoteIpAddress);
+
+    private static bool IsLoopback(IPAddress? address) =>
+        address is not null &&
+        (IPAddress.IsLoopback(address) ||
+         address.IsIPv4MappedToIPv6 && IPAddress.IsLoopback(address.MapToIPv4()));
+
+    private static bool TryReadAgentCredential(
+        string authorization,
+        out Guid endpointId,
+        out string credential)
+    {
+        endpointId = Guid.Empty;
+        credential = string.Empty;
+        if (!AuthenticationHeaderValue.TryParse(authorization, out var header) ||
+            !string.Equals(header.Scheme, "SentinelAgent", StringComparison.OrdinalIgnoreCase) ||
+            header.Parameter is null)
+        {
+            return false;
+        }
+
+        var separator = header.Parameter.IndexOf('.');
+        if (separator < 0 ||
+            !Guid.TryParseExact(header.Parameter.AsSpan(0, separator), "D", out endpointId))
+        {
+            return false;
+        }
+
+        credential = header.Parameter[(separator + 1)..];
+        return credential.Length == 64;
+    }
 }
