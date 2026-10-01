@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication;
@@ -5,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Core.Persistence;
 
 namespace SentinelAI.Core;
@@ -31,6 +33,7 @@ public static class CoreHost
         });
         builder.Services.AddSingleton<IPasswordHasher<AdminRecord>, PasswordHasher<AdminRecord>>();
         builder.Services.AddSingleton<AdminStore>();
+        builder.Services.AddSingleton<DeviceStore>();
         builder.Services.AddHostedService<AdminInitializationService>();
 
         builder.Services.AddDataProtection()
@@ -52,6 +55,12 @@ public static class CoreHost
                 policy.Window = TimeSpan.FromMinutes(1);
                 policy.QueueLimit = 0;
             });
+            options.AddFixedWindowLimiter("heartbeat", policy =>
+            {
+                policy.PermitLimit = 30;
+                policy.Window = TimeSpan.FromMinutes(1);
+                policy.QueueLimit = 0;
+            });
         });
 
         var app = builder.Build();
@@ -66,6 +75,34 @@ public static class CoreHost
 
         app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
             .AllowAnonymous();
+
+        app.MapPost("/api/agent/heartbeat", async (
+                HeartbeatRequest? request,
+                HttpContext context,
+                DeviceStore devices,
+                CancellationToken cancellationToken) =>
+            {
+                var remoteAddress = context.Connection.RemoteIpAddress;
+                if (remoteAddress is null ||
+                    !IPAddress.IsLoopback(remoteAddress) &&
+                    !(remoteAddress.IsIPv4MappedToIPv6 && IPAddress.IsLoopback(remoteAddress.MapToIPv4())))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (request is null || request.InstallationId == Guid.Empty)
+                {
+                    return Results.BadRequest();
+                }
+
+                var device = await devices.RecordHeartbeatAsync(request.InstallationId, cancellationToken);
+                return Results.Ok(new HeartbeatResponse(
+                    device.InstallationId,
+                    device.LastSeenUtc,
+                    device.HealthStatus));
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting("heartbeat");
 
         app.MapPost("/api/auth/login", async (
                 LoginRequest? request,
