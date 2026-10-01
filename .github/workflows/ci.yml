@@ -35,7 +35,12 @@ jobs:
         run: |
           dotnet run --project tests/SentinelAI.Agent.Tests/SentinelAI.Agent.Tests.csproj --configuration Release *> "$env:RUNNER_TEMP\sentinelai-agent-test.log"
           $testExitCode = $LASTEXITCODE
-          Get-Content "$env:RUNNER_TEMP\sentinelai-agent-test.log" | Select-Object -Last 25
+          $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-agent-test.log" | Select-Object -Last 25
+          $tail
+          if ($testExitCode -ne 0) {
+            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows Agent enrollment test::$message"
+          }
           exit $testExitCode
       - name: Upload failed Agent test diagnostics
         if: failure()
