@@ -2,32 +2,30 @@
 
 ## Completed
 
-- TASK-001 implementation: .NET solution, Agent and Core executables, shared contracts library, two scaffold test projects, dashboard shell, repository settings, build/test scripts, and GitHub Actions CI.
-- Local `./scripts/build.sh` and `./scripts/test.sh` passed. The Core host also started and returned HTTP 404 at `/`, as expected before TASK-002 adds endpoints.
-- The review branch `codex/task-001-monorepo-ci` is pushed to GitHub.
+- TASK-001 merged through PR #1; its GitHub Actions CI passed.
+- TASK-002 Core API and local authentication are implemented on `codex/task-002-core-api-auth`: health, SQLite initialization, one bootstrap administrator, password hashing, login, a protected endpoint, configuration, and JSON structured logs.
+- Local `./scripts/build.sh` and `./scripts/test.sh` passed on 2026-10-01 with zero build warnings or errors. Core integration checks use a live loopback server and temporary SQLite database.
 
 ## Current architecture
 
-- Agent is a .NET 10 console entry point with no service behavior yet.
-- Core is an empty ASP.NET Core host with no API endpoints yet.
-- Agent and Core reference the shared contracts project; it contains no transport models yet.
-- Dashboard is a static HTML/CSS shell with a dependency-free Node build.
-- Two executable .NET test projects check the initial Agent entry point and Core host wiring. CI runs them through `scripts/test.sh`.
+- Agent remains a .NET 10 console scaffold with no endpoint behavior.
+- Core is a .NET 10 ASP.NET Core service. It binds to loopback HTTP by default, supports standard Kestrel HTTPS configuration, and exposes `GET /api/health`, `POST /api/auth/login`, and authenticated `GET /api/admin/me`.
+- Core creates a local SQLite database on startup and creates one administrator from first-run environment variables. It stores an Identity PBKDF2 password hash. Bearer tokens last 15 minutes and are invalidated on restart.
+- Shared contracts are still empty. Dashboard remains a static shell. CI uses the root build and test scripts.
 
 ## Important decisions
 
-See `.agent/DECISIONS.md` for the minimal initial toolchain and test approach.
+See `.agent/DECISIONS.md` for the local storage, bootstrap, token, binding, and test decisions.
 
 ## Known issues
 
-- GitHub Actions results and Pull Request creation remain unverified because this cloud environment denies HTTPS access to `api.github.com`. The workflow has been pushed and should run on the branch.
-- The initial test projects use executable assertions and are not discoverable by `dotnet test`. A standard test framework can be added when behavior needs broader unit coverage and NuGet access is available.
-- Windows Service behavior requires a later task and a Windows validation environment.
+- The service has not yet been exercised on Windows; local and hosted CI validation run on Linux.
+- ASP.NET Core's unused key manager can log a generic warning about unencrypted key persistence. TASK-002 configures its repository in memory, and no Data Protection key file is written by Core.
 
 ## Next task
 
-TASK-002 — Core API and Local Authentication, after TASK-001 CI is confirmed.
+TASK-003 — Agent Heartbeat. Do not start it as part of TASK-002.
 
 ## Last verified commit
 
-`088db6ec30f74e1c47277264cf2d2da68d35ea11` — local build and scaffold tests passed; GitHub Actions result pending.
+`dfbfadc3caad29fc848f1c0ac9d7d80c9584bf3d` — TASK-002 implementation passed local build and integration tests.
