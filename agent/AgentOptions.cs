@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.Extensions.Configuration;
+using SentinelAI.Hosting;
 
 namespace SentinelAI.Agent;
 
@@ -10,8 +11,10 @@ public sealed record AgentOptions(
     TimeSpan RetryDelay,
     TimeSpan MaxRetryDelay,
     string? EnrollmentToken,
-    string? CoreCertificateSha256)
+    string? CoreCertificateSha256,
+    string? EnrollmentTokenFile = null)
 {
+    public bool HasEnrollmentToken => EnrollmentToken is not null || EnrollmentTokenFile is not null;
     public Uri HeartbeatUrl => new(CoreUrl, "/api/agent/heartbeat");
     public Uri EnrollmentUrl => new(CoreUrl, "/api/agent/enroll");
     public Uri InventoryUrl => new(CoreUrl, "/api/agent/inventory");
@@ -75,15 +78,31 @@ public sealed record AgentOptions(
             throw new InvalidOperationException("Agent:RetryDelay must not exceed Agent:MaxRetryDelay.");
         }
 
+        var enrollmentToken = string.IsNullOrWhiteSpace(configuration["Agent:EnrollmentToken"])
+            ? null : configuration["Agent:EnrollmentToken"]!.Trim();
+        var enrollmentTokenFile = configuration["Agent:EnrollmentTokenFile"];
+        if (enrollmentTokenFile is not null)
+        {
+            if (!Path.IsPathFullyQualified(enrollmentTokenFile) ||
+                !string.Equals(Path.GetFullPath(enrollmentTokenFile),
+                    Path.Combine(Path.GetFullPath(dataDirectory), "pilot-enrollment-token"),
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                throw new InvalidOperationException("Agent:EnrollmentTokenFile must be the pilot-enrollment-token file in Agent:DataDirectory.");
+            if (enrollmentToken is not null)
+                throw new InvalidOperationException("Only one Agent enrollment token source may be configured.");
+            PilotHostConfiguration.RejectLinks(enrollmentTokenFile);
+            enrollmentTokenFile = Path.GetFullPath(enrollmentTokenFile);
+        }
+
         return new AgentOptions(
             coreUrl,
             Path.GetFullPath(dataDirectory),
             heartbeatInterval,
             retryDelay,
             maxRetryDelay,
-            string.IsNullOrWhiteSpace(configuration["Agent:EnrollmentToken"])
-                ? null : configuration["Agent:EnrollmentToken"]!.Trim(),
-            certificatePin);
+            enrollmentToken,
+            certificatePin,
+            enrollmentTokenFile);
     }
 
     private static TimeSpan ReadPositiveInterval(IConfiguration configuration, string key, TimeSpan fallback)

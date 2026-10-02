@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Compile Include="..\shared\hosting\PilotHostConfiguration.cs" Link="PilotHostConfiguration.cs" />
     <ProjectReference Include="..\shared\contracts\SentinelAI.Contracts.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />

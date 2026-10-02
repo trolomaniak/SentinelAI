@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Configuration;
+using SentinelAI.Hosting;
 using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography;
@@ -11,7 +13,22 @@ public static class AgentHost
 {
     public static HostApplicationBuilder CreateBuilder(string[] args)
     {
-        var builder = Host.CreateApplicationBuilder(args);
+        var pilot = PilotHostConfiguration.Read(args, agent: true);
+        var builder = pilot.Values is null ? Host.CreateApplicationBuilder(args) :
+            Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+            {
+                Args = pilot.Arguments,
+                ContentRootPath = AppContext.BaseDirectory
+            });
+        if (pilot.Values is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("Agent__EnrollmentToken")))
+                throw new InvalidOperationException("Pilot configuration cannot be combined with an environment enrollment token.");
+            builder.Configuration.Sources.Clear();
+            builder.Configuration.AddInMemoryCollection(pilot.Values);
+            // Validate before the service host starts, without reading the temporary token.
+            _ = AgentOptions.FromConfiguration(builder.Configuration);
+        }
         builder.Services.AddWindowsService(options => options.ServiceName = "SentinelAIAgent");
 
         builder.Services.AddSingleton(provider =>

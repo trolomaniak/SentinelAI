@@ -18,6 +18,7 @@ using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Reports;
 using SentinelAI.Licensing;
 using SentinelAI.Rules;
+using SentinelAI.Hosting;
 
 namespace SentinelAI.Core;
 
@@ -25,7 +26,19 @@ public static class CoreHost
 {
     public static WebApplication Build(string[] args, Action<WebApplicationBuilder>? configureBuilder = null)
     {
-        var builder = WebApplication.CreateBuilder(args);
+        var pilot = PilotHostConfiguration.Read(args, agent: false);
+        var builder = pilot.Values is null ? WebApplication.CreateBuilder(args) :
+            WebApplication.CreateBuilder(new WebApplicationOptions
+            {
+                Args = pilot.Arguments,
+                ContentRootPath = AppContext.BaseDirectory
+            });
+        if (pilot.Values is not null)
+        {
+            builder.Configuration.Sources.Clear();
+            builder.Configuration.AddInMemoryCollection(pilot.Values);
+            builder.WebHost.UseUrls(pilot.Values["urls"]!);
+        }
 
         // An explicit URL or Kestrel configuration can enable HTTPS or another interface.
         // Without one, the local API is reachable only from this machine.

@@ -32,6 +32,7 @@ try
     WindowsSecurityConfigurationTests.Run();
     WindowsOperatingSystemTests.Run();
     VerifyRemoteCoreTrustConfiguration();
+    await PilotHostConfigurationTests.RunAsync(Path.Combine(testDirectory, "pilot-host"));
     await VerifyRetryAndStableIdentityAsync(Path.Combine(testDirectory, "retry"));
     await VerifyAgentToCoreAsync(Path.Combine(testDirectory, "end-to-end"));
     await VerifyAgentEnrollmentAsync(Path.Combine(testDirectory, "enrollment"));
