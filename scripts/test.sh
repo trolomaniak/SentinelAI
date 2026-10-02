@@ -10,6 +10,8 @@ dotnet run --project "$repo_root/tests/SentinelAI.Agent.Tests/SentinelAI.Agent.T
 dotnet run --project "$repo_root/tests/SentinelAI.Core.Tests/SentinelAI.Core.Tests.csproj" --configuration Release --no-build --no-restore
 dotnet run --project "$repo_root/tests/SentinelAI.Rules.Tests/SentinelAI.Rules.Tests.csproj" --configuration Release --no-build --no-restore
 dotnet run --project "$repo_root/tests/SentinelAI.Scoring.Tests/SentinelAI.Scoring.Tests.csproj" --configuration Release --no-build --no-restore
+dotnet run --project "$repo_root/tests/SentinelAI.Licensing.Tests/SentinelAI.Licensing.Tests.csproj" --configuration Release --no-build --no-restore
+dotnet run --project "$repo_root/tests/SentinelAI.LicenseApi.Tests/SentinelAI.LicenseApi.Tests.csproj" --configuration Release --no-build --no-restore
 
 cd "$repo_root/dashboard"
 npm test

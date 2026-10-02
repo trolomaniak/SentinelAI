@@ -2,7 +2,7 @@
 
 SentinelAI is a Windows-first, local-first cybersecurity platform. Core provides a local API with SQLite-backed administrator login, endpoint heartbeats, and endpoint inventory. The Agent sends heartbeats and inventory to Core; Core serves a local device dashboard.
 
-The backend uses .NET 10 and contains the Agent, Core web host, shared contracts, reusable deterministic rules, and risk scoring projects. The dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer.
+The backend uses .NET 10 and contains the Agent, Core web host, shared contracts, reusable deterministic rules, risk scoring, and a separate cloud License API. The dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer.
 
 From the repository root, run:
 
@@ -11,7 +11,7 @@ From the repository root, run:
 ./scripts/test.sh
 ```
 
-The build script restores and builds the .NET solution, then builds the dashboard. The test script runs Agent and Core integration checks, individual rule/scoring tests, and dashboard JavaScript tests.
+The build script restores and builds the .NET solution, then builds the dashboard. The test script runs Agent/Core and licensing integration checks, individual rule/scoring/lease verification tests, and dashboard JavaScript tests.
 
 To start Core for the first time, set a bootstrap administrator name and a password of at least 12 characters. The password is used only to create the initial administrator and is stored as a password hash in SQLite. Remove the password from the environment after the first successful start; later starts use the existing database.
 
@@ -25,6 +25,16 @@ dotnet run --project core/SentinelAI.Core.csproj --no-launch-profile
 Core listens at `http://127.0.0.1:5000` by default. Set `ASPNETCORE_URLS` to change the address or enable HTTPS with a configured Kestrel certificate. Set `SentinelAI__DataDirectory` to change the SQLite directory; otherwise Core uses the operating system's local application data directory under `SentinelAI/Core`. Keep that directory private and backed up. An existing administrator is never replaced by bootstrap environment variables.
 
 `GET /api/health` is public. `POST /api/auth/login` accepts JSON with `username` and `password` and returns a short-lived bearer access token when credentials are valid. Send it as `Authorization: Bearer <accessToken>` to `GET /api/admin/me`. Invalid credentials receive the same `401` response. Login attempts are rate-limited. Tokens expire after 15 minutes and are invalidated when Core restarts.
+
+## Signed subscription leases
+
+The separate [License API](cloud/license-api/README.md) issues a seven-day signed lease containing organization and Core installation IDs, plan, endpoint limit, enabled features, issue time, and full-mode expiration. Its activation credential selects an operator-configured entitlement; client requests cannot choose their own plan or limits. The development issuer uses ECDSA P-256/SHA-256 (ES256), an asymmetric equivalent allowed by TASK-010, without an external crypto dependency.
+
+Core verifies signatures locally using only provisioned public P-256 SPKI PEM keys. Set `SentinelAI__Licensing__TrustedPublicKeys__<keyId>` to an absolute public-key file path. Key IDs support overlapping trust during rotation. Core rejects private keys and other curves; it never references the cloud signer. Lease identity must match the organization and Core installation IDs already stored by enrollment (also returned when issuing an enrollment token).
+
+An authenticated Core administrator can call `POST /api/admin/license/verify` with `{"lease":"<signed-lease>"}`. The response reports `valid`, `expired`, `invalid`, `notYetValid`, or `identityMismatch`; claims are exposed only for a verified, identity-matching valid or expired lease. Invalid signatures, unknown keys, malformed tokens, modified claims, and unsupported algorithms fail verification. Expiration begins exactly at `full_mode_until`; there is no hidden extension. Like other administrator reads, verification requires HTTPS outside loopback and sends `Cache-Control: no-store`.
+
+With no public trust keys configured, the verification endpoint returns `503`; existing monitoring continues. TASK-010 introduces issuance and local verification only. Automatic renewal, persisted license state, clock rollback protection, the seven-day grace/Safe Mode state machine, and feature or endpoint-limit enforcement remain separate work. Use the automated development key-generation workflow documented with the License API; tests generate their own temporary keys and use synthetic entitlements. Never provision a private signing key to Core or commit signing keys or activation credentials.
 
 ## Device dashboard
 

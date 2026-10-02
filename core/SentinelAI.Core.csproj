@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\shared\contracts\SentinelAI.Contracts.csproj" />
+    <ProjectReference Include="..\shared\crypto\SentinelAI.Licensing.csproj" />
     <ProjectReference Include="..\rules\SentinelAI.Rules.csproj" />
     <ProjectReference Include="..\scoring\SentinelAI.Scoring.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
