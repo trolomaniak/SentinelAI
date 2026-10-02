@@ -29,10 +29,7 @@ public sealed class InventoryCollector
             isWindows ? ReadInstalledRamBytes() : null,
             isWindows ? ReadFixedDisks() : [],
             isWindows
-                ? new SecurityPostureInventory(
-                    ReadFirewallEnabled("DomainProfile"),
-                    ReadFirewallEnabled("StandardProfile"),
-                    ReadFirewallEnabled("PublicProfile"))
+                ? WindowsSecurityConfigurationCollector.CollectPosture()
                 : new SecurityPostureInventory(null, null, null));
     }
 
@@ -112,34 +109,6 @@ public sealed class InventoryCollector
         }
 
         return disks;
-    }
-
-    [SupportedOSPlatform("windows")]
-    private static bool? ReadFirewallEnabled(string profile)
-    {
-        try
-        {
-            var setting = ReadFirewallSetting(@"SOFTWARE\Policies\Microsoft\WindowsFirewall\" + profile)
-                ?? ReadFirewallSetting(
-                    @"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\" + profile);
-            return setting switch
-            {
-                0 => false,
-                1 => true,
-                _ => null
-            };
-        }
-        catch (Exception exception) when (IsUnavailable(exception))
-        {
-            return null;
-        }
-    }
-
-    [SupportedOSPlatform("windows")]
-    private static int? ReadFirewallSetting(string keyPath)
-    {
-        using var key = Registry.LocalMachine.OpenSubKey(keyPath);
-        return key?.GetValue("EnableFirewall") is int setting ? setting : null;
     }
 
     private static bool IsUnavailable(Exception exception) =>

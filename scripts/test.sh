@@ -8,6 +8,7 @@ dotnet build "$repo_root/SentinelAI.sln" --configuration Release --no-restore
 
 dotnet run --project "$repo_root/tests/SentinelAI.Agent.Tests/SentinelAI.Agent.Tests.csproj" --configuration Release --no-build --no-restore
 dotnet run --project "$repo_root/tests/SentinelAI.Core.Tests/SentinelAI.Core.Tests.csproj" --configuration Release --no-build --no-restore
+dotnet run --project "$repo_root/tests/SentinelAI.Rules.Tests/SentinelAI.Rules.Tests.csproj" --configuration Release --no-build --no-restore
 
 cd "$repo_root/dashboard"
 npm test

@@ -20,4 +20,20 @@ public sealed record DiskInventory(string Name, long TotalBytes, long AvailableB
 public sealed record SecurityPostureInventory(
     bool? DomainFirewallEnabled,
     bool? PrivateFirewallEnabled,
-    bool? PublicFirewallEnabled);
+    bool? PublicFirewallEnabled,
+    WindowsSecurityConfiguration? Configuration = null);
+
+// Null means unavailable, absent, or unrecognized. These are observed configuration
+// values, not assertions about effective protection or Internet reachability.
+public sealed record WindowsSecurityConfiguration(
+    bool? UacEnabled = null,
+    int? AdminConsentPromptBehavior = null,
+    bool? RdpEnabled = null,
+    bool? RdpNetworkLevelAuthenticationRequired = null,
+    int? RdpSecurityLayer = null,
+    int? RdpMinimumEncryptionLevel = null,
+    bool? Smb1ServerEnabled = null,
+    bool? SmbInsecureGuestLogonsAllowed = null,
+    bool? AutomaticAdminLogonEnabled = null,
+    bool? LsaProtectionEnabled = null,
+    bool? AutomaticUpdatesDisabled = null);
