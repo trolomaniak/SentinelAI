@@ -44,4 +44,4 @@ TASK-010 — License API. Do not start it as part of TASK-009.
 
 ## Last verified commit
 
-`c5c54bbbe6915d2cadc28e018dee8e3a411cff1f` — merged TASK-008 base verified through PR #9 CI. The TASK-009 working tree passed the checks above before its implementation commit.
+`12f9327205b17715ef5a7618b55fc3b9ecec3afb` — TASK-009 implementation verified by the local build, full test suite, Core publication, and diff review listed above. Hosted CI and pull request review follow on this branch.
