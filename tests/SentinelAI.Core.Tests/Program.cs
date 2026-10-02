@@ -165,6 +165,8 @@ try
         await VerifyDeviceReadApiAsync(
             client, store.DatabasePath, installationId, endpointId,
             lastHeartbeatUtc, latestInventory, agentCredential, firstAccessToken);
+        latestInventory = await RuleApiTests.VerifyAsync(
+            client, app, endpointId, agentCredential, firstAccessToken, latestInventory);
     }
 
     // Existing installations must work without retaining the bootstrap secret in configuration.
@@ -228,6 +230,7 @@ try
                restoredDetail?.InventoryCollectedUtc == latestInventory.CollectedUtc &&
                restoredDetail.Disks.Count == latestInventory.Disks.Count,
             "The dashboard device detail did not survive Core restart.");
+        await RuleApiTests.VerifyAfterRestartAsync(client, endpointId, accessToken, latestInventory.CollectedUtc);
     }
 
     await using (var remoteHttpApp = CoreHost.Build([]))
@@ -272,6 +275,12 @@ try
         {
             Ensure(deviceDetail.StatusCode == HttpStatusCode.Forbidden,
                 "Core exposed administrator device details over remote HTTP.");
+        }
+        using (var alerts = await GetAsBearerAsync(
+                   client, $"/api/admin/devices/{endpointId:D}/alerts", accessToken))
+        {
+            Ensure(alerts.StatusCode == HttpStatusCode.Forbidden,
+                "Core exposed security findings over remote HTTP.");
         }
     }
 

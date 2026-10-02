@@ -37,3 +37,9 @@
 - Serve the dependency-free dashboard from Core's origin, with the static assets copied into Core build and publish output. Keep administrator bearer tokens only in browser memory and require HTTPS for non-loopback dashboard sign-in. No cross-origin API permission is introduced.
 - Expose administrator-only list and detail views of enrolled endpoints. Join enrollment identity, Core heartbeat time, and the latest inventory without returning credentials or raw database records. Unverified loopback-only devices are excluded.
 - Derive connectivity health from Core's last-seen time: healthy up to two minutes, warning up to five minutes, offline thereafter, and unknown before any heartbeat. Keep last reported firewall settings separate from connectivity health and label missing inventory as unknown.
+
+## 2026-10-02 — TASK-007 deterministic rules
+
+- Keep detection in a dependency-free stateless rules library with individually testable rules and explicit normalized observation inputs. Preserve the inventory timestamp and typed evidence; evaluation has no clock or LLM dependency and never performs remediation.
+- Extend inventory with optional bounded Windows configuration observations. Do not infer default settings, effective runtime protection, account privilege, Internet exposure, or patch compliance. Missing, unreadable, malformed, and unsupported observations remain unknown; prerequisite checks suppress inapplicable UAC/RDP findings.
+- Derive current structured findings from the newest accepted persisted inventory through an administrator-only API. This avoids a second snapshot store or premature incident lifecycle schema. Older uploads cannot replace findings, newer normal state clears them, and repeat reads are deterministic. Incident history/status and risk scoring remain later tasks.

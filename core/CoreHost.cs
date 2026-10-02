@@ -14,6 +14,7 @@ using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Core.Persistence;
+using SentinelAI.Rules;
 
 namespace SentinelAI.Core;
 
@@ -43,6 +44,7 @@ public static class CoreHost
         builder.Services.AddSingleton<DeviceReadStore>();
         builder.Services.AddSingleton<EnrollmentStore>();
         builder.Services.AddSingleton<InventoryStore>();
+        builder.Services.AddSingleton(RuleEngine.CreateDefault());
         builder.Services.AddHostedService<AdminInitializationService>();
 
         builder.Services.AddDataProtection()
@@ -308,6 +310,39 @@ public static class CoreHost
             })
             .RequireAuthorization();
 
+        app.MapGet("/api/admin/devices/{endpointId:guid}/alerts", async (
+                Guid endpointId,
+                HttpContext context,
+                DeviceReadStore devices,
+                InventoryStore inventories,
+                RuleEngine rules,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (await devices.FindAsync(endpointId, cancellationToken) is null)
+                {
+                    return Results.NotFound();
+                }
+
+                var inventory = await inventories.FindLatestAsync(endpointId, cancellationToken);
+                // Derive current findings from the newest accepted snapshot. Keeping the
+                // observation time makes stale data visible and repeat reads deterministic.
+                return Results.Ok(new
+                {
+                    endpointId,
+                    observedUtc = inventory?.CollectedUtc,
+                    alerts = inventory is null
+                        ? Array.Empty<SecurityAlert>()
+                        : rules.Evaluate(EndpointState.FromInventory(inventory))
+                });
+            })
+            .RequireAuthorization();
+
         app.MapPost("/api/admin/enrollment-tokens", async (
                 HttpContext context,
                 EnrollmentStore enrollments,
@@ -345,6 +380,15 @@ public static class CoreHost
             report.InstalledRamBytes is <= 0 ||
             report.Disks is null or { Count: > 32 } ||
             report.SecurityPosture is null)
+        {
+            return false;
+        }
+
+        var configuration = report.SecurityPosture.Configuration;
+        if (configuration is not null &&
+            (configuration.AdminConsentPromptBehavior is < 0 or > 5 ||
+             configuration.RdpSecurityLayer is < 0 or > 2 ||
+             configuration.RdpMinimumEncryptionLevel is < 1 or > 4))
         {
             return false;
         }
