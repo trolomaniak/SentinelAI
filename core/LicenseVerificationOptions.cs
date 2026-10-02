@@ -5,20 +5,23 @@ namespace SentinelAI.Core;
 /// <summary>Locally provisioned public trust anchors; never a cloud signing key.</summary>
 public sealed class LicenseVerificationOptions
 {
-    private LicenseVerificationOptions(LeaseTokenVerifier verifier, bool configured)
+    private LicenseVerificationOptions(LeaseTokenVerifier verifier, bool configured, LicenseRenewalOptions renewal)
     {
         Verifier = verifier;
         Configured = configured;
+        Renewal = renewal;
     }
 
     public LeaseTokenVerifier Verifier { get; }
     public bool Configured { get; }
+    public LicenseRenewalOptions Renewal { get; }
 
     public static LicenseVerificationOptions Load(IConfiguration configuration)
     {
         var section = configuration.GetSection("SentinelAI:Licensing");
         if (section.GetChildren().Any(child =>
-                !string.Equals(child.Key, "TrustedPublicKeys", StringComparison.OrdinalIgnoreCase)))
+                !string.Equals(child.Key, "TrustedPublicKeys", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(child.Key, "Renewal", StringComparison.OrdinalIgnoreCase)))
         {
             throw new InvalidOperationException("Unknown SentinelAI:Licensing setting.");
         }
@@ -47,9 +50,15 @@ public sealed class LicenseVerificationOptions
             keys.Add(entry.Key, File.ReadAllText(file.FullName));
         }
 
+        var renewal = LicenseRenewalOptions.Load(configuration);
+        if (renewal.Configured && keys.Count == 0)
+        {
+            throw new InvalidOperationException("License renewal requires configured public verification trust anchors.");
+        }
+
         try
         {
-            return new LicenseVerificationOptions(new LeaseTokenVerifier(keys), keys.Count != 0);
+            return new LicenseVerificationOptions(new LeaseTokenVerifier(keys), keys.Count != 0, renewal);
         }
         catch (ArgumentException)
         {

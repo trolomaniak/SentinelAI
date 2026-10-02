@@ -15,6 +15,9 @@ using SentinelAI.Core.Persistence;
 using SentinelAI.LicenseApi;
 
 await LicenseApiIntegrationTests.RunAsync();
+LicenseStateMachineTests.Run();
+await LicenseStateIntegrationTests.RunAsync();
+await LicenseRenewalClientTests.RunAsync();
 
 internal static class LicenseApiIntegrationTests
 {

@@ -52,9 +52,16 @@ public static class CoreHost
         builder.Services.AddSingleton(riskOptions);
         builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
         builder.Services.AddSingleton<RiskReadStore>();
-        builder.Services.AddSingleton(LicenseVerificationOptions.Load(builder.Configuration));
+        var licenseOptions = LicenseVerificationOptions.Load(builder.Configuration);
+        builder.Services.AddSingleton(licenseOptions);
+        builder.Services.AddSingleton(licenseOptions.Renewal);
         builder.Services.AddSingleton<LicenseVerificationService>();
+        builder.Services.AddSingleton<LicenseStateStore>();
+        builder.Services.AddSingleton<LicenseClock>();
+        builder.Services.AddSingleton<ILicenseLeaseClient, LicenseLeaseClient>();
+        builder.Services.AddSingleton<LicenseStateService>();
         builder.Services.AddHostedService<AdminInitializationService>();
+        builder.Services.AddHostedService<LicenseRenewalWorker>();
 
         builder.Services.AddDataProtection()
             .UseEphemeralDataProtectionProvider()
@@ -139,6 +146,13 @@ public static class CoreHost
         }
 
         app.UseRouting();
+        app.Use(async (context, next) =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api/admin/license") ||
+                context.Request.Path == "/api/admin/incidents/export")
+                context.Response.Headers.CacheControl = "no-store";
+            await next(context);
+        });
         app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
@@ -487,6 +501,42 @@ public static class CoreHost
             })
             .RequireAuthorization()
             .WithMetadata(new RequestSizeLimitAttribute(1024));
+
+        app.MapGet("/api/admin/license", async (HttpContext context, LicenseStateService licensing,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                return Results.Ok(await licensing.GetAsync(cancellationToken));
+            }).RequireAuthorization();
+
+        app.MapPost("/api/admin/license/renew", async (HttpContext context, LicenseStateService licensing,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                // The caller cannot select a destination, identity, plan, features, or time.
+                if (context.Request.Query.Count != 0 || context.Request.ContentLength > 0)
+                    return Results.BadRequest();
+                try
+                {
+                    if (await context.Request.Body.ReadAsync(new byte[1].AsMemory(), cancellationToken) != 0)
+                        return Results.BadRequest();
+                }
+                catch (BadHttpRequestException) { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+                if (!licensing.Configured) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                return Results.Ok(await licensing.RenewAsync(cancellationToken));
+            }).RequireAuthorization().RequireRateLimiting("license-verification")
+            .WithMetadata(new RequestSizeLimitAttribute(1024));
+
+        app.MapGet("/api/admin/incidents/export", async (HttpContext context, AlertStore alerts,
+                TimeProvider clock, CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (context.Request.Query.Keys.Any(key => key is not ("offset" or "limit")) ||
+                    !TryReadRiskQuery(context.Request.Query, out var offset, out var limit))
+                    return Results.BadRequest();
+                // Emergency access has no licensing gate, in every state including failed renewal.
+                return Results.Ok(await alerts.ExportAsync(offset, limit, clock.GetUtcNow(), cancellationToken));
+            }).RequireAuthorization();
 
         app.MapPost("/api/admin/license/verify", async (
                 HttpContext context,

@@ -180,6 +180,43 @@ public sealed class AlertStore(AdminStore admins)
         return new AlertPage(alerts, total, offset, limit);
     }
 
+    public async Task<IncidentExport> ExportAsync(int offset, int limit, DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        if (offset < 0 || limit is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(limit));
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        long total;
+        await using (var count = connection.CreateCommand())
+        {
+            count.Transaction = transaction;
+            count.CommandText = "SELECT COUNT(*) FROM TrackedAlerts;";
+            total = (long)(await count.ExecuteScalarAsync(cancellationToken) ?? 0L);
+        }
+        var ids = new List<Guid>();
+        await using (var query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
+            query.CommandText = """
+                SELECT AlertId FROM TrackedAlerts ORDER BY LastObservedUtcTicks DESC, AlertId
+                LIMIT $limit OFFSET $offset;
+                """;
+            query.Parameters.AddWithValue("$limit", limit);
+            query.Parameters.AddWithValue("$offset", offset);
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) ids.Add(Guid.Parse(reader.GetString(0)));
+        }
+        var incidents = new List<AlertDetail>();
+        foreach (var id in ids)
+        {
+            if (await FindAsync(connection, transaction, id, cancellationToken) is { } detail)
+                incidents.Add(detail);
+        }
+        transaction.Commit();
+        return new("sentinelai-emergency-incidents-v1", now, incidents, total, offset, limit);
+    }
+
     public async Task<AlertDetail?> FindAsync(Guid alertId, CancellationToken cancellationToken = default)
     {
         await using var connection = CreateConnection();
