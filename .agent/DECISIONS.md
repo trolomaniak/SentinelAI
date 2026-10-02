@@ -31,3 +31,9 @@
 - Send inventory through a separate authenticated Agent API after an enrolled heartbeat succeeds. The Agent refreshes every six hours and retries inventory failures after five minutes without interrupting heartbeat delivery. Anonymous loopback Agents cannot submit inventory.
 - Keep only the newest report per Core-assigned endpoint ID in SQLite, ordered by Agent collection time. Validate field sizes and disk counts before storing reports; keep inventory separate from heartbeat freshness and health.
 - Limit Windows collection to bounded system metadata queries for host, OS, CPU, physical memory, fixed local disks, and available firewall profile settings. Represent unavailable values as unknown instead of failing the Agent. Do not inspect arbitrary file contents or launch external scanners.
+
+## 2026-10-02 — TASK-006 device dashboard
+
+- Serve the dependency-free dashboard from Core's origin, with the static assets copied into Core build and publish output. Keep administrator bearer tokens only in browser memory and require HTTPS for non-loopback dashboard sign-in. No cross-origin API permission is introduced.
+- Expose administrator-only list and detail views of enrolled endpoints. Join enrollment identity, Core heartbeat time, and the latest inventory without returning credentials or raw database records. Unverified loopback-only devices are excluded.
+- Derive connectivity health from Core's last-seen time: healthy up to two minutes, warning up to five minutes, offline thereafter, and unknown before any heartbeat. Keep last reported firewall settings separate from connectivity health and label missing inventory as unknown.

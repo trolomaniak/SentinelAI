@@ -1,8 +1,8 @@
 # SentinelAI
 
-SentinelAI is a Windows-first, local-first cybersecurity platform. Core provides a local API with SQLite-backed administrator login, endpoint heartbeats, and endpoint inventory. The Agent sends heartbeats and inventory to Core; the dashboard remains a scaffold.
+SentinelAI is a Windows-first, local-first cybersecurity platform. Core provides a local API with SQLite-backed administrator login, endpoint heartbeats, and endpoint inventory. The Agent sends heartbeats and inventory to Core; Core serves a local device dashboard.
 
-The backend uses .NET 10 and contains the Agent, Core web host, and shared contracts projects. The dashboard is a dependency-free static shell built with Node.js 20 or newer.
+The backend uses .NET 10 and contains the Agent, Core web host, and shared contracts projects. The dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer.
 
 From the repository root, run:
 
@@ -11,7 +11,7 @@ From the repository root, run:
 ./scripts/test.sh
 ```
 
-The build script restores and builds the .NET solution, then builds the dashboard. The test script runs Agent and Core integration checks.
+The build script restores and builds the .NET solution, then builds the dashboard. The test script runs Agent and Core integration checks plus dashboard JavaScript tests.
 
 To start Core for the first time, set a bootstrap administrator name and a password of at least 12 characters. The password is used only to create the initial administrator and is stored as a password hash in SQLite. Remove the password from the environment after the first successful start; later starts use the existing database.
 
@@ -26,6 +26,12 @@ Core listens at `http://127.0.0.1:5000` by default. Set `ASPNETCORE_URLS` to cha
 
 `GET /api/health` is public. `POST /api/auth/login` accepts JSON with `username` and `password` and returns a short-lived bearer access token when credentials are valid. Send it as `Authorization: Bearer <accessToken>` to `GET /api/admin/me`. Invalid credentials receive the same `401` response. Login attempts are rate-limited. Tokens expire after 15 minutes and are invalidated when Core restarts.
 
+## Device dashboard
+
+Open the Core origin in a browser, for example `http://127.0.0.1:5000/`, and sign in with the Core administrator account. Core serves the dashboard on the same origin as its API, so no cross-origin permission is required. For access from another computer, configure Core with HTTPS; the dashboard sign-in form will not submit credentials over remote HTTP. The bearer token stays in browser memory and is cleared on sign-out, page refresh, or the next request after session expiry.
+
+The device list shows enrolled endpoints, their last heartbeat, Agent version, OS, and the last reported configured firewall settings. Select an endpoint to see its inventory and firewall profile details. Health is computed from Core's last-seen time: healthy through two minutes, warning through five minutes, offline after five minutes, and unknown before the first heartbeat. Missing inventory is displayed as unknown. Anonymous legacy loopback heartbeats do not appear as enrolled devices. The authenticated `GET /api/admin/devices` and `GET /api/admin/devices/{endpointId}` endpoints supply the list and details.
+
 ## Windows Agent and enrollment
 
 Run `./scripts/publish-agent-windows.sh` to produce `artifacts/agent/win-x64/SentinelAI.Agent.exe`. This is a self-contained, single-file Windows x64 build: the target does not need a separate .NET installation. The bundled native runtime is extracted when the EXE starts. CI verifies the EXE on Windows and uploads it as the `SentinelAI.Agent-win-x64` build artifact.
@@ -38,6 +44,6 @@ Core binds to loopback by default. For an Agent on another machine, configure a 
 
 The Agent protects its enrollment credential with Windows DPAPI under its service account; Unix test installations restrict the state file to mode `0600`. The state is bound to the configured Core origin and certificate fingerprint. An enrolled Agent authenticates every heartbeat with that credential. Legacy anonymous loopback heartbeats remain `unverified` and cannot update an enrolled endpoint. Core stores only hashes of enrollment tokens and Agent credentials in SQLite; `reporting` is the last observed health state, so consumers should use `last_seen` to assess freshness.
 
-After an enrolled heartbeat succeeds, the Agent reports hostname, OS name and version, architecture, CPU model and logical processor count, installed RAM, local fixed-disk capacities, and available Windows firewall profile settings. Unavailable fields are reported as unknown. Collection uses bounded system metadata calls and does not scan files or launch external commands. The Agent refreshes inventory every six hours and retries a failed inventory upload after five minutes. Core accepts inventory only from an enrolled Agent over the same trusted transport as heartbeats, validates and limits the report, and stores the most recently collected report in SQLite. Inventory upload failures do not interrupt heartbeats. Inventory is stored locally in Core; the device dashboard belongs to TASK-006.
+After an enrolled heartbeat succeeds, the Agent reports hostname, OS name and version, architecture, CPU model and logical processor count, installed RAM, local fixed-disk capacities, and available Windows firewall profile settings. Unavailable fields are reported as unknown. Collection uses bounded system metadata calls and does not scan files or launch external commands. The Agent refreshes inventory every six hours and retries a failed inventory upload after five minutes. Core accepts inventory only from an enrolled Agent over the same trusted transport as heartbeats, validates and limits the report, and stores the most recently collected report in SQLite. Inventory upload failures do not interrupt heartbeats.
 
 To install a manually published Windows EXE as a service, run `New-Service -Name SentinelAIAgent -BinaryPathName 'C:\SentinelAI\Agent\SentinelAI.Agent.exe' -StartupType Automatic` and then `Start-Service SentinelAIAgent` from an elevated PowerShell session. Keep the service account stable so it can decrypt its DPAPI state. A signed pilot installer belongs to TASK-015.

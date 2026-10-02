@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.FileProviders;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Contracts.Inventory;
@@ -39,6 +40,7 @@ public static class CoreHost
         builder.Services.AddSingleton<IPasswordHasher<AdminRecord>, PasswordHasher<AdminRecord>>();
         builder.Services.AddSingleton<AdminStore>();
         builder.Services.AddSingleton<DeviceStore>();
+        builder.Services.AddSingleton<DeviceReadStore>();
         builder.Services.AddSingleton<EnrollmentStore>();
         builder.Services.AddSingleton<InventoryStore>();
         builder.Services.AddHostedService<AdminInitializationService>();
@@ -95,6 +97,25 @@ public static class CoreHost
         var fallbackAdmin = new AdminRecord(string.Empty, string.Empty);
         var fallbackHash = app.Services.GetRequiredService<IPasswordHasher<AdminRecord>>()
             .HashPassword(fallbackAdmin, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
+
+        var dashboardDirectory = Path.Combine(AppContext.BaseDirectory, "dashboard");
+        if (Directory.Exists(dashboardDirectory))
+        {
+            var dashboardFiles = new PhysicalFileProvider(dashboardDirectory);
+            app.Lifetime.ApplicationStopped.Register(dashboardFiles.Dispose);
+            app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = dashboardFiles });
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = dashboardFiles,
+                OnPrepareResponse = context =>
+                {
+                    context.Context.Response.Headers["Content-Security-Policy"] =
+                        "default-src 'self'; script-src 'self'; style-src 'self'; " +
+                        "img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+                    context.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                }
+            });
+        }
 
         app.UseRouting();
         app.UseRateLimiter();
@@ -228,6 +249,7 @@ public static class CoreHost
                 HttpContext context,
                 CancellationToken cancellationToken) =>
             {
+                context.Response.Headers.CacheControl = "no-store";
                 var admin = await admins.FindByUsernameAsync(request?.Username ?? string.Empty, cancellationToken);
                 var password = request?.Password ?? string.Empty;
                 var verification = passwordHasher.VerifyHashedPassword(
@@ -252,6 +274,38 @@ public static class CoreHost
 
         app.MapGet("/api/admin/me", (ClaimsPrincipal user) =>
                 Results.Ok(new { username = user.Identity?.Name, role = "administrator" }))
+            .RequireAuthorization();
+
+        app.MapGet("/api/admin/devices", async (
+                HttpContext context,
+                DeviceReadStore devices,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                return Results.Ok(await devices.ListAsync(cancellationToken));
+            })
+            .RequireAuthorization();
+
+        app.MapGet("/api/admin/devices/{endpointId:guid}", async (
+                Guid endpointId,
+                HttpContext context,
+                DeviceReadStore devices,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                var device = await devices.FindAsync(endpointId, cancellationToken);
+                return device is null ? Results.NotFound() : Results.Ok(device);
+            })
             .RequireAuthorization();
 
         app.MapPost("/api/admin/enrollment-tokens", async (

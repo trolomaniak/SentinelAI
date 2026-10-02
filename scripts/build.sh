@@ -8,4 +8,6 @@ dotnet build "$repo_root/SentinelAI.sln" --configuration Release --no-restore
 
 cd "$repo_root/dashboard"
 npm ci
+node --check assets/app.js
+node --check assets/device-view.js
 npm run build
