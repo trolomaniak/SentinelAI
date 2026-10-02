@@ -42,4 +42,4 @@ TASK-009 — Risk score. Do not start it as part of TASK-008.
 
 ## Last verified commit
 
-`0e4906a148de418155a28f11e6dcd4d9b00974bb` — merged TASK-007 base, verified by PR #8 CI. The TASK-008 working tree passed the checks above before its implementation commit.
+`f306a414e1f11a9a723b0d62e99f0741912c5884` — TASK-008 implementation passed local solution/dashboard build, Agent/Core/rules/dashboard tests, and Core publication containing the new dashboard assets.
