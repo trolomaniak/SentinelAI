@@ -1,6 +1,6 @@
 # Licensing lifecycle
 
-TASK-011 keeps licensing independent of the local security baseline. Core alone fetches and verifies signed leases; the cloud signer and its private key stay in the separate License API. Agent telemetry, local detection, all tracked alerts, incident access, alert status changes, and risk reads remain available in every licensing state. No current runtime feature is premium, so this task does not add arbitrary gates to existing APIs.
+TASK-011 keeps licensing independent of the local security baseline. Core alone fetches and verifies signed leases; the cloud signer and its private key stay in the separate License API. Agent telemetry, local detection, all tracked alerts, incident access, alert status changes, and risk reads remain available in every licensing state. TASK-012 introduces the optional cloud AI explanation feature, requiring signed `cloud_ai` permission and currently enabled premium capabilities. Safe Mode withholds that cloud request while local security APIs continue.
 
 | State | Condition | Optional signed features |
 | --- | --- | --- |

@@ -2,7 +2,7 @@
 
 SentinelAI is a Windows-first, local-first cybersecurity platform. Core provides a local API with SQLite-backed administrator login, endpoint heartbeats, and endpoint inventory. The Agent sends heartbeats and inventory to Core; Core serves a local device dashboard.
 
-The backend uses .NET 10 and contains the Agent, Core web host, shared contracts, reusable deterministic rules, risk scoring, and a separate cloud License API. The dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer.
+The backend uses .NET 10 and contains the Agent, Core web host, shared contracts, reusable deterministic rules, risk scoring, a separate cloud License API and AI Gateway. The dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer.
 
 From the repository root, run:
 
@@ -34,7 +34,11 @@ Core verifies signatures locally using only provisioned public P-256 SPKI PEM ke
 
 An authenticated Core administrator can call `POST /api/admin/license/verify` with `{"lease":"<signed-lease>"}`. The response reports `valid`, `expired`, `invalid`, `notYetValid`, or `identityMismatch`; claims are exposed only for a verified, identity-matching valid or expired lease. Invalid signatures, unknown keys, malformed tokens, modified claims, and unsupported algorithms fail verification. Expiration begins exactly at `full_mode_until`; there is no hidden extension. Like other administrator reads, verification requires HTTPS outside loopback and sends `Cache-Control: no-store`.
 
-With no public trust keys configured, the verification endpoint returns `503`; existing monitoring continues. TASK-011 adds opt-in renewal, persisted signed lease/time state, and the explicit FULL/GRACE/SAFE_MODE/RECOVERING lifecycle. A failed renewal retains GRACE only until the signed seven-day deadline; Safe Mode preserves telemetry, rules, alerts, incident access, and emergency export. See [licensing operation and configuration](docs/LICENSING.md). Feature/endpoint-limit enforcement for future premium functionality remains separate work. Use the automated development key-generation workflow documented with the License API; tests generate their own temporary keys and use synthetic entitlements. Never provision a private signing key to Core or commit signing keys or activation credentials.
+With no public trust keys configured, the verification endpoint returns `503`; existing monitoring continues. TASK-011 adds opt-in renewal, persisted signed lease/time state, and the explicit FULL/GRACE/SAFE_MODE/RECOVERING lifecycle. A failed renewal retains GRACE only until the signed seven-day deadline; Safe Mode preserves telemetry, rules, alerts, incident access, and emergency export. See [licensing operation and configuration](docs/LICENSING.md). TASK-012 uses these capabilities for the optional signed `cloud_ai` feature; future premium features and endpoint-limit enforcement remain separate work. Use the automated development key-generation workflow documented with the License API; tests generate their own temporary keys and use synthetic entitlements. Never provision a private signing key to Core or commit signing keys or activation credentials.
+
+## Assistive alert explanations
+
+Select **Explain with AI** on an alert to request a structured explanation, investigation suggestions and remediation suggestions. Core sends only minimized configuration evidence through the separate AI Gateway; the provider key stays on that gateway. Analysis is labeled assistive, cannot override the deterministic alert, and performs no endpoint actions. Cloud failures leave local alerts and review controls available. The optional feature requires a signed `cloud_ai` entitlement. See [AI configuration and privacy](docs/AI.md).
 
 ## Device dashboard
 
