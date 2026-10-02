@@ -30,6 +30,7 @@ try
 {
     VerifyInventoryCollection();
     WindowsSecurityConfigurationTests.Run();
+    WindowsOperatingSystemTests.Run();
     VerifyRemoteCoreTrustConfiguration();
     await VerifyRetryAndStableIdentityAsync(Path.Combine(testDirectory, "retry"));
     await VerifyAgentToCoreAsync(Path.Combine(testDirectory, "end-to-end"));
@@ -66,13 +67,15 @@ static void VerifyInventoryCollection()
 
     if (OperatingSystem.IsWindows())
     {
-        Ensure(report.OsName == "Windows" && report.InstalledRamBytes is > 0 &&
+        Ensure(report.OsName.StartsWith("Windows", StringComparison.OrdinalIgnoreCase) &&
+               Version.TryParse(report.OsVersion, out _) && report.InstalledRamBytes is > 0 &&
                report.Disks.Count > 0 && report.SecurityPosture.Configuration is not null,
             "Windows inventory did not collect OS, physical RAM, and fixed disk metadata.");
     }
     else
     {
-        Ensure(report.SecurityPosture.Configuration is null,
+        Ensure(report.SecurityPosture.Configuration is null &&
+               report.OsDisplayVersion is null && report.OsInstallationType is null,
             "Non-Windows inventory must not assert Windows security configuration.");
     }
 }

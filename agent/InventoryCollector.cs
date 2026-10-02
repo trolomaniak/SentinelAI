@@ -17,20 +17,23 @@ public sealed class InventoryCollector
         }
 
         var isWindows = OperatingSystem.IsWindows();
+        var windowsOs = isWindows ? WindowsOperatingSystemCollector.Collect() : null;
         return new InventoryReport(
             endpointId,
             DateTimeOffset.UtcNow,
             typeof(InventoryCollector).Assembly.GetName().Version?.ToString() ?? "0.0.0.0",
             Environment.MachineName,
-            isWindows ? "Windows" : RuntimeInformation.OSDescription,
-            Environment.OSVersion.Version.ToString(),
+            windowsOs?.Name ?? RuntimeInformation.OSDescription,
+            windowsOs?.Version ?? Environment.OSVersion.Version.ToString(),
             RuntimeInformation.OSArchitecture.ToString(),
             new CpuInventory(isWindows ? ReadCpuModel() : null, Environment.ProcessorCount),
             isWindows ? ReadInstalledRamBytes() : null,
             isWindows ? ReadFixedDisks() : [],
             isWindows
                 ? WindowsSecurityConfigurationCollector.CollectPosture()
-                : new SecurityPostureInventory(null, null, null));
+                : new SecurityPostureInventory(null, null, null),
+            windowsOs?.DisplayVersion,
+            windowsOs?.InstallationType);
     }
 
     [SupportedOSPlatform("windows")]

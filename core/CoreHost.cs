@@ -690,6 +690,8 @@ public static class CoreHost
             !IsValidText(report.Hostname, 255) ||
             !IsValidText(report.OsName, 128) ||
             !IsValidText(report.OsVersion, 128) ||
+            report.OsDisplayVersion is not null && !IsValidText(report.OsDisplayVersion, 32) ||
+            report.OsInstallationType is not null && !IsValidText(report.OsInstallationType, 32) ||
             !IsValidText(report.Architecture, 32) ||
             report.Cpu is null ||
             report.Cpu.LogicalProcessorCount is < 1 or > 1024 ||

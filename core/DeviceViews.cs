@@ -19,4 +19,5 @@ public sealed record DeviceDetail(
     CpuInventory? Cpu,
     long? InstalledRamBytes,
     IReadOnlyList<DiskInventory> Disks,
-    SecurityPostureInventory? SecurityPosture);
+    SecurityPostureInventory? SecurityPosture,
+    string? OsName = null);

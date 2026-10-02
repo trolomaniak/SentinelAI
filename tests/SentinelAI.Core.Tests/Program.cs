@@ -175,6 +175,7 @@ try
         latestInventory = alertTestState.LatestInventory;
     }
 
+    await OperatingSystemApiTests.VerifyAsync(username, password);
     await RiskApiTests.VerifyAsync(username, password);
 
     // Existing installations must work without retaining the bootstrap secret in configuration.
@@ -204,6 +205,8 @@ try
         Ensure(persistedInventory?.Hostname == latestInventory.Hostname &&
                persistedInventory.CollectedUtc == latestInventory.CollectedUtc &&
                persistedInventory.Cpu.Model == latestInventory.Cpu.Model &&
+               persistedInventory.OsDisplayVersion == latestInventory.OsDisplayVersion &&
+               persistedInventory.OsInstallationType == latestInventory.OsInstallationType &&
                persistedInventory.Disks[0].TotalBytes == latestInventory.Disks[0].TotalBytes,
             "Core restart lost the latest endpoint inventory.");
         using (var authenticatedHeartbeat = await SendAgentHeartbeatAsync(
@@ -236,6 +239,7 @@ try
         var restoredDetail = await persistedDetail.Content.ReadFromJsonAsync<DeviceDetail>();
         Ensure(persistedDetail.StatusCode == HttpStatusCode.OK &&
                restoredDetail?.InventoryCollectedUtc == latestInventory.CollectedUtc &&
+               restoredDetail.OsName == latestInventory.OsName &&
                restoredDetail.Disks.Count == latestInventory.Disks.Count,
             "The dashboard device detail did not survive Core restart.");
         await RuleApiTests.VerifyAfterRestartAsync(client, endpointId, accessToken, latestInventory.CollectedUtc);
@@ -465,7 +469,7 @@ static async Task VerifyDeviceReadApiAsync(
         var enrolled = devices.FirstOrDefault(device => device.EndpointId == endpointId);
         Ensure(list.StatusCode == HttpStatusCode.OK && list.Headers.CacheControl?.NoStore == true &&
                enrolled?.Name == inventory.Hostname &&
-               enrolled.OperatingSystem == $"{inventory.OsName} {inventory.OsVersion}" &&
+               enrolled.OperatingSystem == "Windows 11 26H2 10.0.26200.0" &&
                enrolled.AgentVersion == inventory.AgentVersion && enrolled.HealthState == "healthy" &&
                enrolled.LastSeenUtc == lastHeartbeatUtc &&
                enrolled.SecurityPostureSummary == "Firewall enabled on all profiles",
@@ -495,7 +499,7 @@ static async Task VerifyDeviceReadApiAsync(
         Ensure(detail.StatusCode == HttpStatusCode.OK && detail.Headers.CacheControl?.NoStore == true &&
                device?.Device.EndpointId == endpointId &&
                device.InventoryCollectedUtc == inventory.CollectedUtc &&
-               device.OsVersion == inventory.OsVersion &&
+               device.OsName == "Windows 11" && device.OsVersion == "26H2 10.0.26200.0" &&
                device.Architecture == inventory.Architecture &&
                device.Cpu?.LogicalProcessorCount == inventory.Cpu.LogicalProcessorCount &&
                device.InstalledRamBytes == inventory.InstalledRamBytes &&
@@ -676,7 +680,10 @@ static async Task<InventoryReport> VerifyInventoryAsync(
     var newer = report with
     {
         CollectedUtc = report.CollectedUtc.AddTicks(1),
-        Hostname = "updated-endpoint"
+        Hostname = "updated-endpoint",
+        OsVersion = "10.0.26200.0",
+        OsDisplayVersion = "26H2",
+        OsInstallationType = "Client"
     };
     using (var updated = await SendInventoryAsync(client, newer, endpointId, credential))
     {
