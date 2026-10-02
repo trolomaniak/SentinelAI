@@ -15,13 +15,14 @@ using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Core.Persistence;
+using SentinelAI.Licensing;
 using SentinelAI.Rules;
 
 namespace SentinelAI.Core;
 
 public static class CoreHost
 {
-    public static WebApplication Build(string[] args)
+    public static WebApplication Build(string[] args, Action<WebApplicationBuilder>? configureBuilder = null)
     {
         var builder = WebApplication.CreateBuilder(args);
 
@@ -51,6 +52,8 @@ public static class CoreHost
         builder.Services.AddSingleton(riskOptions);
         builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
         builder.Services.AddSingleton<RiskReadStore>();
+        builder.Services.AddSingleton(LicenseVerificationOptions.Load(builder.Configuration));
+        builder.Services.AddSingleton<LicenseVerificationService>();
         builder.Services.AddHostedService<AdminInitializationService>();
 
         builder.Services.AddDataProtection()
@@ -72,6 +75,15 @@ public static class CoreHost
                 policy.Window = TimeSpan.FromMinutes(1);
                 policy.QueueLimit = 0;
             });
+            options.AddPolicy("license-verification", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
             options.AddPolicy("heartbeat", context => RateLimitPartition.GetFixedWindowLimiter(
                 context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions
@@ -101,6 +113,7 @@ public static class CoreHost
                 }));
         });
 
+        configureBuilder?.Invoke(builder);
         var app = builder.Build();
         var fallbackAdmin = new AdminRecord(string.Empty, string.Empty);
         var fallbackHash = app.Services.GetRequiredService<IPasswordHasher<AdminRecord>>()
@@ -474,6 +487,44 @@ public static class CoreHost
             })
             .RequireAuthorization()
             .WithMetadata(new RequestSizeLimitAttribute(1024));
+
+        app.MapPost("/api/admin/license/verify", async (
+                HttpContext context,
+                LicenseVerificationService licensing,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (!licensing.Configured)
+                {
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
+
+                var request = await LicenseVerificationRequestReader.ReadAsync(
+                    context.Request, cancellationToken);
+                if (request.ErrorStatus is { } errorStatus)
+                {
+                    return Results.StatusCode(errorStatus);
+                }
+
+                var result = await licensing.VerifyAsync(request.Lease, cancellationToken);
+                var status = result.Status switch
+                {
+                    LeaseVerificationStatus.Valid => "valid",
+                    LeaseVerificationStatus.Expired => "expired",
+                    LeaseVerificationStatus.NotYetValid => "notYetValid",
+                    LeaseVerificationStatus.IdentityMismatch => "identityMismatch",
+                    _ => "invalid"
+                };
+                return Results.Ok(new { status, result.Claims, result.KeyId });
+            })
+            .RequireAuthorization()
+            .RequireRateLimiting("license-verification")
+            .WithMetadata(new RequestSizeLimitAttribute(LicenseVerificationRequestReader.MaximumRequestBytes));
 
         return app;
     }
