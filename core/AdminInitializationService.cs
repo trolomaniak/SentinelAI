@@ -6,7 +6,8 @@ internal sealed class AdminInitializationService(
     AdminStore admins,
     DeviceStore devices,
     EnrollmentStore enrollments,
-    InventoryStore inventories) : IHostedService
+    InventoryStore inventories,
+    AlertStore alerts) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -14,6 +15,8 @@ internal sealed class AdminInitializationService(
         await devices.InitializeAsync(cancellationToken);
         await enrollments.InitializeAsync(cancellationToken);
         await inventories.InitializeAsync(cancellationToken);
+        await alerts.InitializeAsync(cancellationToken);
+        await inventories.BackfillAlertsAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

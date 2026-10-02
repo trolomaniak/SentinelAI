@@ -38,7 +38,21 @@ The authenticated `GET /api/admin/devices/{endpointId}/alerts` API evaluates the
 
 Rules cover configured firewall profiles, UAC, RDP authentication/encryption, SMBv1 and guest access, automatic logon, LSA protection, and automatic update policy. The Agent reads bounded Windows registry settings without scanning files, running external programs, or reading stored credentials. Findings describe configuration risks rather than proving runtime protection, Internet exposure, or missing patches. BitLocker, live Defender/third-party AV health, administrator baselines, and update compliance require additional telemetry; they are not inferred from these settings. See [the rule catalog](rules/README.md) for conditions and severity.
 
-Core derives findings locally from persisted inventory on request. Repeated reads of the same snapshot are deterministic; a newer normal snapshot removes the current finding, and an older upload cannot replace it. Alert history, incident status/views, and risk scoring belong to later tasks. Detection does not use an LLM or perform remediation. This API requires administrator authentication and HTTPS outside loopback, and responses are not cached.
+Core derives current findings locally from persisted inventory on request. Repeated reads of the same snapshot are deterministic; a newer normal snapshot removes the current finding, and an older upload cannot replace it. Durable alert tracking is separate from this current-state API and is described below. Detection does not use an LLM or perform remediation. This API requires administrator authentication and HTTPS outside loopback, and responses are not cached.
+
+## Alerts and status tracking
+
+Open **Alerts** in the dashboard to view stored detections. Filter by severity or status, page through the list, and select an alert for its endpoint, reason, typed evidence, observation times, recommended action, and status history. Administrators can set **Open**, **Investigating**, **Resolved**, or **Accepted**. A status edit records the administrator and Core's time; it does not change endpoint configuration. Concurrent edits are rejected with a conflict so the administrator can review the latest state.
+
+Core stores one tracked alert per endpoint and rule, atomically with each accepted newer inventory. Repeated positive observations update the evidence and last-observed time without creating duplicate rows. Investigating and Accepted remain administrator decisions; a strictly newer positive observation reopens a Resolved alert. Normal or unknown observations do not automatically resolve stored alerts. Historical findings can therefore remain visible after they disappear from the current-state API. The first-observed time and status-change history are retained; evidence reflects the latest positive observation. Existing inventories are backfilled on startup without resetting statuses or duplicating history.
+
+Administrator APIs, all uncached and requiring HTTPS outside loopback:
+
+- `GET /api/admin/alerts?severity=high&status=open&offset=0&limit=50` returns `{ alerts, total, offset, limit }`. Filters are optional; valid limits are 1–200.
+- `GET /api/admin/alerts/{alertId}` returns the alert details, the latest 100 status changes, and `statusHistoryCount`. Full status history remains stored locally.
+- `PUT /api/admin/alerts/{alertId}/status` accepts `{ "status": "investigating", "expectedVersion": 1 }`, using the version from the latest detail response. A stale version returns `409`; an unknown alert returns `404`.
+
+Snapshot-based detections may be stale while an endpoint is offline. Read the observation timestamps before acting. Risk scoring, cross-rule correlation, AI analysis, and automated remediation are outside TASK-008.
 
 ## Windows Agent and enrollment
 

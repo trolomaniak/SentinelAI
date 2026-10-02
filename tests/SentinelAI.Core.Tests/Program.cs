@@ -37,6 +37,7 @@ try
     string agentCredential;
     CoreIdentity coreIdentity;
     InventoryReport latestInventory;
+    AlertApiTestState alertTestState;
     await using (var app = CoreHost.Build([]))
     {
         Ensure(app.Services.GetService<IServer>() is not null, "The Core host did not register a web server.");
@@ -107,6 +108,8 @@ try
                 "A fresh Core did not return an uncached empty device list.");
         }
 
+        await AlertApiTests.VerifyEmptyAsync(client, firstAccessToken);
+
         var store = app.Services.GetRequiredService<AdminStore>();
         Ensure(File.Exists(store.DatabasePath), "Core did not create the SQLite database on startup.");
         var admin = await store.FindByUsernameAsync(username)
@@ -167,6 +170,9 @@ try
             lastHeartbeatUtc, latestInventory, agentCredential, firstAccessToken);
         latestInventory = await RuleApiTests.VerifyAsync(
             client, app, endpointId, agentCredential, firstAccessToken, latestInventory);
+        alertTestState = await AlertApiTests.VerifyAsync(
+            client, app, endpointId, agentCredential, firstAccessToken, latestInventory, username, password);
+        latestInventory = alertTestState.LatestInventory;
     }
 
     // Existing installations must work without retaining the bootstrap secret in configuration.
@@ -231,6 +237,7 @@ try
                restoredDetail.Disks.Count == latestInventory.Disks.Count,
             "The dashboard device detail did not survive Core restart.");
         await RuleApiTests.VerifyAfterRestartAsync(client, endpointId, accessToken, latestInventory.CollectedUtc);
+        await AlertApiTests.VerifyAfterRestartAsync(client, accessToken, alertTestState);
     }
 
     await using (var remoteHttpApp = CoreHost.Build([]))
@@ -282,6 +289,7 @@ try
             Ensure(alerts.StatusCode == HttpStatusCode.Forbidden,
                 "Core exposed security findings over remote HTTP.");
         }
+        await AlertApiTests.VerifyRemoteHttpAsync(client, accessToken, alertTestState.AlertId);
     }
 
     Console.WriteLine("Core integration tests passed.");

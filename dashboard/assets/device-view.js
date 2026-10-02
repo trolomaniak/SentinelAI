@@ -15,6 +15,11 @@ export function healthPresentation(state) {
 
 export function routeFromHash(hash) {
   if (!hash || hash === "#" || hash === "#/devices") return { kind: "list" };
+  if (hash === "#/alerts") return { kind: "alerts" };
+  const alertMatch = /^#\/alerts\/(.+)$/i.exec(hash);
+  if (alertMatch) return endpointIdPattern.test(alertMatch[1])
+    ? { kind: "alert-detail", alertId: alertMatch[1].toLowerCase() }
+    : { kind: "invalid" };
   const match = /^#\/devices\/(.+)$/i.exec(hash);
   return match && endpointIdPattern.test(match[1])
     ? { kind: "detail", endpointId: match[1].toLowerCase() }

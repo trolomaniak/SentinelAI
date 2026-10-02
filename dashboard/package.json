@@ -2,7 +2,7 @@
   "name": "sentinelai-dashboard",
   "version": "0.1.0",
   "private": true,
-  "description": "SentinelAI local device dashboard",
+  "description": "SentinelAI local device and security alert dashboard",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
