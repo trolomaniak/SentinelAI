@@ -42,6 +42,21 @@ try
         Ensure(app.Services.GetService<IServer>() is not null, "The Core host did not register a web server.");
         using var client = await StartCoreAsync(app);
 
+        using (var dashboard = await client.GetAsync("/"))
+        {
+            Ensure(dashboard.StatusCode == HttpStatusCode.OK &&
+                   dashboard.Content.Headers.ContentType?.MediaType == "text/html" &&
+                   (await dashboard.Content.ReadAsStringAsync()).Contains("./assets/app.js", StringComparison.Ordinal) &&
+                   dashboard.Headers.Contains("Content-Security-Policy"),
+                "Core did not serve the dashboard from its own origin.");
+        }
+        using (var script = await client.GetAsync("/assets/app.js"))
+        {
+            Ensure(script.StatusCode == HttpStatusCode.OK &&
+                   (await script.Content.ReadAsStringAsync()).Contains("/api/admin/devices", StringComparison.Ordinal),
+                "Core did not serve the dashboard application script.");
+        }
+
         using (var health = await client.GetAsync("/api/health"))
         {
             Ensure(health.StatusCode == HttpStatusCode.OK, "The health endpoint did not return HTTP 200.");
@@ -52,6 +67,16 @@ try
         using (var anonymous = await client.GetAsync("/api/admin/me"))
         {
             Ensure(anonymous.StatusCode == HttpStatusCode.Unauthorized, "The administrator endpoint allowed an anonymous request.");
+        }
+        using (var anonymousDevices = await client.GetAsync("/api/admin/devices"))
+        {
+            Ensure(anonymousDevices.StatusCode == HttpStatusCode.Unauthorized,
+                "The device list allowed an anonymous request.");
+        }
+        using (var anonymousDetail = await client.GetAsync($"/api/admin/devices/{Guid.NewGuid():D}"))
+        {
+            Ensure(anonymousDetail.StatusCode == HttpStatusCode.Unauthorized,
+                "The device detail allowed an anonymous request.");
         }
 
         string wrongPasswordBody;
@@ -73,6 +98,13 @@ try
         using (var authorized = await GetAsBearerAsync(client, "/api/admin/me", firstAccessToken))
         {
             Ensure(authorized.StatusCode == HttpStatusCode.OK, "The administrator endpoint rejected a valid bearer token.");
+        }
+        using (var emptyDevices = await GetAsBearerAsync(client, "/api/admin/devices", firstAccessToken))
+        {
+            Ensure(emptyDevices.StatusCode == HttpStatusCode.OK &&
+                   emptyDevices.Headers.CacheControl?.NoStore == true &&
+                   (await emptyDevices.Content.ReadFromJsonAsync<DeviceListItem[]>()) is { Length: 0 },
+                "A fresh Core did not return an uncached empty device list.");
         }
 
         var store = app.Services.GetRequiredService<AdminStore>();
@@ -105,6 +137,11 @@ try
         Ensure(firstHeartbeat.LastSeenUtc.Offset == TimeSpan.Zero,
             "The heartbeat timestamp was not in UTC.");
         Ensure(await devices.CountAsync() == 1, "The first heartbeat did not create exactly one device.");
+        using (var unverifiedList = await GetAsBearerAsync(client, "/api/admin/devices", firstAccessToken))
+        {
+            Ensure((await unverifiedList.Content.ReadFromJsonAsync<DeviceListItem[]>()) is { Length: 0 },
+                "An unverified loopback heartbeat appeared as an enrolled dashboard endpoint.");
+        }
         var firstDevice = await devices.FindByInstallationIdAsync(installationId)
             ?? throw new Exception("Core did not persist the first heartbeat.");
         Ensure(firstDevice.LastSeenUtc == firstHeartbeat.LastSeenUtc,
@@ -125,6 +162,9 @@ try
         (endpointId, agentCredential, coreIdentity, lastHeartbeatUtc) = await VerifyEnrollmentAsync(
             client, app, installationId, firstAccessToken, secondHeartbeat.LastSeenUtc, dataDirectory);
         latestInventory = await VerifyInventoryAsync(client, app, endpointId, agentCredential);
+        await VerifyDeviceReadApiAsync(
+            client, store.DatabasePath, installationId, endpointId,
+            lastHeartbeatUtc, latestInventory, agentCredential, firstAccessToken);
     }
 
     // Existing installations must work without retaining the bootstrap secret in configuration.
@@ -175,6 +215,19 @@ try
         var accessToken = await GetAccessTokenAsync(client, username, password);
         using var authorized = await GetAsBearerAsync(client, "/api/admin/me", accessToken);
         Ensure(authorized.StatusCode == HttpStatusCode.OK, "The persisted administrator could not log in after restart.");
+        using var persistedList = await GetAsBearerAsync(client, "/api/admin/devices", accessToken);
+        var persistedDevices = await persistedList.Content.ReadFromJsonAsync<DeviceListItem[]>() ?? [];
+        Ensure(persistedList.StatusCode == HttpStatusCode.OK &&
+               persistedDevices.Any(device => device.EndpointId == endpointId &&
+                   device.Name == latestInventory.Hostname && device.HealthState == "healthy"),
+            "The dashboard device list did not survive Core restart.");
+        using var persistedDetail = await GetAsBearerAsync(
+            client, $"/api/admin/devices/{endpointId:D}", accessToken);
+        var restoredDetail = await persistedDetail.Content.ReadFromJsonAsync<DeviceDetail>();
+        Ensure(persistedDetail.StatusCode == HttpStatusCode.OK &&
+               restoredDetail?.InventoryCollectedUtc == latestInventory.CollectedUtc &&
+               restoredDetail.Disks.Count == latestInventory.Disks.Count,
+            "The dashboard device detail did not survive Core restart.");
     }
 
     await using (var remoteHttpApp = CoreHost.Build([]))
@@ -208,6 +261,17 @@ try
         {
             Ensure(inventory.StatusCode == HttpStatusCode.Forbidden,
                 "Core accepted inventory and an Agent credential over remote HTTP.");
+        }
+        using (var deviceList = await GetAsBearerAsync(client, "/api/admin/devices", accessToken))
+        {
+            Ensure(deviceList.StatusCode == HttpStatusCode.Forbidden,
+                "Core exposed the administrator device list over remote HTTP.");
+        }
+        using (var deviceDetail = await GetAsBearerAsync(
+                   client, $"/api/admin/devices/{endpointId:D}", accessToken))
+        {
+            Ensure(deviceDetail.StatusCode == HttpStatusCode.Forbidden,
+                "Core exposed administrator device details over remote HTTP.");
         }
     }
 
@@ -355,6 +419,123 @@ static async Task<(Guid EndpointId, string Credential, CoreIdentity CoreIdentity
         "Concurrent attempts reused a one-time enrollment token.");
 
     return (enrollment.EndpointId, enrollment.AgentCredential, coreIdentity, updatedDevice!.LastSeenUtc);
+}
+
+static async Task VerifyDeviceReadApiAsync(
+    HttpClient client,
+    string databasePath,
+    Guid installationId,
+    Guid endpointId,
+    DateTimeOffset lastHeartbeatUtc,
+    InventoryReport inventory,
+    string agentCredential,
+    string adminAccessToken)
+{
+    using (var agentRequest = new HttpRequestMessage(HttpMethod.Get, "/api/admin/devices"))
+    {
+        agentRequest.Headers.Authorization = new AuthenticationHeaderValue(
+            "SentinelAgent", $"{endpointId:D}.{agentCredential}");
+        using var agentRead = await client.SendAsync(agentRequest);
+        Ensure(agentRead.StatusCode == HttpStatusCode.Unauthorized,
+            "An Agent credential could read the administrator device list.");
+    }
+
+    using (var list = await GetAsBearerAsync(client, "/api/admin/devices", adminAccessToken))
+    {
+        var devices = await list.Content.ReadFromJsonAsync<DeviceListItem[]>() ?? [];
+        var enrolled = devices.FirstOrDefault(device => device.EndpointId == endpointId);
+        Ensure(list.StatusCode == HttpStatusCode.OK && list.Headers.CacheControl?.NoStore == true &&
+               enrolled?.Name == inventory.Hostname &&
+               enrolled.OperatingSystem == $"{inventory.OsName} {inventory.OsVersion}" &&
+               enrolled.AgentVersion == inventory.AgentVersion && enrolled.HealthState == "healthy" &&
+               enrolled.LastSeenUtc == lastHeartbeatUtc &&
+               enrolled.SecurityPostureSummary == "Firewall enabled on all profiles",
+            "The administrator device list did not expose current, display-ready endpoint data.");
+
+        var awaitingHeartbeat = devices.FirstOrDefault(device => device.HealthState == "unknown")
+            ?? throw new Exception("An enrolled endpoint without a heartbeat was omitted from the device list.");
+        Ensure(awaitingHeartbeat.LastSeenUtc is null &&
+               awaitingHeartbeat.OperatingSystem is null && awaitingHeartbeat.AgentVersion is null &&
+               awaitingHeartbeat.SecurityPostureSummary == "Firewall status unknown",
+            "An enrolled endpoint without a heartbeat or inventory was not shown as unknown.");
+        using var unknownDetail = await GetAsBearerAsync(
+            client, $"/api/admin/devices/{awaitingHeartbeat.EndpointId:D}", adminAccessToken);
+        var unknown = await unknownDetail.Content.ReadFromJsonAsync<DeviceDetail>();
+        Ensure(unknownDetail.StatusCode == HttpStatusCode.OK &&
+               unknown?.Device.HealthState == "unknown" &&
+               unknown.InventoryCollectedUtc is null && unknown.Cpu is null &&
+               unknown.Disks.Count == 0 && unknown.SecurityPosture is null,
+            "An enrolled endpoint without inventory did not have a usable detail view.");
+    }
+
+    using (var detail = await GetAsBearerAsync(
+               client, $"/api/admin/devices/{endpointId:D}", adminAccessToken))
+    {
+        var content = await detail.Content.ReadAsStringAsync();
+        var device = JsonSerializer.Deserialize<DeviceDetail>(content, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Ensure(detail.StatusCode == HttpStatusCode.OK && detail.Headers.CacheControl?.NoStore == true &&
+               device?.Device.EndpointId == endpointId &&
+               device.InventoryCollectedUtc == inventory.CollectedUtc &&
+               device.OsVersion == inventory.OsVersion &&
+               device.Architecture == inventory.Architecture &&
+               device.Cpu?.LogicalProcessorCount == inventory.Cpu.LogicalProcessorCount &&
+               device.InstalledRamBytes == inventory.InstalledRamBytes &&
+               device.Disks.Count == inventory.Disks.Count &&
+               device.SecurityPosture?.DomainFirewallEnabled == true &&
+               !content.Contains(agentCredential, StringComparison.Ordinal) &&
+               !content.Contains("credentialHash", StringComparison.OrdinalIgnoreCase),
+            "The endpoint detail omitted inventory fields or exposed an Agent credential.");
+    }
+
+    using (var missing = await GetAsBearerAsync(
+               client, $"/api/admin/devices/{Guid.NewGuid():D}", adminAccessToken))
+    {
+        Ensure(missing.StatusCode == HttpStatusCode.NotFound &&
+               missing.Headers.CacheControl?.NoStore == true,
+            "A nonexistent endpoint detail did not return uncached HTTP 404.");
+    }
+
+    try
+    {
+        await SetLastSeenUtcAsync(databasePath, installationId, DateTimeOffset.UtcNow.AddMinutes(-3));
+        await AssertDeviceHealthAsync(client, endpointId, adminAccessToken, "warning");
+        await SetLastSeenUtcAsync(databasePath, installationId, DateTimeOffset.UtcNow.AddMinutes(-6));
+        await AssertDeviceHealthAsync(client, endpointId, adminAccessToken, "offline");
+    }
+    finally
+    {
+        await SetLastSeenUtcAsync(databasePath, installationId, lastHeartbeatUtc);
+    }
+}
+
+static async Task AssertDeviceHealthAsync(
+    HttpClient client, Guid endpointId, string adminAccessToken, string expected)
+{
+    using var list = await GetAsBearerAsync(client, "/api/admin/devices", adminAccessToken);
+    var devices = await list.Content.ReadFromJsonAsync<DeviceListItem[]>() ?? [];
+    Ensure(list.StatusCode == HttpStatusCode.OK &&
+           devices.FirstOrDefault(device => device.EndpointId == endpointId)?.HealthState == expected,
+        $"The device list did not classify a stale heartbeat as {expected}.");
+    using var detail = await GetAsBearerAsync(
+        client, $"/api/admin/devices/{endpointId:D}", adminAccessToken);
+    var deviceDetail = await detail.Content.ReadFromJsonAsync<DeviceDetail>();
+    Ensure(detail.StatusCode == HttpStatusCode.OK && deviceDetail?.Device.HealthState == expected,
+        $"The device detail did not classify a stale heartbeat as {expected}.");
+}
+
+static async Task SetLastSeenUtcAsync(string databasePath, Guid installationId, DateTimeOffset lastSeenUtc)
+{
+    await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+    {
+        DataSource = databasePath,
+        Mode = SqliteOpenMode.ReadWrite
+    }.ToString());
+    await connection.OpenAsync();
+    await using var update = connection.CreateCommand();
+    update.CommandText = "UPDATE Devices SET LastSeenUtcTicks = $ticks WHERE InstallationId = $installationId;";
+    update.Parameters.AddWithValue("$ticks", lastSeenUtc.UtcDateTime.Ticks);
+    update.Parameters.AddWithValue("$installationId", installationId.ToString("D"));
+    Ensure(await update.ExecuteNonQueryAsync() == 1, "The heartbeat fixture could not be updated.");
 }
 
 static async Task<InventoryReport> VerifyInventoryAsync(
@@ -576,6 +757,7 @@ static async Task<string> GetAccessTokenAsync(HttpClient client, string username
 {
     using var login = await LoginAsync(client, username, password);
     Ensure(login.StatusCode == HttpStatusCode.OK, "The administrator could not log in.");
+    Ensure(login.Headers.CacheControl?.NoStore == true, "The administrator token response permits caching.");
     using var body = JsonDocument.Parse(await login.Content.ReadAsStringAsync());
     Ensure(body.RootElement.TryGetProperty("accessToken", out var token), "Login did not return an access token.");
     var accessToken = token.GetString();

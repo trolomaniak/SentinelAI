@@ -4,24 +4,60 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#101a2b" />
-    <title>SentinelAI Dashboard</title>
+    <title>Devices · SentinelAI</title>
     <link rel="stylesheet" href="./assets/styles.css" />
+    <script type="module" src="./assets/app.js"></script>
   </head>
   <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
-      <span class="brand-mark" aria-hidden="true">S</span>
-      <span class="brand-name">SentinelAI</span>
+      <div class="site-header-inner">
+        <a class="brand" href="#/devices" aria-label="SentinelAI devices">
+          <span class="brand-mark" aria-hidden="true">S</span>
+          <span class="brand-name">SentinelAI</span>
+        </a>
+        <div class="header-actions">
+          <span class="workspace-label">Local workspace</span>
+          <button id="sign-out" class="button button-subtle" type="button" hidden>Sign out</button>
+        </div>
+      </div>
     </header>
 
-    <main class="main-content">
-      <p class="eyebrow">Local security workspace</p>
-      <h1>Dashboard</h1>
-      <section class="welcome-panel" aria-labelledby="welcome-heading">
-        <h2 id="welcome-heading">Workspace ready</h2>
-        <p>
-          The dashboard foundation is in place. Device status and security
-          activity will appear here as the agent and core are developed.
-        </p>
+    <main id="main" class="main-content">
+      <section id="login-view" class="login-layout" aria-labelledby="login-heading">
+        <div>
+          <p class="eyebrow">Local device visibility</p>
+          <h1 id="login-heading">Sign in to view devices</h1>
+          <p class="lead">Use your SentinelAI Core administrator account to see enrolled endpoints and their latest reported state.</p>
+        </div>
+        <form id="login-form" class="panel login-panel">
+          <label for="username">Username</label>
+          <input id="username" name="username" autocomplete="username" required />
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+          <p id="login-message" class="form-message" role="alert" hidden></p>
+          <button id="login-submit" class="button button-primary" type="submit">Sign in</button>
+          <p class="helper-text">Your session stays in this tab and ends when the page closes or refreshes.</p>
+        </form>
+      </section>
+
+      <section id="devices-view" aria-labelledby="devices-heading" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">Endpoint monitoring</p>
+            <h1 id="devices-heading">Devices</h1>
+            <p class="lead">Enrolled endpoints and their most recent Core heartbeat.</p>
+          </div>
+          <button id="refresh-devices" class="button button-secondary" type="button">Refresh</button>
+        </div>
+        <p id="devices-status" class="status-line" role="status" aria-live="polite"></p>
+        <div id="devices-content"></div>
+      </section>
+
+      <section id="detail-view" aria-labelledby="detail-heading" hidden>
+        <a class="back-link" href="#/devices">← All devices</a>
+        <p id="detail-status" class="status-line" role="status" aria-live="polite"></p>
+        <div id="detail-content"></div>
       </section>
     </main>
   </body>
