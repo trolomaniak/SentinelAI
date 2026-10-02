@@ -13,6 +13,7 @@ dotnet run --project "$repo_root/tests/SentinelAI.Scoring.Tests/SentinelAI.Scori
 dotnet run --project "$repo_root/tests/SentinelAI.Licensing.Tests/SentinelAI.Licensing.Tests.csproj" --configuration Release --no-build --no-restore
 dotnet run --project "$repo_root/tests/SentinelAI.LicenseApi.Tests/SentinelAI.LicenseApi.Tests.csproj" --configuration Release --no-build --no-restore
 dotnet run --project "$repo_root/tests/SentinelAI.Ai.Tests/SentinelAI.Ai.Tests.csproj" --configuration Release --no-build --no-restore
+dotnet run --project "$repo_root/tests/SentinelAI.Updates.Tests/SentinelAI.Updates.Tests.csproj" --configuration Release --no-build --no-restore
 
 cd "$repo_root/dashboard"
 npm test

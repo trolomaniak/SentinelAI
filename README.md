@@ -91,6 +91,12 @@ Open **Reports** in the dashboard, choose an inclusive UTC date range, and gener
 
 `GET /api/admin/reports/security?from=2026-09-01&to=2026-09-30` returns an authenticated, uncached HTML attachment. Dates must be exactly `yyyy-MM-dd`, ordered and at most 366 inclusive days. The current risk/health snapshot is explicitly separate from period activity: Core does not store historical scores or complete inventory/heartbeat history, so historical trend is unavailable. See [report semantics and limits](docs/REPORTING.md).
 
+## Signed update foundation
+
+TASK-014 adds bounded signed update manifests, public P-256 signature verification, SHA-256/size verification of a private staged ZIP and explicit Stable/Pilot/Beta channels. The local `updater` tool verifies or stages a package under an operator-selected environment/artifact/channel/version policy. A separate development-only tool generates keys outside the checkout and creates signed test manifests; production signing material is never provisioned to Core, Agent or the verification client.
+
+The transactional library verifies/extracts before stopping a service, retains the previous code, requires an explicit service lifecycle/health adapter and restores the previous installation on failure. Pending transactions can be recovered after interruption; a failed rollback preserves its journal and backup. This foundation does not add automatic updates or service installation. See [manifest trust, development commands and rollback operation](docs/UPDATES.md).
+
 ## Windows Agent and enrollment
 
 Run `./scripts/publish-agent-windows.sh` to produce `artifacts/agent/win-x64/SentinelAI.Agent.exe`. This is a self-contained, single-file Windows x64 build: the target does not need a separate .NET installation. The bundled native runtime is extracted when the EXE starts. CI verifies the EXE on Windows and uploads it as the `SentinelAI.Agent-win-x64` build artifact.
