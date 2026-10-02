@@ -154,12 +154,23 @@ h3 { margin: 0 0 .75rem; font-size: 1.05rem; }
 .history-list li { margin-top: .8rem; }
 .history-meta { display: inline-block; margin: 0 .75rem; color: var(--muted); overflow-wrap: anywhere; }
 .history-list time { color: var(--muted); }
+.risk-layout { display: grid; gap: 1rem; }
+.risk-layout .detail-grid { margin-top: 0; }
+.risk-layout .fact-grid + .fact-grid { margin-top: 1.2rem; }
+.risk-layout .helper-text, .risk-explanation { margin-top: 1rem; }
+.risk-number { white-space: nowrap; font-size: 1.05rem; }
+.risk-reason { min-width: 18rem; max-width: 32rem; overflow-wrap: anywhere; }
+.risk-link { display: inline-block; font-weight: 700; overflow-wrap: anywhere; }
+.risk-link + .fact-grid { margin-top: 1rem; }
+.risk-factors-heading { margin-bottom: 0; }
+.risk-formula { margin: 1rem 0 0; padding: .8rem; border-radius: .45rem; background: #0d1a2b; overflow-wrap: anywhere; }
 
 @media (max-width: 760px) {
   .login-layout, .detail-grid { grid-template-columns: 1fr; }
   .workspace-label { display: none; }
   .device-table { min-width: 52rem; }
   .alert-table { min-width: 60rem; }
+  .risk-table { min-width: 68rem; }
 }
 
 @media (max-width: 520px) {

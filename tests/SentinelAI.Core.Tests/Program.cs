@@ -175,6 +175,8 @@ try
         latestInventory = alertTestState.LatestInventory;
     }
 
+    await RiskApiTests.VerifyAsync(username, password);
+
     // Existing installations must work without retaining the bootstrap secret in configuration.
     Environment.SetEnvironmentVariable("SENTINELAI_BOOTSTRAP_USERNAME", null);
     Environment.SetEnvironmentVariable("SENTINELAI_BOOTSTRAP_PASSWORD", null);

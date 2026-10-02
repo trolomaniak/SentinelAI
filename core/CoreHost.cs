@@ -47,6 +47,10 @@ public static class CoreHost
         builder.Services.AddSingleton<InventoryStore>();
         builder.Services.AddSingleton<AlertStore>();
         builder.Services.AddSingleton(RuleEngine.CreateDefault());
+        var riskOptions = RiskScoringOptions.Load(builder.Configuration);
+        builder.Services.AddSingleton(riskOptions);
+        builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+        builder.Services.AddSingleton<RiskReadStore>();
         builder.Services.AddHostedService<AdminInitializationService>();
 
         builder.Services.AddDataProtection()
@@ -345,6 +349,43 @@ public static class CoreHost
             })
             .RequireAuthorization();
 
+        app.MapGet("/api/admin/risk", async (
+                HttpContext context,
+                RiskReadStore risk,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (!TryReadRiskQuery(context.Request.Query, out var offset, out var limit))
+                {
+                    return Results.BadRequest();
+                }
+
+                return Results.Ok(await risk.ListAsync(offset, limit, cancellationToken));
+            })
+            .RequireAuthorization();
+
+        app.MapGet("/api/admin/devices/{endpointId:guid}/risk", async (
+                Guid endpointId,
+                HttpContext context,
+                RiskReadStore risk,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                var result = await risk.FindAsync(endpointId, cancellationToken);
+                return result is null ? Results.NotFound() : Results.Ok(result);
+            })
+            .RequireAuthorization();
+
         app.MapPost("/api/admin/enrollment-tokens", async (
                 HttpContext context,
                 EnrollmentStore enrollments,
@@ -438,6 +479,27 @@ public static class CoreHost
     }
 
     private sealed record LoginRequest(string? Username, string? Password);
+
+    private static bool TryReadRiskQuery(IQueryCollection query, out int offset, out int limit)
+    {
+        offset = 0;
+        limit = 50;
+        if (query.TryGetValue("offset", out var offsetValues) &&
+            (offsetValues.Count != 1 ||
+             !int.TryParse(offsetValues[0], NumberStyles.None, CultureInfo.InvariantCulture, out offset)))
+        {
+            return false;
+        }
+
+        if (query.TryGetValue("limit", out var limitValues) &&
+            (limitValues.Count != 1 ||
+             !int.TryParse(limitValues[0], NumberStyles.None, CultureInfo.InvariantCulture, out limit)))
+        {
+            return false;
+        }
+
+        return offset >= 0 && limit is >= 1 and <= 200;
+    }
 
     private static bool TryReadAlertQuery(
         IQueryCollection query,
