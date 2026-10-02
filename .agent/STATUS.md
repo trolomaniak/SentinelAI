@@ -50,4 +50,4 @@ TASK-011 — Grace and Safe Mode. Do not start it as part of TASK-010.
 
 ## Last verified commit
 
-`15c1aa75e8abbb9ed083fdce17d4ad38cb104865` — merged TASK-009 base verified through PR #10 CI. The TASK-010 working tree passed the checks above before its implementation commit.
+`a2728f9d16b080136113ae9d438df0adf2afd856` — TASK-010 implementation verified by the local build, full regression suite, Core/License API publication, and final diff review listed above. Hosted CI and pull request review follow on this branch.
