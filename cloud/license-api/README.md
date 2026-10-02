@@ -1,6 +1,6 @@
 # Development License API
 
-This separate .NET 10 server issues locally verifiable seven-day signed leases. Core and Agent do not reference the issuer, load its private key, or receive activation credentials. The server uses a static, startup-validated entitlement list for development and tests; billing, public production deployment, periodic renewal, storage of leases, and Safe Mode enforcement are outside TASK-010.
+This separate .NET 10 server issues locally verifiable seven-day signed leases. Core and Agent do not reference the issuer implementation or load its private key. Core's opt-in TASK-011 renewal client uses an operator-provisioned activation credential; Agent and dashboard never receive it. The server uses a static, startup-validated entitlement list for development and tests; billing and public production deployment remain separate work. Core's renewal, lease storage, and Safe Mode behavior are documented in [licensing operation](../../docs/LICENSING.md).
 
 ## Generate development material
 
@@ -19,7 +19,7 @@ The default output is the ignored `artifacts/license-development-keys` directory
 | `activation-credential.txt` | Random 256-bit activation credential, encoded as 43 base64url characters without padding |
 | `activation-credential.sha256` | Hex SHA-256 of the exact credential UTF-8 bytes; configure this digest on the server |
 
-Successful generation prints file paths only. On Unix the output directory is created with mode `0700` and files with mode `0600`. On Windows use a directory whose existing ACL restricts access to the development account. Keep the private key and activation credential out of source control, Core configuration, logs, process arguments, and shared artifacts. Automated tests generate temporary development keys; they never use production keys.
+Successful generation prints file paths only. On Unix the output directory is created with mode `0700` and files with mode `0600`. On Windows use a directory whose existing ACL restricts access to the development account. Keep the private key and activation credential out of source control, configuration values, logs, process arguments, and shared artifacts. Core may be configured with the path to its protected activation credential file; the private signing key stays on the issuer. Automated tests generate temporary development keys; they never use production keys.
 
 The executable also supports `--generate-development-keys <new-output-directory>` without starting a server or requiring entitlement configuration.
 

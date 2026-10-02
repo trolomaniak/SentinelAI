@@ -44,3 +44,6 @@ public sealed record AlertStatusChange(
 public sealed record AlertPage(IReadOnlyList<AlertListItem> Alerts, long Total, int Offset, int Limit);
 
 public sealed record UpdateAlertStatusRequest(string? Status, long ExpectedVersion);
+
+public sealed record IncidentExport(string Format, DateTimeOffset GeneratedAtUtc,
+    IReadOnlyList<AlertDetail> Incidents, long Total, int Offset, int Limit);
