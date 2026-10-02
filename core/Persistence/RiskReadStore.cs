@@ -53,16 +53,22 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         return snapshot.Count == 0 ? null : Score(snapshot[0], timeProvider.GetUtcNow());
     }
 
-    private EndpointRiskDetail Score(SnapshotEndpoint endpoint, DateTimeOffset now) => new(
-        endpoint.EndpointId,
-        endpoint.EndpointName,
-        endpoint.InventoryCollectedUtc,
-        options.Scorer.ScoreEndpoint(endpoint.EndpointId,
-            endpoint.Alerts.Select(alert => new ScoringAlert(alert.AlertId, alert.RuleId, alert.Severity,
+    private EndpointRiskDetail Score(SnapshotEndpoint endpoint, DateTimeOffset now) =>
+        ScoreSnapshot(endpoint.EndpointId, endpoint.EndpointName, endpoint.InventoryCollectedUtc,
+            endpoint.Inventory, endpoint.Alerts, now);
+
+    internal EndpointRiskDetail ScoreSnapshot(Guid endpointId, string endpointName,
+        DateTimeOffset? inventoryCollectedUtc, InventoryReport? inventory,
+        IReadOnlyList<RiskAlertView> alerts, DateTimeOffset now) => new(
+        endpointId,
+        endpointName,
+        inventoryCollectedUtc,
+        options.Scorer.ScoreEndpoint(endpointId,
+            alerts.Select(alert => new ScoringAlert(alert.AlertId, alert.RuleId, alert.Severity,
                 alert.Status, alert.LastObservedUtc)),
-            options.ContextFor(endpoint.EndpointId, endpoint.InventoryCollectedUtc), now),
-        AssessCoverage(endpoint.Inventory, now),
-        endpoint.Alerts,
+            options.ContextFor(endpointId, inventoryCollectedUtc), now),
+        AssessCoverage(inventory, now),
+        alerts,
         options.Scorer.Policy,
         options.InventoryFreshForHours);
 

@@ -17,6 +17,7 @@ export function routeFromHash(hash) {
   if (!hash || hash === "#" || hash === "#/devices") return { kind: "list" };
   if (hash === "#/alerts") return { kind: "alerts" };
   if (hash === "#/risk") return { kind: "risk" };
+  if (hash === "#/reports") return { kind: "reports" };
   const riskMatch = /^#\/risk\/(.+)$/i.exec(hash);
   if (riskMatch) return endpointIdPattern.test(riskMatch[1])
     ? { kind: "risk-detail", endpointId: riskMatch[1].toLowerCase() }

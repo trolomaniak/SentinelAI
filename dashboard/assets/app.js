@@ -14,6 +14,7 @@ import {
   severityPresentation,
 } from "./alert-view.js";
 import { renderEndpointRisk, renderRiskOverview, riskListPath, riskLink } from "./risk-view.js";
+import { previousUtcMonth, reportPath, reportRangeError } from "./report-view.js";
 
 const loginView = document.querySelector("#login-view");
 const devicesView = document.querySelector("#devices-view");
@@ -45,6 +46,13 @@ const riskDetailContent = document.querySelector("#risk-detail-content");
 const riskPagination = document.querySelector("#risk-pagination");
 const riskPrevious = document.querySelector("#risk-previous");
 const riskNext = document.querySelector("#risk-next");
+const reportsView = document.querySelector("#reports-view");
+const reportForm = document.querySelector("#report-form");
+const reportFrom = document.querySelector("#report-from");
+const reportTo = document.querySelector("#report-to");
+const generateReportButton = document.querySelector("#generate-report");
+const reportStatus = document.querySelector("#report-status");
+const reportContent = document.querySelector("#report-content");
 const trustedOrigin = isTrustedDashboardOrigin(window.location);
 
 let accessToken = null;
@@ -53,6 +61,9 @@ let alertOffset = 0;
 const alertPageSize = 50;
 let riskOffset = 0;
 const riskPageSize = 50;
+let reportObjectUrl = null;
+let reportRequestVersion = 0;
+let reportBusy = false;
 
 class ApiError extends Error {
   constructor(status) {
@@ -71,6 +82,7 @@ function node(tag, className, text) {
 }
 
 function setView(name) {
+  if (name !== "reports") resetReport();
   loginView.hidden = name !== "login";
   devicesView.hidden = name !== "devices";
   detailView.hidden = name !== "detail";
@@ -78,12 +90,14 @@ function setView(name) {
   alertDetailView.hidden = name !== "alert-detail";
   riskView.hidden = name !== "risk";
   riskDetailView.hidden = name !== "risk-detail";
+  reportsView.hidden = name !== "reports";
   signOutButton.hidden = !accessToken;
   document.querySelector("#workspace-nav").hidden = !accessToken;
   document.querySelector("#devices-nav").setAttribute("aria-current", ["devices", "detail"].includes(name) ? "page" : "false");
   document.querySelector("#alerts-nav").setAttribute("aria-current", ["alerts", "alert-detail"].includes(name) ? "page" : "false");
   document.querySelector("#risk-nav").setAttribute("aria-current", ["risk", "risk-detail"].includes(name) ? "page" : "false");
-  document.title = `${["risk", "risk-detail"].includes(name) ? "Risk" : ["alerts", "alert-detail"].includes(name) ? "Alerts" : name === "login" ? "Sign in" : "Devices"} · SentinelAI`;
+  document.querySelector("#reports-nav").setAttribute("aria-current", name === "reports" ? "page" : "false");
+  document.title = `${name === "reports" ? "Reports" : ["risk", "risk-detail"].includes(name) ? "Risk" : ["alerts", "alert-detail"].includes(name) ? "Alerts" : name === "login" ? "Sign in" : "Devices"} · SentinelAI`;
 }
 
 function showLogin(message = trustedOrigin ? "" : "Open Core with HTTPS to sign in from another computer.") {
@@ -104,7 +118,7 @@ function expireSession() {
   showLogin("Your session ended. Sign in again to continue.");
 }
 
-async function requestCore(path, method = "GET", body) {
+async function requestCore(path, method = "GET", body, responseType = "json") {
   const requestedToken = accessToken;
   const response = await fetch(path, {
     method,
@@ -112,12 +126,19 @@ async function requestCore(path, method = "GET", body) {
     ...(body ? { body: JSON.stringify(body) } : {}),
     cache: "no-store",
     credentials: "omit",
+    ...(responseType === "html" ? { redirect: "error" } : {}),
   });
   if (response.status === 401) {
     if (requestedToken === accessToken) expireSession();
     throw new SessionExpired();
   }
   if (!response.ok) throw new ApiError(response.status);
+  if (responseType === "html") {
+    if (response.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() !== "text/html") {
+      throw new Error("Invalid report response");
+    }
+    return response.blob();
+  }
   return response.json();
 }
 
@@ -685,6 +706,87 @@ async function loadRiskDetail(endpointId) {
   }
 }
 
+function clearReportDownload() {
+  if (reportObjectUrl) URL.revokeObjectURL(reportObjectUrl);
+  reportObjectUrl = null;
+  reportContent.replaceChildren();
+}
+
+function setReportBusy(busy) {
+  reportBusy = busy;
+  generateReportButton.disabled = busy;
+  reportFrom.disabled = busy;
+  reportTo.disabled = busy;
+  reportForm.setAttribute("aria-busy", String(busy));
+}
+
+function resetReport() {
+  reportRequestVersion += 1;
+  setReportBusy(false);
+  clearReportDownload();
+  reportStatus.textContent = "";
+}
+
+function loadReports() {
+  navigationVersion += 1;
+  resetReport();
+  if (!reportFrom.value && !reportTo.value) {
+    const period = previousUtcMonth();
+    reportFrom.value = period.from;
+    reportTo.value = period.to;
+  }
+  setView("reports");
+}
+
+async function generateReport(event) {
+  event.preventDefault();
+  if (!trustedOrigin || !accessToken || reportsView.hidden || reportBusy) return;
+  const from = reportFrom.value;
+  const to = reportTo.value;
+  clearReportDownload();
+  const validationError = reportRangeError(from, to);
+  if (validationError) {
+    reportStatus.textContent = validationError;
+    return;
+  }
+  const version = navigationVersion;
+  const requestVersion = ++reportRequestVersion;
+  const token = accessToken;
+  const current = () => version === navigationVersion && requestVersion === reportRequestVersion &&
+    token === accessToken && !!accessToken && !reportsView.hidden && window.location.hash === "#/reports";
+  setReportBusy(true);
+  reportStatus.textContent = "Generating the local HTML report…";
+  try {
+    const blob = await requestCore(reportPath(from, to), "GET", undefined, "html");
+    if (!current()) return;
+    const objectUrl = URL.createObjectURL(blob);
+    if (!current()) {
+      URL.revokeObjectURL(objectUrl);
+      return;
+    }
+    reportObjectUrl = objectUrl;
+    const panel = node("div", "panel state-panel");
+    const download = node("a", "button button-primary", "Download HTML report");
+    download.id = "download-report";
+    download.href = objectUrl;
+    download.download = `SentinelAI-security-report-${from}-${to}.html`;
+    download.rel = "noopener";
+    panel.append(node("h2", null, "Report ready"),
+      node("p", null, `${from} through ${to}, inclusive UTC. Save the HTML file to read it offline.`), download);
+    reportContent.append(panel);
+    reportStatus.textContent = "Report generated locally. Choose Download HTML report to save it.";
+  } catch (error) {
+    if (error instanceof SessionExpired || !current()) return;
+    reportStatus.textContent = error instanceof ApiError && error.status === 400
+      ? "Core rejected this date range. Check both UTC dates and try again."
+      : error instanceof ApiError && error.status === 422
+        ? "The report exceeds local generation limits. Core cannot return a complete report for this dataset."
+        : "Could not generate the report. Check the Core connection and try again.";
+  } finally {
+    if (current()) setReportBusy(false);
+  }
+}
+
 function loadRoute() {
   if (!accessToken) {
     showLogin();
@@ -703,6 +805,8 @@ function loadRoute() {
     loadRisk();
   } else if (route.kind === "risk-detail") {
     loadRiskDetail(route.endpointId);
+  } else if (route.kind === "reports") {
+    loadReports();
   } else {
     navigationVersion += 1;
     setView("detail");
@@ -765,6 +869,7 @@ signOutButton.addEventListener("click", () => {
 });
 
 document.querySelector("#refresh-devices").addEventListener("click", loadDevices);
+reportForm.addEventListener("submit", generateReport);
 document.querySelector("#refresh-alerts").addEventListener("click", loadAlerts);
 document.querySelector("#refresh-risk").addEventListener("click", loadRisk);
 document.querySelector("#refresh-risk-detail").addEventListener("click", () => {
