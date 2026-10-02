@@ -247,8 +247,8 @@ function renderDetail(detail) {
   grid.append(detailPanel("Device status", factGrid([
     ["Health", healthPresentation(device.healthState).label],
     ["Last seen", renderTime(device.lastSeenUtc)],
-    ["Operating system", device.operatingSystem || "Not reported"],
-    ["OS version", detail.osVersion || "Not reported"],
+    ["OS", (detail.osName ?? device.operatingSystem) || "Not reported"],
+    ["OS Version", detail.osVersion || "Not reported"],
     ["Agent version", device.agentVersion || "Not reported"],
     ["Inventory collected", renderTime(detail.inventoryCollectedUtc, "Not received")],
   ])));

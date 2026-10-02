@@ -11,7 +11,9 @@ public sealed record InventoryReport(
     CpuInventory Cpu,
     long? InstalledRamBytes,
     IReadOnlyList<DiskInventory> Disks,
-    SecurityPostureInventory SecurityPosture);
+    SecurityPostureInventory SecurityPosture,
+    string? OsDisplayVersion = null,
+    string? OsInstallationType = null);
 
 public sealed record CpuInventory(string? Model, int LogicalProcessorCount);
 

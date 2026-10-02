@@ -64,7 +64,9 @@ public sealed class DeviceReadStore(AdminStore admins)
         var summary = new DeviceListItem(
             endpointId,
             inventory?.Hostname ?? $"Endpoint {endpointId.ToString("N")[..8]}",
-            inventory is null ? null : $"{inventory.OsName} {inventory.OsVersion}",
+            inventory is null ? null : JoinOperatingSystemParts(inventory.OsName, inventory.OsDisplayVersion,
+                string.Equals(inventory.OsInstallationType, "Client", StringComparison.OrdinalIgnoreCase)
+                    ? null : inventory.OsInstallationType, inventory.OsVersion),
             HealthState(lastSeen, now),
             lastSeen,
             inventory?.AgentVersion,
@@ -72,13 +74,17 @@ public sealed class DeviceReadStore(AdminStore admins)
         return new DeviceDetail(
             summary,
             inventory?.CollectedUtc,
-            inventory?.OsVersion,
+            inventory is null ? null : JoinOperatingSystemParts(inventory.OsDisplayVersion, inventory.OsVersion),
             inventory?.Architecture,
             inventory?.Cpu,
             inventory?.InstalledRamBytes,
             inventory?.Disks ?? [],
-            inventory?.SecurityPosture);
+            inventory?.SecurityPosture,
+            inventory?.OsName);
     }
+
+    private static string JoinOperatingSystemParts(params string?[] parts) =>
+        string.Join(" ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
 
     private static string HealthState(DateTimeOffset? lastSeen, DateTimeOffset now)
     {
