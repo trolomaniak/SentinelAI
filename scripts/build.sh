@@ -10,4 +10,5 @@ cd "$repo_root/dashboard"
 npm ci
 node --check assets/app.js
 node --check assets/device-view.js
+node --check assets/alert-view.js
 npm run build

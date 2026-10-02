@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#101a2b" />
-    <title>Devices · SentinelAI</title>
+    <title>SentinelAI</title>
     <link rel="stylesheet" href="./assets/styles.css" />
     <script type="module" src="./assets/app.js"></script>
   </head>
@@ -16,6 +16,10 @@
           <span class="brand-mark" aria-hidden="true">S</span>
           <span class="brand-name">SentinelAI</span>
         </a>
+        <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
+          <a id="devices-nav" href="#/devices">Devices</a>
+          <a id="alerts-nav" href="#/alerts">Alerts</a>
+        </nav>
         <div class="header-actions">
           <span class="workspace-label">Local workspace</span>
           <button id="sign-out" class="button button-subtle" type="button" hidden>Sign out</button>
@@ -26,9 +30,9 @@
     <main id="main" class="main-content">
       <section id="login-view" class="login-layout" aria-labelledby="login-heading">
         <div>
-          <p class="eyebrow">Local device visibility</p>
-          <h1 id="login-heading">Sign in to view devices</h1>
-          <p class="lead">Use your SentinelAI Core administrator account to see enrolled endpoints and their latest reported state.</p>
+          <p class="eyebrow">Local security visibility</p>
+          <h1 id="login-heading">Sign in to SentinelAI</h1>
+          <p class="lead">Use your SentinelAI Core administrator account to see enrolled endpoints and detected security alerts.</p>
         </div>
         <form id="login-form" class="panel login-panel">
           <label for="username">Username</label>
@@ -58,6 +62,53 @@
         <a class="back-link" href="#/devices">← All devices</a>
         <p id="detail-status" class="status-line" role="status" aria-live="polite"></p>
         <div id="detail-content"></div>
+      </section>
+
+      <section id="alerts-view" aria-labelledby="alerts-heading" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">Security findings</p>
+            <h1 id="alerts-heading">Alerts</h1>
+            <p class="lead">Review reported risks, their evidence, and the administrator's response.</p>
+          </div>
+          <button id="refresh-alerts" class="button button-secondary" type="button">Refresh</button>
+        </div>
+        <form id="alert-filters" class="filter-bar" aria-label="Filter alerts">
+          <div>
+            <label for="severity-filter">Severity</label>
+            <select id="severity-filter" name="severity">
+              <option value="">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="info">Information</option>
+            </select>
+          </div>
+          <div>
+            <label for="status-filter">Status</label>
+            <select id="status-filter" name="status">
+              <option value="">All statuses</option>
+              <option value="open">Open</option>
+              <option value="investigating">Investigating</option>
+              <option value="resolved">Resolved</option>
+              <option value="accepted">Accepted</option>
+            </select>
+          </div>
+          <button class="button button-secondary" type="submit">Apply filters</button>
+        </form>
+        <p id="alerts-status" class="status-line" role="status" aria-live="polite"></p>
+        <div id="alerts-content"></div>
+        <div id="alerts-pagination" class="pagination" hidden>
+          <button id="alerts-previous" class="button button-secondary" type="button">Previous</button>
+          <button id="alerts-next" class="button button-secondary" type="button">Next</button>
+        </div>
+      </section>
+
+      <section id="alert-detail-view" aria-labelledby="alert-detail-heading" hidden>
+        <a class="back-link" href="#/alerts">← All alerts</a>
+        <p id="alert-detail-status" class="status-line" role="status" aria-live="polite"></p>
+        <div id="alert-detail-content"></div>
       </section>
     </main>
   </body>

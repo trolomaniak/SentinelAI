@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Threading.RateLimiting;
@@ -44,6 +45,7 @@ public static class CoreHost
         builder.Services.AddSingleton<DeviceReadStore>();
         builder.Services.AddSingleton<EnrollmentStore>();
         builder.Services.AddSingleton<InventoryStore>();
+        builder.Services.AddSingleton<AlertStore>();
         builder.Services.AddSingleton(RuleEngine.CreateDefault());
         builder.Services.AddHostedService<AdminInitializationService>();
 
@@ -358,10 +360,124 @@ public static class CoreHost
             })
             .RequireAuthorization();
 
+        app.MapGet("/api/admin/alerts", async (
+                HttpContext context,
+                AlertStore alerts,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (!TryReadAlertQuery(context.Request.Query, out var severity, out var status,
+                        out var offset, out var limit))
+                {
+                    return Results.BadRequest();
+                }
+
+                return Results.Ok(await alerts.ListAsync(severity, status, offset, limit, cancellationToken));
+            })
+            .RequireAuthorization();
+
+        app.MapGet("/api/admin/alerts/{alertId:guid}", async (
+                Guid alertId,
+                HttpContext context,
+                AlertStore alerts,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                var alert = await alerts.FindAsync(alertId, cancellationToken);
+                return alert is null ? Results.NotFound() : Results.Ok(alert);
+            })
+            .RequireAuthorization();
+
+        app.MapPut("/api/admin/alerts/{alertId:guid}/status", async (
+                Guid alertId,
+                UpdateAlertStatusRequest? request,
+                HttpContext context,
+                AlertStore alerts,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (request is null || !AlertStore.IsValidStatus(request.Status) || request.ExpectedVersion < 1)
+                {
+                    return Results.BadRequest();
+                }
+
+                var actor = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (string.IsNullOrWhiteSpace(actor))
+                {
+                    return Results.Unauthorized();
+                }
+
+                var result = await alerts.UpdateStatusAsync(alertId, request.Status!, request.ExpectedVersion,
+                    actor, cancellationToken);
+                return result.Outcome switch
+                {
+                    AlertStatusUpdateOutcome.NotFound => (IResult)Results.NotFound(),
+                    AlertStatusUpdateOutcome.Conflict => Results.Conflict(),
+                    _ => Results.Ok(result.Alert)
+                };
+            })
+            .RequireAuthorization()
+            .WithMetadata(new RequestSizeLimitAttribute(1024));
+
         return app;
     }
 
     private sealed record LoginRequest(string? Username, string? Password);
+
+    private static bool TryReadAlertQuery(
+        IQueryCollection query,
+        out string? severity,
+        out string? status,
+        out int offset,
+        out int limit)
+    {
+        severity = null;
+        status = null;
+        offset = 0;
+        limit = 50;
+        if (query.TryGetValue("severity", out var severityValues))
+        {
+            if (severityValues.Count != 1 || !AlertStore.IsValidSeverity(severityValues[0])) return false;
+            severity = severityValues[0];
+        }
+
+        if (query.TryGetValue("status", out var statusValues))
+        {
+            if (statusValues.Count != 1 || !AlertStore.IsValidStatus(statusValues[0])) return false;
+            status = statusValues[0];
+        }
+
+        if (query.TryGetValue("offset", out var offsetValues) &&
+            (offsetValues.Count != 1 ||
+             !int.TryParse(offsetValues[0], NumberStyles.None, CultureInfo.InvariantCulture, out offset)))
+        {
+            return false;
+        }
+
+        if (query.TryGetValue("limit", out var limitValues) &&
+            (limitValues.Count != 1 ||
+             !int.TryParse(limitValues[0], NumberStyles.None, CultureInfo.InvariantCulture, out limit)))
+        {
+            return false;
+        }
+
+        return offset >= 0 && limit is >= 1 and <= 200;
+    }
 
     private static bool IsValidInventory(InventoryReport? report)
     {
