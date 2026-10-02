@@ -15,6 +15,7 @@ using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Core.Persistence;
+using SentinelAI.Core.Reports;
 using SentinelAI.Licensing;
 using SentinelAI.Rules;
 
@@ -52,6 +53,7 @@ public static class CoreHost
         builder.Services.AddSingleton(riskOptions);
         builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
         builder.Services.AddSingleton<RiskReadStore>();
+        builder.Services.AddSingleton<SecurityReportReadStore>();
         var licenseOptions = LicenseVerificationOptions.Load(builder.Configuration);
         builder.Services.AddSingleton(licenseOptions);
         builder.Services.AddSingleton(licenseOptions.Renewal);
@@ -159,6 +161,7 @@ public static class CoreHost
         app.Use(async (context, next) =>
         {
             if (context.Request.Path.StartsWithSegments("/api/admin/license") ||
+                context.Request.Path.StartsWithSegments("/api/admin/reports") ||
                 context.Request.Path == "/api/admin/incidents/export" ||
                 (context.Request.Path.StartsWithSegments("/api/admin/alerts") &&
                  context.Request.Path.Value?.TrimEnd('/').EndsWith("/explanation", StringComparison.OrdinalIgnoreCase) == true))
@@ -574,6 +577,40 @@ public static class CoreHost
                     return Results.BadRequest();
                 // Emergency access has no licensing gate, in every state including failed renewal.
                 return Results.Ok(await alerts.ExportAsync(offset, limit, clock.GetUtcNow(), cancellationToken));
+            }).RequireAuthorization();
+
+        app.MapGet("/api/admin/reports/security", async (HttpContext context, SecurityReportReadStore reports,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                var query = context.Request.Query;
+                if (query.Count != 2 || query.Keys.Any(key => key is not ("from" or "to")) ||
+                    query["from"].Count != 1 || query["to"].Count != 1 ||
+                    !ReportPeriod.TryParse(query["from"][0], query["to"][0], out var period))
+                    return Results.BadRequest();
+
+                try
+                {
+                    // Local reporting is independent of cloud AI and optional licensing permissions.
+                    var report = await reports.GenerateAsync(period!, cancellationToken);
+                    var html = SecurityReportRenderer.Render(report);
+                    const int maximumBytes = 8 * 1024 * 1024;
+                    if (System.Text.Encoding.UTF8.GetByteCount(html) > maximumBytes)
+                        return Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
+                            title: "The report exceeds local generation limits.");
+                    context.Response.Headers["Content-Security-Policy"] =
+                        "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; " +
+                        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+                    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                    var filename = FormattableString.Invariant(
+                        $"SentinelAI-security-report-{period!.From:yyyy-MM-dd}-{period.To:yyyy-MM-dd}.html");
+                    return Results.File(System.Text.Encoding.UTF8.GetBytes(html), "text/html; charset=utf-8", filename);
+                }
+                catch (ReportCapacityException)
+                {
+                    return Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
+                        title: "The report dataset exceeds local generation limits.");
+                }
             }).RequireAuthorization();
 
         app.MapPost("/api/admin/license/verify", async (

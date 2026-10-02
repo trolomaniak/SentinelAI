@@ -176,6 +176,7 @@ try
     }
 
     await OperatingSystemApiTests.VerifyAsync(username, password);
+    await ReportApiTests.VerifyAsync(username, password);
     await RiskApiTests.VerifyAsync(username, password);
 
     // Existing installations must work without retaining the bootstrap secret in configuration.

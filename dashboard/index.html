@@ -20,6 +20,7 @@
           <a id="devices-nav" href="#/devices">Devices</a>
           <a id="alerts-nav" href="#/alerts">Alerts</a>
           <a id="risk-nav" href="#/risk">Risk</a>
+          <a id="reports-nav" href="#/reports">Reports</a>
         </nav>
         <div class="header-actions">
           <span class="workspace-label">Local workspace</span>
@@ -136,6 +137,31 @@
         </div>
         <p id="risk-detail-status" class="status-line" role="status" aria-live="polite"></p>
         <div id="risk-detail-content"></div>
+      </section>
+
+      <section id="reports-view" aria-labelledby="reports-heading" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">Local security reporting</p>
+            <h1 id="reports-heading">Reports</h1>
+            <p class="lead">Download a security report from stored SentinelAI data. Generation works locally without cloud AI.</p>
+          </div>
+        </div>
+        <form id="report-form" class="filter-bar" aria-label="Security report date range" aria-describedby="report-range-help">
+          <div>
+            <label for="report-from">From (UTC)</label>
+            <input id="report-from" name="from" type="date" required />
+          </div>
+          <div>
+            <label for="report-to">To (UTC)</label>
+            <input id="report-to" name="to" type="date" required />
+          </div>
+          <button id="generate-report" class="button button-primary" type="submit">Generate HTML report</button>
+        </form>
+        <p id="report-range-help" class="helper-text">Both dates are inclusive UTC calendar dates, up to 366 days. The default is the previous complete calendar month.</p>
+        <p class="helper-text">Alert and status activity covers the selected period. Scores, endpoint health, and posture reflect the current snapshot when generated; historical score trends are unavailable.</p>
+        <p id="report-status" class="status-line" role="status" aria-live="polite"></p>
+        <div id="report-content"></div>
       </section>
     </main>
   </body>

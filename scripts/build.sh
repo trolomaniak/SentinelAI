@@ -12,4 +12,5 @@ node --check assets/app.js
 node --check assets/device-view.js
 node --check assets/alert-view.js
 node --check assets/risk-view.js
+node --check assets/report-view.js
 npm run build

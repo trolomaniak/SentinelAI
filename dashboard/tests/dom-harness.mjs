@@ -151,13 +151,13 @@ export async function settle() {
 
 let imports = 0;
 
-export async function startDashboard(handler, hash = '#/alerts') {
+export async function startDashboard(handler, hash = '#/alerts', origin = { protocol: 'http:', hostname: '127.0.0.1' }) {
   const saved = Object.fromEntries(['document', 'window', 'Node', 'fetch'].map((key) => [key, globalThis[key]]));
   const document = parseStaticHtml(await readFile(new URL('../index.html', import.meta.url), 'utf8'));
   const window = new TestElement('window');
   let currentHash = hash;
   window.location = {
-    protocol: 'http:', hostname: '127.0.0.1',
+    ...origin,
     get hash() { return currentHash; },
     set hash(value) {
       if (value === currentHash) return;

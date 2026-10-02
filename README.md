@@ -85,6 +85,12 @@ Asset criticality defaults to standard priority; exposure defaults to unknown wi
 
 Configuration lives under `SentinelAI:RiskScoring`. For example, start Core with `--SentinelAI:RiskScoring:EndpointContexts:<endpointId>:AssetCriticality high --SentinelAI:RiskScoring:EndpointContexts:<endpointId>:Exposure internet`, replacing `<endpointId>` with an enrolled endpoint GUID. Policy overrides go under `SentinelAI:RiskScoring:Policy`; use `MaximumCorrelationBaseBonus` for the limit applied before asset/exposure multipliers. The API returns the effective policy. Coverage uses the 13 supported rule inputs, not every possible Windows protection. Inventory freshness defaults to 12 hours (two collection cycles), while age/correlation uses its separately exposed policy window.
 
+## Local security reports
+
+Open **Reports** in the dashboard, choose an inclusive UTC date range, and generate a standalone HTML report. The default range is the previous complete calendar month. The report includes a management summary, current organization risk and endpoint health, retained incident activity by severity, high/critical incidents, resolutions, tracked posture findings, prioritized actions and technical evidence. It works locally without AI, issuer connectivity or a premium license. Open the downloaded HTML offline; use the browser's print dialog to print it or save it as PDF.
+
+`GET /api/admin/reports/security?from=2026-09-01&to=2026-09-30` returns an authenticated, uncached HTML attachment. Dates must be exactly `yyyy-MM-dd`, ordered and at most 366 inclusive days. The current risk/health snapshot is explicitly separate from period activity: Core does not store historical scores or complete inventory/heartbeat history, so historical trend is unavailable. See [report semantics and limits](docs/REPORTING.md).
+
 ## Windows Agent and enrollment
 
 Run `./scripts/publish-agent-windows.sh` to produce `artifacts/agent/win-x64/SentinelAI.Agent.exe`. This is a self-contained, single-file Windows x64 build: the target does not need a separate .NET installation. The bundled native runtime is extracted when the EXE starts. CI verifies the EXE on Windows and uploads it as the `SentinelAI.Agent-win-x64` build artifact.
