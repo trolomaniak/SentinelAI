@@ -426,6 +426,79 @@ function renderStatusHistory(history) {
   return list;
 }
 
+function isAiExplanation(response) {
+  const analysis = response?.analysis;
+  const text = (value, maximum) => typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
+  const steps = (value) => Array.isArray(value) && value.length > 0 && value.length <= 8 && value.every((item) => text(item, 512));
+  return response?.label === "AI assistive analysis" && analysis &&
+    text(analysis.explanation, 2048) && text(analysis.whyItMatters, 1024) &&
+    steps(analysis.recommendedInvestigation) && steps(analysis.suggestedRemediation) &&
+    ["low", "medium", "high"].includes(analysis.confidence) && text(analysis.uncertainty, 1024);
+}
+
+function renderAiAnalysis(analysis) {
+  const content = node("div", "ai-analysis");
+  content.append(node("h3", null, "Explanation"), node("p", "alert-copy", analysis.explanation));
+  content.append(node("h3", null, "Why it matters"), node("p", "alert-copy", analysis.whyItMatters));
+  for (const [title, steps] of [["Recommended investigation", analysis.recommendedInvestigation], ["Suggested remediation", analysis.suggestedRemediation]]) {
+    const list = node("ol");
+    for (const step of steps) list.append(node("li", "alert-copy", step));
+    content.append(node("h3", null, title), list);
+  }
+  content.append(node("h3", null, "Confidence and uncertainty"), node("p", "helper-text", `Model confidence: ${analysis.confidence}. This is not a calibrated detection probability.`), node("p", "alert-copy", analysis.uncertainty));
+  return content;
+}
+
+function renderAiPanel(alert) {
+  const panel = detailPanel("AI assistive analysis", node("p", "helper-text", "Request an explanation using only relevant structured configuration evidence and minimized endpoint context. Hostnames and raw log history are excluded."));
+  panel.className += " wide-panel";
+  panel.id = "alert-ai-panel";
+  panel.append(node("p", "helper-text", "Review suggestions before taking any action. AI does not execute remediation or change deterministic findings or this alert's status."));
+  const button = node("button", "button button-secondary", "Explain with AI");
+  button.id = "explain-alert";
+  button.type = "button";
+  const status = node("p", "status-feedback");
+  status.id = "alert-ai-status";
+  status.hidden = true;
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  const output = node("div");
+  output.id = "alert-ai-analysis";
+  panel.append(button, status, output);
+  button.addEventListener("click", async () => {
+    if (button.disabled) return;
+    const version = navigationVersion;
+    const token = accessToken;
+    const current = () => version === navigationVersion && token === accessToken && !!accessToken && panel.parentNode?.parentNode === alertDetailContent;
+    button.disabled = true;
+    button.textContent = "Explaining…";
+    status.hidden = false;
+    status.textContent = "Requesting AI assistive analysis… Local alert review remains available.";
+    output.replaceChildren();
+    try {
+      const response = await requestCore(`/api/admin/alerts/${encodeURIComponent(alert.alertId)}/explanation`, "POST");
+      if (!current()) return;
+      if (!isAiExplanation(response)) throw new Error("Invalid AI response");
+      output.append(renderAiAnalysis(response.analysis));
+      status.textContent = "AI suggestions are ready for administrator review.";
+      button.textContent = "Explain again with AI";
+    } catch (error) {
+      if (error instanceof SessionExpired || !current()) return;
+      status.textContent = error instanceof ApiError && error.status === 403
+        ? "AI explanations are unavailable for the current license or operating mode. Local alert review remains available."
+        : error instanceof ApiError && error.status === 422
+          ? "This alert does not have supported configuration evidence for an AI explanation. Local alert review remains available."
+          : error instanceof ApiError && error.status === 429
+            ? "Too many AI requests. Wait before trying again; local alert review remains available."
+            : "AI explanation is unavailable. You can continue reviewing this alert and try again.";
+      button.textContent = "Try AI again";
+    } finally {
+      if (current()) button.disabled = false;
+    }
+  });
+  return panel;
+}
+
 function renderAlertDetail(alert, feedback = "") {
   alertDetailContent.replaceChildren();
   const header = node("div", "detail-heading");
@@ -490,6 +563,7 @@ function renderAlertDetail(alert, feedback = "") {
   }
   history.className += " wide-panel";
   grid.append(history);
+  grid.append(renderAiPanel(alert));
   alertDetailContent.append(grid);
 }
 

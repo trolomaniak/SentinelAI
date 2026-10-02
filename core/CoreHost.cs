@@ -60,6 +60,10 @@ public static class CoreHost
         builder.Services.AddSingleton<LicenseClock>();
         builder.Services.AddSingleton<ILicenseLeaseClient, LicenseLeaseClient>();
         builder.Services.AddSingleton<LicenseStateService>();
+        builder.Services.AddSingleton(AiOptions.Load(builder.Configuration));
+        builder.Services.AddSingleton<IAiGatewayClient>(services =>
+            new AiGatewayClient(services.GetRequiredService<AiOptions>()));
+        builder.Services.AddSingleton<AiExplanationService>();
         builder.Services.AddHostedService<AdminInitializationService>();
         builder.Services.AddHostedService<LicenseRenewalWorker>();
 
@@ -77,6 +81,12 @@ public static class CoreHost
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             options.AddFixedWindowLimiter("login", policy =>
+            {
+                policy.PermitLimit = 5;
+                policy.Window = TimeSpan.FromMinutes(1);
+                policy.QueueLimit = 0;
+            });
+            options.AddFixedWindowLimiter("ai-explanation", policy =>
             {
                 policy.PermitLimit = 5;
                 policy.Window = TimeSpan.FromMinutes(1);
@@ -149,7 +159,9 @@ public static class CoreHost
         app.Use(async (context, next) =>
         {
             if (context.Request.Path.StartsWithSegments("/api/admin/license") ||
-                context.Request.Path == "/api/admin/incidents/export")
+                context.Request.Path == "/api/admin/incidents/export" ||
+                (context.Request.Path.StartsWithSegments("/api/admin/alerts") &&
+                 context.Request.Path.Value?.TrimEnd('/').EndsWith("/explanation", StringComparison.OrdinalIgnoreCase) == true))
                 context.Response.Headers.CacheControl = "no-store";
             await next(context);
         });
@@ -500,6 +512,32 @@ public static class CoreHost
                 };
             })
             .RequireAuthorization()
+            .WithMetadata(new RequestSizeLimitAttribute(1024));
+
+        app.MapPost("/api/admin/alerts/{alertId:guid}/explanation", async (
+                Guid alertId, HttpContext context, AiExplanationService explanation,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                // The caller selects a stored finding; no prompt, destination, or incident overrides are accepted.
+                if (context.Request.Query.Count != 0 || context.Request.ContentLength > 0)
+                    return Results.BadRequest();
+                try
+                {
+                    if (await context.Request.Body.ReadAsync(new byte[1].AsMemory(), cancellationToken) != 0)
+                        return Results.BadRequest();
+                }
+                catch (BadHttpRequestException) { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+                var result = await explanation.ExplainAsync(alertId, cancellationToken);
+                return result.Outcome switch
+                {
+                    AiExplanationOutcome.Success => (IResult)Results.Ok(result.Response),
+                    AiExplanationOutcome.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
+                    AiExplanationOutcome.NotFound => Results.NotFound(),
+                    AiExplanationOutcome.UnsupportedContext => Results.StatusCode(StatusCodes.Status422UnprocessableEntity),
+                    _ => Results.StatusCode(StatusCodes.Status503ServiceUnavailable)
+                };
+            }).RequireAuthorization().RequireRateLimiting("ai-explanation")
             .WithMetadata(new RequestSizeLimitAttribute(1024));
 
         app.MapGet("/api/admin/license", async (HttpContext context, LicenseStateService licensing,
