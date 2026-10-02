@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <Compile Include="..\shared\hosting\PilotHostConfiguration.cs" Link="PilotHostConfiguration.cs" />
     <ProjectReference Include="..\shared\contracts\SentinelAI.Contracts.csproj" />
     <ProjectReference Include="..\shared\crypto\SentinelAI.Licensing.csproj" />
     <ProjectReference Include="..\rules\SentinelAI.Rules.csproj" />
@@ -10,9 +11,9 @@
 
   <ItemGroup>
     <Content Include="..\dashboard\index.html" Link="dashboard\index.html"
-             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <Content Include="..\dashboard\assets\**\*" Link="dashboard\assets\%(RecursiveDir)%(Filename)%(Extension)"
-             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
   <PropertyGroup>

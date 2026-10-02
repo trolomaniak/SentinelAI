@@ -155,6 +155,7 @@ internal static class CommandTests
                 EnsureVerified(await RunClientAsync(channelVerification), privateKey, channel);
             }
 
+            await VerifyPreparationAsync(directory, signingArguments, verifyingArguments, tamperedPackage, privateKey);
             await VerifyStrictArgumentsAsync(directory, signingArguments, verifyingArguments, privateKey);
             await VerifyRepositoryKeyRejectionAsync(directory, package, privateKey);
             await VerifyPartialKeyPairAsync(directory, privateKey);
@@ -165,6 +166,130 @@ internal static class CommandTests
         finally
         {
             Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static async Task VerifyPreparationAsync(string directory, string[] signingArguments,
+        string[] verifyingArguments, string tamperedPackage, string privateKey)
+    {
+        var candidate = Path.Combine(directory, "prepared-agent");
+        var preparingArguments = verifyingArguments.ToArray();
+        preparingArguments[0] = "prepare";
+        preparingArguments = preparingArguments.Concat(["--output", candidate]).ToArray();
+        EnsureVerified(await RunClientAsync(preparingArguments), privateKey);
+        Ensure(await File.ReadAllTextAsync(Path.Combine(candidate, "SentinelAI.Agent.exe")) ==
+               "Synthetic development agent executable; never run." &&
+               Directory.GetFileSystemEntries(candidate).Length == 1,
+            "Fresh Agent preparation did not produce only the authenticated executable.");
+        if (!OperatingSystem.IsWindows())
+            Ensure(File.GetUnixFileMode(candidate) ==
+                   (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute),
+                "Prepared code directory permissions are not restricted to its owner.");
+
+        var marker = Path.Combine(candidate, "operator-marker.txt");
+        await File.WriteAllTextAsync(marker, "Existing operator data.");
+        EnsureRejected(await RunClientAsync(preparingArguments), privateKey);
+        Ensure(await File.ReadAllTextAsync(marker) == "Existing operator data.",
+            "Repeated preparation changed an existing installation directory.");
+        var existingFile = Path.Combine(directory, "existing-code-file");
+        await File.WriteAllTextAsync(existingFile, "Existing operator file.");
+        EnsureRejected(await RunClientAsync(ReplaceValue(preparingArguments, "--output", existingFile)), privateKey);
+        Ensure(await File.ReadAllTextAsync(existingFile) == "Existing operator file.",
+            "Preparation overwrote an existing destination file.");
+        EnsureRejected(await RunClientAsync(ReplaceValue(preparingArguments, "--output", "relative-code")), privateKey);
+        EnsureRejected(await RunClientAsync(preparingArguments[..^2]), privateKey);
+        EnsureRejected(await RunClientAsync(preparingArguments.Concat(["--unknown", "value"]).ToArray()), privateKey);
+
+        var rejected = Path.Combine(directory, "rejected-agent");
+        var freshArguments = ReplaceValue(preparingArguments, "--output", rejected);
+        EnsureRejected(await RunClientAsync(ReplaceValue(freshArguments, "--package", tamperedPackage)), privateKey);
+        Ensure(!Directory.Exists(rejected), "Preparation retained a candidate with an invalid package hash.");
+        var modifiedManifest = Path.Combine(directory, "prepare-invalid-signature.json");
+        var json = JsonNode.Parse(await File.ReadAllBytesAsync(verifyingArguments[Array.IndexOf(verifyingArguments, "--manifest") + 1]))!;
+        json["manifest"]!["version"] = "1.2.4";
+        await File.WriteAllTextAsync(modifiedManifest, json.ToJsonString());
+        EnsureRejected(await RunClientAsync(ReplaceValue(freshArguments, "--manifest", modifiedManifest)), privateKey);
+        Ensure(!Directory.Exists(rejected), "Preparation retained a candidate with an invalid signature.");
+
+        var corePackage = Path.Combine(directory, "core.zip");
+        var coreManifest = Path.Combine(directory, "core.manifest.json");
+        await CreatePackageAsync(corePackage,
+            ("SentinelAI.Core.exe", "Synthetic Core executable; never run."),
+            ("wwwroot/index.html", "Synthetic dashboard document."),
+            ("wwwroot/assets/app.js", "Synthetic dashboard asset."));
+        var coreSigning = ReplaceValue(ReplaceValue(ReplaceValue(signingArguments, "--package", corePackage),
+            "--output", coreManifest), "--artifact-id", "sentinelai-core-win-x64");
+        Ensure((await RunDevAsync(coreSigning)).ExitCode == 0, "Synthetic Core package could not be signed.");
+        var coreCandidate = Path.Combine(directory, "prepared-core");
+        var coreArguments = ReplaceValue(ReplaceValue(ReplaceValue(ReplaceValue(preparingArguments,
+            "--package", corePackage), "--manifest", coreManifest), "--artifact-id", "sentinelai-core-win-x64"),
+            "--output", coreCandidate);
+        EnsureVerified(await RunClientAsync(coreArguments), privateKey, artifactId: "sentinelai-core-win-x64");
+        Ensure(await File.ReadAllTextAsync(Path.Combine(coreCandidate, "SentinelAI.Core.exe")) ==
+               "Synthetic Core executable; never run." &&
+               await File.ReadAllTextAsync(Path.Combine(coreCandidate, "wwwroot", "index.html")) ==
+               "Synthetic dashboard document." &&
+               await File.ReadAllTextAsync(Path.Combine(coreCandidate, "wwwroot", "assets", "app.js")) ==
+               "Synthetic dashboard asset.", "Core preparation did not preserve its authenticated dashboard layout.");
+
+        foreach (var (name, entries) in new (string, (string Path, string Contents)[])[]
+                 {
+                     ("traversal", [("SentinelAI.Agent.exe", "Synthetic executable."), ("../outside.txt", "Unsafe path.")]),
+                     ("state", [("SentinelAI.Agent.exe", "Synthetic executable."), ("enrollment-state", "Synthetic state.")]),
+                     ("receipt", [("SentinelAI.Agent.exe", "Synthetic executable."), (".sentinelai-update-receipt.json", "Synthetic installed-state receipt.")]),
+                     ("receipt-alias", [("SentinelAI.Agent.exe", "Synthetic executable."), (".SENTINELAI-UPDATE-RECEIPT.JSON", "Synthetic installed-state receipt alias.")]),
+                     ("wrong-executable", [("SentinelAI.Core.exe", "Synthetic Core executable.")]),
+                     ("collision", [("SentinelAI.Agent.exe", "Synthetic executable."), ("sentinelai.agent.exe", "Duplicate path.")])
+                 })
+        {
+            var unsafePackage = Path.Combine(directory, name + ".zip");
+            var unsafeManifest = Path.Combine(directory, name + ".manifest.json");
+            await CreatePackageAsync(unsafePackage, entries);
+            Ensure((await RunDevAsync(ReplaceValue(ReplaceValue(signingArguments, "--package", unsafePackage),
+                "--output", unsafeManifest))).ExitCode == 0, "Synthetic unsafe archive could not be signed.");
+            EnsureRejected(await RunClientAsync(ReplaceValue(ReplaceValue(freshArguments, "--package", unsafePackage),
+                "--manifest", unsafeManifest)), privateKey);
+            Ensure(!Directory.Exists(rejected), "Failed archive preparation retained partially extracted code.");
+        }
+        Ensure(!File.Exists(Path.Combine(directory, "outside.txt")), "Preparation wrote outside its candidate directory.");
+
+        var malformedPackage = Path.Combine(directory, "malformed.zip");
+        var malformedManifest = Path.Combine(directory, "malformed.manifest.json");
+        await File.WriteAllTextAsync(malformedPackage, "Synthetic bytes, not a ZIP archive.");
+        Ensure((await RunDevAsync(ReplaceValue(ReplaceValue(signingArguments, "--package", malformedPackage),
+            "--output", malformedManifest))).ExitCode == 0, "Synthetic malformed package could not be signed.");
+        EnsureRejected(await RunClientAsync(ReplaceValue(ReplaceValue(freshArguments, "--package", malformedPackage),
+            "--manifest", malformedManifest)), privateKey);
+        Ensure(!Directory.Exists(rejected), "Malformed ZIP preparation retained an empty code directory.");
+
+        var unsupportedManifest = Path.Combine(directory, "unsupported.manifest.json");
+        Ensure((await RunDevAsync(ReplaceValue(ReplaceValue(signingArguments, "--artifact-id", "sentinelai-other-win-x64"),
+            "--output", unsupportedManifest))).ExitCode == 0, "Synthetic unsupported artifact could not be signed.");
+        EnsureRejected(await RunClientAsync(ReplaceValue(ReplaceValue(freshArguments, "--artifact-id", "sentinelai-other-win-x64"),
+            "--manifest", unsupportedManifest)), privateKey);
+        Ensure(!Directory.Exists(rejected), "Preparation accepted an unsupported executable artifact.");
+
+        if (!OperatingSystem.IsWindows())
+        {
+            var linked = Path.Combine(directory, "prepare-linked");
+            Directory.CreateSymbolicLink(linked, candidate);
+            EnsureRejected(await RunClientAsync(ReplaceValue(freshArguments, "--output", linked)), privateKey);
+            EnsureRejected(await RunClientAsync(ReplaceValue(freshArguments, "--output", Path.Combine(linked, "child"))), privateKey);
+            Ensure(await File.ReadAllTextAsync(marker) == "Existing operator data." &&
+                   !Directory.Exists(Path.Combine(candidate, "child")), "Preparation followed a destination link.");
+            var brokenLink = Path.Combine(directory, "prepare-broken-link");
+            Directory.CreateSymbolicLink(brokenLink, Path.Combine(directory, "absent-target"));
+            EnsureRejected(await RunClientAsync(ReplaceValue(freshArguments, "--output", brokenLink)), privateKey);
+            Ensure(new DirectoryInfo(brokenLink).LinkTarget is not null &&
+                   !Directory.Exists(Path.Combine(directory, "absent-target")),
+                "Preparation replaced a broken link or created its target.");
+            var unsafeParent = Path.Combine(directory, "prepare-shared-parent");
+            Directory.CreateDirectory(unsafeParent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(unsafeParent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                                            UnixFileMode.GroupWrite);
+            var unsafeOutput = Path.Combine(unsafeParent, "code");
+            EnsureRejected(await RunClientAsync(ReplaceValue(freshArguments, "--output", unsafeOutput)), privateKey);
+            Ensure(!Directory.Exists(unsafeOutput), "Preparation wrote into a parent writable by other accounts.");
         }
     }
 
@@ -286,11 +411,17 @@ internal static class CommandTests
     }
 
     private static async Task CreatePackageAsync(string path)
+        => await CreatePackageAsync(path, ("SentinelAI.Agent.exe", "Synthetic development agent executable; never run."));
+
+    private static async Task CreatePackageAsync(string path, params (string Path, string Contents)[] entries)
     {
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
-        var entry = archive.CreateEntry("SentinelAI.Agent.exe");
-        await using var stream = entry.Open();
-        await stream.WriteAsync(Encoding.UTF8.GetBytes("Synthetic development agent executable; never run."));
+        foreach (var (entryPath, contents) in entries)
+        {
+            var entry = archive.CreateEntry(entryPath);
+            await using var stream = entry.Open();
+            await stream.WriteAsync(Encoding.UTF8.GetBytes(contents));
+        }
     }
 
     private static async Task<CommandResult> RunDevAsync(string[] arguments)
@@ -309,14 +440,15 @@ internal static class CommandTests
         return new CommandResult(exitCode, output.ToString(), error.ToString());
     }
 
-    private static void EnsureVerified(CommandResult result, string privateKey, string channel = "stable")
+    private static void EnsureVerified(CommandResult result, string privateKey, string channel = "stable",
+        string artifactId = ArtifactId)
     {
         Ensure(result.ExitCode == 0 && string.IsNullOrEmpty(result.Error), "The client rejected the signed development package.");
         using var output = JsonDocument.Parse(result.Output);
         var properties = output.RootElement.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
         Ensure(properties.SetEquals(["version", "artifactId", "channel", "environment"]) &&
                output.RootElement.GetProperty("version").GetString() == "1.2.3" &&
-               output.RootElement.GetProperty("artifactId").GetString() == ArtifactId &&
+               output.RootElement.GetProperty("artifactId").GetString() == artifactId &&
                output.RootElement.GetProperty("channel").GetString() == channel &&
                output.RootElement.GetProperty("environment").GetString() == "development",
             "Verification stdout did not expose only the bounded authenticated metadata.");

@@ -20,8 +20,13 @@ public sealed class HeartbeatWorker(
     {
         var installationId = await identityStore.LoadOrCreateAsync(stoppingToken);
         var enrollment = await enrollmentStateStore.LoadAsync(installationId, stoppingToken);
+        if (enrollment is not null)
+        {
+            await enrollmentStateStore.WriteEndpointReceiptAsync(enrollment, stoppingToken);
+            EnrollmentTokenHandoff.DeleteIfPresent(options);
+        }
         logger.LogInformation("Agent installation {InstallationId} started", installationId);
-        if (enrollment is null && options.EnrollmentToken is null && !options.CoreUrl.IsLoopback)
+        if (enrollment is null && !options.HasEnrollmentToken && !options.CoreUrl.IsLoopback)
         {
             logger.LogWarning("An enrollment token is required before connecting to a remote Core");
         }
@@ -33,7 +38,7 @@ public sealed class HeartbeatWorker(
             bool acknowledged;
             try
             {
-                if (enrollment is null && options.EnrollmentToken is not null)
+                if (enrollment is null && options.HasEnrollmentToken)
                 {
                     var attempt = await enrollmentClient.EnrollAsync(installationId, stoppingToken);
                     if (attempt.Response is null)
@@ -44,6 +49,8 @@ public sealed class HeartbeatWorker(
                     else
                     {
                         enrollment = await enrollmentStateStore.SaveAsync(attempt.Response, stoppingToken);
+                        await enrollmentStateStore.WriteEndpointReceiptAsync(enrollment, stoppingToken);
+                        EnrollmentTokenHandoff.DeleteIfPresent(options);
                         logger.LogInformation("Agent endpoint {EndpointId} enrolled", enrollment.EndpointId);
                         acknowledged = await SendHeartbeatAsync(installationId, enrollment, stoppingToken);
                     }

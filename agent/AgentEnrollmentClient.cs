@@ -9,14 +9,11 @@ public sealed class AgentEnrollmentClient(AgentOptions options, HttpClient httpC
         Guid installationId,
         CancellationToken cancellationToken = default)
     {
-        if (options.EnrollmentToken is null)
-        {
-            throw new InvalidOperationException("An enrollment token is not configured.");
-        }
+        var token = await EnrollmentTokenHandoff.ReadAsync(options, cancellationToken);
 
         using var response = await httpClient.PostAsJsonAsync(
             options.EnrollmentUrl,
-            new EnrollmentRequest(installationId, options.EnrollmentToken),
+            new EnrollmentRequest(installationId, token),
             cancellationToken);
         if (!response.IsSuccessStatusCode)
         {

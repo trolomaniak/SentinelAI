@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using SentinelAI.Contracts.Enrollment;
+using SentinelAI.Hosting;
 
 namespace SentinelAI.Agent;
 
@@ -23,6 +24,34 @@ public sealed class EnrollmentStateStore(AgentOptions options)
     private const UnixFileMode StateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
     public string StatePath => Path.Combine(options.DataDirectory, "enrollment-state");
+
+    public async Task WriteEndpointReceiptAsync(EnrollmentState state, CancellationToken cancellationToken = default)
+    {
+        // The receipt is nonsecret; derive it from authenticated persisted state rather than caller claims.
+        var persisted = await LoadAsync(state.InstallationId, cancellationToken);
+        if (persisted is null || persisted.EndpointId != state.EndpointId)
+            throw new InvalidDataException("An endpoint receipt requires validated persistent enrollment state.");
+        var receiptPath = Path.Combine(options.DataDirectory, "endpoint-id");
+        PilotHostConfiguration.RejectLinks(receiptPath);
+        var temporaryPath = Path.Combine(options.DataDirectory, $".endpoint-id.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            var streamOptions = new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None,
+                Options = FileOptions.Asynchronous
+            };
+            if (!OperatingSystem.IsWindows()) streamOptions.UnixCreateMode = StateFileMode;
+            await using (var stream = new FileStream(temporaryPath, streamOptions))
+            {
+                await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(persisted.EndpointId.ToString("D")), cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporaryPath, receiptPath, overwrite: true);
+        }
+        finally { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+    }
 
     public async Task<EnrollmentState?> LoadAsync(
         Guid installationId,
