@@ -11,7 +11,8 @@ if (!css.trim()) {
 const app = await readFile(new URL('../assets/app.js', import.meta.url), 'utf8');
 const helpers = await readFile(new URL('../assets/device-view.js', import.meta.url), 'utf8');
 const alertHelpers = await readFile(new URL('../assets/alert-view.js', import.meta.url), 'utf8');
-if (!app.trim() || !helpers.trim() || !alertHelpers.trim()) {
+const riskHelpers = await readFile(new URL('../assets/risk-view.js', import.meta.url), 'utf8');
+if (!app.trim() || !helpers.trim() || !alertHelpers.trim() || !riskHelpers.trim()) {
   throw new Error('Dashboard application scripts are empty.');
 }
 

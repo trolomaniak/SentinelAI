@@ -13,6 +13,7 @@ import {
   formatEvidence,
   severityPresentation,
 } from "./alert-view.js";
+import { renderEndpointRisk, renderRiskOverview, riskListPath, riskLink } from "./risk-view.js";
 
 const loginView = document.querySelector("#login-view");
 const devicesView = document.querySelector("#devices-view");
@@ -35,12 +36,23 @@ const statusFilter = document.querySelector("#status-filter");
 const pagination = document.querySelector("#alerts-pagination");
 const previousPage = document.querySelector("#alerts-previous");
 const nextPage = document.querySelector("#alerts-next");
+const riskView = document.querySelector("#risk-view");
+const riskDetailView = document.querySelector("#risk-detail-view");
+const riskStatus = document.querySelector("#risk-status");
+const riskContent = document.querySelector("#risk-content");
+const riskDetailStatus = document.querySelector("#risk-detail-status");
+const riskDetailContent = document.querySelector("#risk-detail-content");
+const riskPagination = document.querySelector("#risk-pagination");
+const riskPrevious = document.querySelector("#risk-previous");
+const riskNext = document.querySelector("#risk-next");
 const trustedOrigin = isTrustedDashboardOrigin(window.location);
 
 let accessToken = null;
 let navigationVersion = 0;
 let alertOffset = 0;
 const alertPageSize = 50;
+let riskOffset = 0;
+const riskPageSize = 50;
 
 class ApiError extends Error {
   constructor(status) {
@@ -64,11 +76,14 @@ function setView(name) {
   detailView.hidden = name !== "detail";
   alertsView.hidden = name !== "alerts";
   alertDetailView.hidden = name !== "alert-detail";
+  riskView.hidden = name !== "risk";
+  riskDetailView.hidden = name !== "risk-detail";
   signOutButton.hidden = !accessToken;
   document.querySelector("#workspace-nav").hidden = !accessToken;
   document.querySelector("#devices-nav").setAttribute("aria-current", ["devices", "detail"].includes(name) ? "page" : "false");
   document.querySelector("#alerts-nav").setAttribute("aria-current", ["alerts", "alert-detail"].includes(name) ? "page" : "false");
-  document.title = `${["alerts", "alert-detail"].includes(name) ? "Alerts" : name === "login" ? "Sign in" : "Devices"} · SentinelAI`;
+  document.querySelector("#risk-nav").setAttribute("aria-current", ["risk", "risk-detail"].includes(name) ? "page" : "false");
+  document.title = `${["risk", "risk-detail"].includes(name) ? "Risk" : ["alerts", "alert-detail"].includes(name) ? "Alerts" : name === "login" ? "Sign in" : "Devices"} · SentinelAI`;
 }
 
 function showLogin(message = trustedOrigin ? "" : "Open Core with HTTPS to sign in from another computer.") {
@@ -84,6 +99,8 @@ function expireSession() {
   detailContent.replaceChildren();
   alertsContent.replaceChildren();
   alertDetailContent.replaceChildren();
+  riskContent.replaceChildren();
+  riskDetailContent.replaceChildren();
   showLogin("Your session ended. Sign in again to continue.");
 }
 
@@ -224,7 +241,7 @@ function renderDetail(detail) {
   const header = node("div", "detail-heading");
   header.append(node("h1", null, device.name || "Unnamed endpoint"), renderStatusBadge(device.healthState));
   header.querySelector("h1").id = "detail-heading";
-  detailContent.append(header, node("p", "lead", "Latest information reported to SentinelAI Core."));
+  detailContent.append(header, node("p", "lead", "Latest information reported to SentinelAI Core."), riskLink(device.endpointId, "View risk score and contributing factors"));
 
   const grid = node("div", "detail-grid");
   grid.append(detailPanel("Device status", factGrid([
@@ -416,6 +433,7 @@ function renderAlertDetail(alert, feedback = "") {
   title.id = "alert-detail-heading";
   header.append(title, renderAlertBadge(alert.severity, severityPresentation), renderAlertBadge(alert.status, alertStatusPresentation));
   alertDetailContent.append(header, node("p", "lead", "A recorded finding from reported configuration. Evidence reflects the last matching observation, not a live protection check."));
+  alertDetailContent.append(riskLink(alert.endpointId, "View endpoint risk and this alert's contribution"));
 
   const grid = node("div", "detail-grid");
   grid.append(detailPanel("What happened?", node("p", "alert-copy", alert.title || "Untitled alert")));
@@ -541,6 +559,58 @@ async function loadAlertDetail(alertId) {
   }
 }
 
+async function loadRisk() {
+  const version = ++navigationVersion;
+  setView("risk");
+  riskStatus.textContent = "Loading risk scores…";
+  riskContent.replaceChildren();
+  riskPagination.hidden = true;
+  riskPrevious.disabled = true;
+  riskNext.disabled = true;
+  try {
+    const page = await getFromCore(riskListPath(riskOffset, riskPageSize));
+    if (version !== navigationVersion || !accessToken) return;
+    if (!page?.organization || !Array.isArray(page.endpoints) || !Number.isInteger(page.total) || !Number.isInteger(page.offset) || !Number.isInteger(page.limit)) {
+      throw new Error("Invalid risk response");
+    }
+    riskOffset = page.offset;
+    riskStatus.textContent = page.endpoints.length
+      ? `${page.offset + 1}–${page.offset + page.endpoints.length} of ${page.total} endpoints, ranked by risk`
+      : page.total === 0 ? "No enrolled endpoints" : "No endpoints on this page";
+    riskContent.append(renderRiskOverview(page));
+    riskPagination.hidden = page.total <= page.limit;
+    riskPrevious.disabled = page.offset === 0;
+    riskNext.disabled = page.offset + page.endpoints.length >= page.total;
+  } catch (error) {
+    if (error instanceof SessionExpired || version !== navigationVersion || !accessToken) return;
+    riskStatus.textContent = "Could not load risk scores";
+    riskContent.append(renderStatePanel("Risk scores are unavailable", "Core could not return risk scores. Check the connection and try again.", loadRisk));
+  }
+}
+
+async function loadRiskDetail(endpointId) {
+  const version = ++navigationVersion;
+  setView("risk-detail");
+  riskDetailStatus.textContent = "Loading endpoint risk…";
+  riskDetailContent.replaceChildren();
+  try {
+    const detail = await getFromCore(`/api/admin/devices/${endpointId}/risk`);
+    if (version !== navigationVersion || !accessToken) return;
+    if (!detail?.risk || !detail.endpointId) throw new Error("Invalid endpoint risk response");
+    riskDetailStatus.textContent = "";
+    riskDetailContent.append(renderEndpointRisk(detail));
+  } catch (error) {
+    if (error instanceof SessionExpired || version !== navigationVersion || !accessToken) return;
+    const missing = error instanceof ApiError && error.status === 404;
+    riskDetailStatus.textContent = missing ? "Endpoint not found" : "Could not load endpoint risk";
+    riskDetailContent.append(renderStatePanel(
+      missing ? "Endpoint not found" : "Endpoint risk is unavailable",
+      missing ? "This endpoint may have been removed or the link is incorrect." : "Core could not return this endpoint's risk factors. Check the connection and try again.",
+      missing ? null : () => loadRiskDetail(endpointId),
+    ));
+  }
+}
+
 function loadRoute() {
   if (!accessToken) {
     showLogin();
@@ -555,13 +625,17 @@ function loadRoute() {
     loadAlerts();
   } else if (route.kind === "alert-detail") {
     loadAlertDetail(route.alertId);
+  } else if (route.kind === "risk") {
+    loadRisk();
+  } else if (route.kind === "risk-detail") {
+    loadRiskDetail(route.endpointId);
   } else {
     navigationVersion += 1;
     setView("detail");
     detailStatus.textContent = "Invalid link";
     detailContent.replaceChildren(renderStatePanel(
       "Invalid link",
-      "Open a device or alert from its list to view details.",
+      "Open a device, alert, or endpoint risk from its list to view details.",
     ));
   }
 }
@@ -610,12 +684,29 @@ signOutButton.addEventListener("click", () => {
   detailContent.replaceChildren();
   alertsContent.replaceChildren();
   alertDetailContent.replaceChildren();
+  riskContent.replaceChildren();
+  riskDetailContent.replaceChildren();
   window.location.hash = "#/devices";
   showLogin("Signed out.");
 });
 
 document.querySelector("#refresh-devices").addEventListener("click", loadDevices);
 document.querySelector("#refresh-alerts").addEventListener("click", loadAlerts);
+document.querySelector("#refresh-risk").addEventListener("click", loadRisk);
+document.querySelector("#refresh-risk-detail").addEventListener("click", () => {
+  const route = routeFromHash(window.location.hash);
+  if (route.kind === "risk-detail") loadRiskDetail(route.endpointId);
+});
+riskPrevious.addEventListener("click", () => {
+  if (riskPrevious.disabled) return;
+  riskOffset = Math.max(0, riskOffset - riskPageSize);
+  loadRisk();
+});
+riskNext.addEventListener("click", () => {
+  if (riskNext.disabled) return;
+  riskOffset += riskPageSize;
+  loadRisk();
+});
 document.querySelector("#alert-filters").addEventListener("submit", (event) => {
   event.preventDefault();
   alertOffset = 0;

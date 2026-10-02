@@ -19,6 +19,7 @@
         <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
           <a id="devices-nav" href="#/devices">Devices</a>
           <a id="alerts-nav" href="#/alerts">Alerts</a>
+          <a id="risk-nav" href="#/risk">Risk</a>
         </nav>
         <div class="header-actions">
           <span class="workspace-label">Local workspace</span>
@@ -109,6 +110,32 @@
         <a class="back-link" href="#/alerts">← All alerts</a>
         <p id="alert-detail-status" class="status-line" role="status" aria-live="polite"></p>
         <div id="alert-detail-content"></div>
+      </section>
+
+      <section id="risk-view" aria-labelledby="risk-heading" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">Deterministic prioritization</p>
+            <h1 id="risk-heading">Risk</h1>
+            <p class="lead">Organization and endpoint scores, with the observations and policy behind them.</p>
+          </div>
+          <button id="refresh-risk" class="button button-secondary" type="button">Refresh</button>
+        </div>
+        <p id="risk-status" class="status-line" role="status" aria-live="polite"></p>
+        <div id="risk-content"></div>
+        <div id="risk-pagination" class="pagination" hidden>
+          <button id="risk-previous" class="button button-secondary" type="button">Previous</button>
+          <button id="risk-next" class="button button-secondary" type="button">Next</button>
+        </div>
+      </section>
+
+      <section id="risk-detail-view" aria-labelledby="risk-detail-heading" hidden>
+        <div class="page-heading">
+          <a class="back-link" href="#/risk">← Organization risk</a>
+          <button id="refresh-risk-detail" class="button button-secondary" type="button">Refresh</button>
+        </div>
+        <p id="risk-detail-status" class="status-line" role="status" aria-live="polite"></p>
+        <div id="risk-detail-content"></div>
       </section>
     </main>
   </body>

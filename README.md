@@ -2,7 +2,7 @@
 
 SentinelAI is a Windows-first, local-first cybersecurity platform. Core provides a local API with SQLite-backed administrator login, endpoint heartbeats, and endpoint inventory. The Agent sends heartbeats and inventory to Core; Core serves a local device dashboard.
 
-The backend uses .NET 10 and contains the Agent, Core web host, shared contracts, and reusable deterministic rules projects. The dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer.
+The backend uses .NET 10 and contains the Agent, Core web host, shared contracts, reusable deterministic rules, and risk scoring projects. The dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer.
 
 From the repository root, run:
 
@@ -11,7 +11,7 @@ From the repository root, run:
 ./scripts/test.sh
 ```
 
-The build script restores and builds the .NET solution, then builds the dashboard. The test script runs Agent and Core integration checks, individual rule tests, and dashboard JavaScript tests.
+The build script restores and builds the .NET solution, then builds the dashboard. The test script runs Agent and Core integration checks, individual rule/scoring tests, and dashboard JavaScript tests.
 
 To start Core for the first time, set a bootstrap administrator name and a password of at least 12 characters. The password is used only to create the initial administrator and is stored as a password hash in SQLite. Remove the password from the environment after the first successful start; later starts use the existing database.
 
@@ -53,6 +53,23 @@ Administrator APIs, all uncached and requiring HTTPS outside loopback:
 - `PUT /api/admin/alerts/{alertId}/status` accepts `{ "status": "investigating", "expectedVersion": 1 }`, using the version from the latest detail response. A stale version returns `409`; an unknown alert returns `404`.
 
 Snapshot-based detections may be stale while an endpoint is offline. Read the observation timestamps before acting. Risk scoring, cross-rule correlation, AI analysis, and automated remediation are outside TASK-008.
+
+## Risk scoring
+
+Open **Risk** in the dashboard for the organization summary and ranked enrolled endpoints, then select an endpoint for its score and contributing factors. Device and alert details link to that endpoint's risk view. Scores are local prioritization indicators. A zero rounded score can reflect small positive contributions, an explicit confidence discount, resolved findings, or missing observations; it does not prove that an endpoint or organization is secure. Missing inventory and unknown observations are explicitly shown.
+
+The deterministic policy combines each tracked alert's severity, configured detection-confidence weight, asset criticality, declared exposure, observation age, and remediation status, plus a bounded bonus for distinct rule groups confirmed in the same fresh latest inventory. Core computes scores from one consistent SQLite snapshot on each request, so newer inventory and administrator status changes are reflected on the next read. No AI determines the score.
+
+Investigating and Accepted do not reduce the status multiplier because acknowledgment does not remediate a finding. Resolved sets that multiplier to zero until a newer positive observation reopens the alert. Older observations retain a reduced raw contribution; they do not silently become safe. Individual factors, defaults, raw contributions, correlation, and any score cap are exposed through the API and dashboard. Organization risk is the highest endpoint score, with counts showing the size and observation coverage of the enrolled estate. See [the scoring policy](scoring/README.md) for the formula, centralized weights, boundary rules, and configuration.
+
+Administrator APIs require the existing bearer token and HTTPS outside loopback, and return uncached responses:
+
+- `GET /api/admin/risk?offset=0&limit=50` returns the organization summary and a ranked endpoint page.
+- `GET /api/admin/devices/{endpointId}/risk` returns the endpoint score and its factor breakdown.
+
+Asset criticality defaults to standard priority; exposure defaults to unknown with a neutral multiplier. They are policy assumptions, not observations inferred from RDP or firewall settings. Operators may declare per-endpoint context through Core configuration. Risk configuration is validated at startup and changes require a Core restart; endpoint and alert data remain persisted.
+
+Configuration lives under `SentinelAI:RiskScoring`. For example, start Core with `--SentinelAI:RiskScoring:EndpointContexts:<endpointId>:AssetCriticality high --SentinelAI:RiskScoring:EndpointContexts:<endpointId>:Exposure internet`, replacing `<endpointId>` with an enrolled endpoint GUID. Policy overrides go under `SentinelAI:RiskScoring:Policy`; use `MaximumCorrelationBaseBonus` for the limit applied before asset/exposure multipliers. The API returns the effective policy. Coverage uses the 13 supported rule inputs, not every possible Windows protection. Inventory freshness defaults to 12 hours (two collection cycles), while age/correlation uses its separately exposed policy window.
 
 ## Windows Agent and enrollment
 

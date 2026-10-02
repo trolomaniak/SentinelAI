@@ -2,44 +2,46 @@
 
 ## Completed
 
-- TASK-001 through TASK-007 are merged through PRs #1, #2, #4, #5, #6, #7, and #8 respectively. Standalone Windows Agent EXE packaging merged through PR #3. TASK-008 started from current `main` at `0e4906a148de418155a28f11e6dcd4d9b00974bb`.
-- TASK-008 is implemented on `codex/task-008-incident-view`: persistent alert tracking, administrator APIs, and the dashboard alert list/details/status workflow. Local build and tests passed on 2026-10-02 with zero .NET warnings/errors. Tests cover migration/backfill, restart persistence, atomic rollback, lifecycle/history, filters/pagination, authorization/HTTPS, stale/concurrent edits, 13 rule cases, Agent integration, and 13 dashboard tests (including nine rendered workflow tests). Core publication passed and included the new dashboard assets. Final diff review found only TASK-008 changes and no new external dependencies.
+- TASK-001 through TASK-008 are merged through PRs #1, #2, #4, #5, #6, #7, #8, and #9 respectively. Standalone Windows Agent EXE packaging merged through PR #3. TASK-009 started from current `main` at `c5c54bbbe6915d2cadc28e018dee8e3a411cff1f`.
+- TASK-009 is implemented on `codex/task-009-risk-score`: a dependency-free scoring library, endpoint/organization risk APIs, centralized validated policy/context configuration, and dashboard score explanations. Local `./scripts/build.sh` and `./scripts/test.sh` passed on 2026-10-02 with zero .NET warnings/errors. Agent/Core integration, 13 rule cases, 59 scoring assertions, and 23 dashboard tests passed. Core publication included `SentinelAI.Scoring.dll` and the new risk view assets. Final diff review found only TASK-009 changes and no new external dependencies.
 
 ## Current architecture
 
-- Agent remains the .NET 10 user-mode Windows Service/console host and self-contained Windows x64 EXE. Stable identity, enrollment credentials, pinned remote HTTPS, heartbeats, six-hour inventory refresh, and bounded explicit Windows configuration collection are unchanged by TASK-008.
-- Core remains an ASP.NET Core service with SQLite administrator/identity/enrollment/heartbeat/latest-inventory persistence. Additive `TrackedAlerts` and `AlertStatusHistory` tables store one posture alert per enrolled endpoint and rule, typed evidence, severity, first/latest observation times, operator status, version, and status-change history. Accepting a newer inventory and recording its positive detections share one transaction. Existing snapshots are backfilled on startup idempotently.
-- The dependency-free deterministic rule library and TASK-007 current-findings API remain separate from persistent alert lifecycle state. Unknown/normal observations never automatically resolve tracked alerts. Repeated positive observations update evidence and last-observed time without creating duplicate rows. Investigating and Accepted are preserved; a strictly newer positive observation reopens Resolved.
-- Administrator-only alert list/detail/status APIs use the existing bearer authentication and HTTPS outside loopback, with uncached responses, parameterized SQLite, bounded pagination, and version-checked status writes. Detail responses include the latest 100 status transitions and their total count; full status history stays in SQLite. Status changes record Core's time and authenticated administrator identity; automatic creation/reopening is attributed to Core.
-- The dependency-free same-origin dashboard adds Alerts navigation, severity/status filters, pagination, detail evidence/recommended action, observation timestamps, and status editing/history. Tokens stay in browser memory; telemetry is rendered as text. Device views remain available. No status action changes endpoint configuration.
+- Agent remains the .NET 10 user-mode Windows Service/console host and self-contained Windows x64 EXE. Enrollment, pinned remote HTTPS, heartbeats, six-hour inventory refresh, and explicit bounded Windows configuration collection remain unchanged.
+- Core keeps existing SQLite identity/enrollment/heartbeat/inventory/alert/history persistence and administrator authentication. TASK-009 adds read-only risk APIs computed from one consistent SQLite snapshot of enrolled endpoints, latest inventory, and tracked alerts, using a single explicit evaluation time. No score table or migration is introduced. Relevant status/inventory changes affect the next uncached read.
+- `scoring/SentinelAI.Scoring.csproj` provides pure decimal scoring with an immutable validated policy snapshot. Alert contributions expose severity, confidence weight, asset criticality, declared exposure, observation age, status/remediation multiplier, points before mitigation, reduction, and final contribution. Correlation uses distinct supported groups with positive contributions confirmed by the same latest snapshot within the age policy window.
+- Default severity points are 1/5/15/25/50; confidence weight is 1; default criticality is standard and exposure unknown, both neutral explicit policy assumptions. Age weights are 1 through seven days, 0.75 through 30 days, and 0.5 thereafter. Open/Investigating/Accepted use status multiplier 1; Resolved uses 0. Default correlation adds five base points per additional group, capped at 20 before asset/exposure multipliers. Raw score, weighted correlation, saturation, and final 0–100 rounded score are explained. Organization score is the highest endpoint score; ties have one bounded representative plus total count.
+- `SentinelAI:RiskScoring` configures policy, optional per-endpoint declared criticality/exposure, and inventory freshness (default 12 hours, two inventory cycles). Invalid configuration fails startup. Context sources and the effective policy are exposed; confidence is a policy weight rather than a calibrated probability. Coverage distinguishes missing/unknown/partial/complete inputs for the 13 supported rules, plus stale inventory; it does not certify all Windows protections.
+- Administrator-only `GET /api/admin/risk` returns organization/fleet coverage and a bounded ranked endpoint page. `GET /api/admin/devices/{endpointId}/risk` returns full factors/contributions. Both retain existing bearer authentication, HTTPS outside loopback, no-store, and credential separation. Existing device, alert, and current-findings APIs keep their contracts.
+- The dependency-free same-origin dashboard adds Risk navigation, ranked endpoint pagination, organization explanation, endpoint factor breakdown, coverage/freshness, raw/capped values, and links from devices/alerts. Browser tokens remain in memory and data is rendered as text. Existing device and alert/status workflows remain available.
 
 ## Important decisions
 
-See `.agent/DECISIONS.md` for atomic persistent alert tracking, duplicate prevention, manual lifecycle semantics, and version conflict handling, along with earlier rules, dashboard, enrollment, and inventory decisions.
+See `.agent/DECISIONS.md` and `scoring/README.md` for the explainable prioritization policy, fixed remediation semantics, declared context defaults, correlation limits, organization maximum, and unknown-data/rounding limitations.
 
 ## Known issues
 
-- Findings describe reported configuration, not effective protection or Internet exposure. Inventory refreshes every six hours and may be stale during outages; observation timestamps are shown. BitLocker, live AV health, administrator baselines, and missing-patch indicators still require additional telemetry.
-- One tracked alert retains its first observation and latest positive evidence rather than every evidence snapshot. Status history is durable. Normal/unknown telemetry does not close an alert automatically; administrators review and set status. Cross-rule correlation and risk scoring are not implemented in TASK-008.
-- Lost Agent enrollment state or a lost first enrollment response still needs an explicit administrator recovery workflow; duplicate enrollment returns `409`.
-- Operators must provision HTTPS and the Agent certificate fingerprint for LAN access. Dashboard remote HTTP sign-in and new administrator reads/mutations are rejected; the pre-existing direct `/api/auth/login` API still accepts remote HTTP if Core is explicitly exposed that way.
-- The dashboard refreshes on navigation or Refresh, with reload/expiry requiring sign-in. The Agent artifact remains an unsigned development EXE; signed pilot installation belongs to TASK-015.
-- ASP.NET Core's unused key manager can log a generic unencrypted-key warning; its repository is process-local and no key file is written by Core.
+- Scores prioritize reported configuration findings; they do not establish effective protection, Internet exposure, attack probability, or telemetry completeness. A zero rounded score can reflect small positive raw values, explicit confidence discounts, resolved alerts, or missing observations. It never proves safety.
+- Criticality/exposure are operator declarations or policy defaults. Confidence weights are not statistically calibrated. The default 12-hour coverage freshness label and seven-/30-day scoring age windows serve different purposes and are exposed separately.
+- Scores use current policy and latest positive alert evidence, not historical risk/evidence snapshots. Investigating/Accepted do not remediate risk; Resolved removes its status contribution until newer positive evidence reopens it. Normal/unknown inventory never automatically closes stored alerts.
+- Inventory may be stale during outages. BitLocker, live AV health, administrator baselines, and missing-patch indicators still need additional telemetry. No AI or remediation action is introduced by scoring.
+- Lost Agent enrollment state still needs an administrator recovery workflow; duplicate enrollment returns `409`. Operators provision HTTPS/certificate pinning. The pre-existing direct `/api/auth/login` endpoint still accepts remote HTTP if Core is explicitly exposed that way; dashboard sign-in and new administrator risk reads reject it.
+- Dashboard refresh/reload/expiry behavior remains manual/in-memory. Agent artifacts are unsigned development builds; signed pilot installation belongs to TASK-015. ASP.NET Core's unused key manager may emit its existing generic warning, without persisting a key file.
 
-## TASK-008 Definition of Done
+## TASK-009 Definition of Done
 
-- Alerts persist in Core: additive SQLite alert/history storage with atomic inventory ingestion and startup backfill.
-- Dashboard shows an alert list with severity/status filtering and pagination.
-- Details show endpoint, reason, evidence, recommended remediation, observation times, and status history.
-- Administrators can update Open, Investigating, Resolved, and Accepted with optimistic conflict checks.
-- API tests cover persistence, authorization/transport, filtering, status changes/conflicts, and upgrade behavior.
-- Frontend tests/build pass: all 13 dashboard tests, syntax checks, and dashboard build passed; full backend solution build and Agent/Core/rules tests passed as well.
-- Status is updated with architecture, decisions, limitations, next task, and the verified commit when available.
+- Endpoint risk score exists with raw/rounded/capped values and explicit factors.
+- Organization score exists with highest-endpoint explanation and fleet coverage.
+- Relevant alert state changes affect on-demand scores without a stale score cache.
+- API exposes every contributing factor, context source, and effective policy.
+- Dashboard displays score and explanation, including missing/stale coverage and rounding limits.
+- Scoring boundary tests pass: age/clock skew, status and confidence factors, declared contexts, current-snapshot correlation, decimal rounding/caps, organization aggregation/ties, and invalid policy. API integration and rendered frontend tests pass alongside previous regressions.
+- Status is updated with architecture, decisions, limitations, next task, and verified commit when available.
 
 ## Next task
 
-TASK-009 — Risk score. Do not start it as part of TASK-008.
+TASK-010 — License API. Do not start it as part of TASK-009.
 
 ## Last verified commit
 
-`f306a414e1f11a9a723b0d62e99f0741912c5884` — TASK-008 implementation passed local solution/dashboard build, Agent/Core/rules/dashboard tests, and Core publication containing the new dashboard assets.
+`c5c54bbbe6915d2cadc28e018dee8e3a411cff1f` — merged TASK-008 base verified through PR #9 CI. The TASK-009 working tree passed the checks above before its implementation commit.
