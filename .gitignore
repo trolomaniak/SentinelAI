@@ -23,6 +23,7 @@ coverage/
 *.p12
 *.pfx
 *.key
+*.private.pem
 
 # Logs
 *.log
