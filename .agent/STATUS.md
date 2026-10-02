@@ -42,4 +42,4 @@ TASK-008 — Incident view. Do not start it as part of TASK-007.
 
 ## Last verified commit
 
-`7932e05f9fea045c092f1cf01ea55da0a5845f38` — merged TASK-006 base. The TASK-007 working tree passed the checks above before its implementation commit.
+`0b697aa504551382af6562789dfcbeb68d5bbc5a` — TASK-007 implementation passed local solution/dashboard build, Agent/Core/rules/dashboard tests, and standalone Windows Agent EXE publication.
