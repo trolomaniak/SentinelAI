@@ -44,8 +44,13 @@ public sealed class AdminStore
 
     public string DatabasePath { get; }
 
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    public Task InitializeAsync(CancellationToken cancellationToken = default) =>
+        InitializeAsync(allowBootstrap: true, cancellationToken);
+
+    internal async Task InitializeAsync(bool allowBootstrap, CancellationToken cancellationToken = default)
     {
+        if (!allowBootstrap && !File.Exists(DatabasePath))
+            throw SetupRequired();
         EnsurePrivateStorage();
 
         await using var connection = CreateConnection(SqliteOpenMode.ReadWriteCreate);
@@ -77,6 +82,8 @@ public sealed class AdminStore
         var createdAdministrator = administratorCount == 0;
         if (createdAdministrator)
         {
+            if (!allowBootstrap)
+                throw SetupRequired();
             var username = Environment.GetEnvironmentVariable(BootstrapUsernameVariable)?.Trim();
             var password = Environment.GetEnvironmentVariable(BootstrapPasswordVariable);
             if (string.IsNullOrWhiteSpace(username) || password is null || password.Length < 12)
@@ -112,6 +119,9 @@ public sealed class AdminStore
             File.SetUnixFileMode(DatabasePath, FileMode);
         }
     }
+
+    private static InvalidOperationException SetupRequired() =>
+        new("Core service startup requires an existing local administrator. Complete local setup before starting the service.");
 
     public async Task<AdminRecord?> FindByUsernameAsync(
         string username,

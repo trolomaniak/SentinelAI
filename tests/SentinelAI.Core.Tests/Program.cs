@@ -299,6 +299,7 @@ try
         await AlertApiTests.VerifyRemoteHttpAsync(client, accessToken, alertTestState.AlertId);
     }
 
+    await CoreServiceHostingTests.RunAsync();
     Console.WriteLine("Core integration tests passed.");
 }
 finally

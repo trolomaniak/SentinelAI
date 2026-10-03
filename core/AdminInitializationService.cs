@@ -8,11 +8,12 @@ internal sealed class AdminInitializationService(
     EnrollmentStore enrollments,
     InventoryStore inventories,
     AlertStore alerts,
-    LicenseStateStore licenses) : IHostedService
+    LicenseStateStore licenses,
+    CoreHostingMode hostingMode) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await admins.InitializeAsync(cancellationToken);
+        await admins.InitializeAsync(allowBootstrap: !hostingMode.IsWindowsService, cancellationToken);
         await devices.InitializeAsync(cancellationToken);
         await enrollments.InitializeAsync(cancellationToken);
         await inventories.InitializeAsync(cancellationToken);

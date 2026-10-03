@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Contracts.Inventory;
@@ -25,9 +26,17 @@ namespace SentinelAI.Core;
 public static class CoreHost
 {
     public static WebApplication Build(string[] args, Action<WebApplicationBuilder>? configureBuilder = null)
+        => Build(args, WindowsServiceHelpers.IsWindowsService(), configureBuilder);
+
+    // The service-policy branch is testable on any host; SCM lifetime activation remains
+    // exclusively controlled by the official Windows service detector.
+    internal static WebApplication Build(string[] args, bool isWindowsService, Action<WebApplicationBuilder>? configureBuilder = null)
     {
         var pilot = PilotHostConfiguration.Read(args, agent: false);
-        var builder = pilot.Values is null ? WebApplication.CreateBuilder(args) :
+        CoreServiceHosting.ValidateStartup(isWindowsService, pilot.Values is not null,
+            Environment.GetEnvironmentVariable("SENTINELAI_BOOTSTRAP_USERNAME"),
+            Environment.GetEnvironmentVariable("SENTINELAI_BOOTSTRAP_PASSWORD"));
+        var builder = pilot.Values is null && !isWindowsService ? WebApplication.CreateBuilder(args) :
             WebApplication.CreateBuilder(new WebApplicationOptions
             {
                 Args = pilot.Arguments,
@@ -47,8 +56,18 @@ public static class CoreHost
             builder.WebHost.UseUrls("http://127.0.0.1:5000");
         }
 
+        builder.Services.AddWindowsService(options => options.ServiceName = CoreServiceHosting.ServiceName);
+        // Preserve the existing sanitized logger setup instead of the service package's
+        // optional Event Log provider (which would require an installer-created source).
         builder.Logging.ClearProviders();
         builder.Logging.AddJsonConsole();
+        builder.Services.AddSingleton(new CoreHostingMode(isWindowsService));
+        if (isWindowsService)
+            builder.Services.Configure<HostOptions>(options =>
+            {
+                options.ShutdownTimeout = CoreServiceHosting.ShutdownTimeout;
+                options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.StopHost;
+            });
 
         builder.Services.Configure<PasswordHasherOptions>(options =>
         {

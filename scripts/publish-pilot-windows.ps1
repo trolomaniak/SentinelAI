@@ -53,6 +53,7 @@ try {
     }
     Copy-Item -LiteralPath (Join-Path $repo 'installer/pilot') -Destination (Join-Path $OutputDirectory 'installer') -Recurse
     Copy-Item -LiteralPath (Join-Path $repo 'docs/PILOT.md') -Destination (Join-Path $OutputDirectory 'PILOT.md')
+    Copy-Item -LiteralPath (Join-Path $repo 'docs/CORE-SERVICE.md') -Destination (Join-Path $OutputDirectory 'CORE-SERVICE.md')
     $complete = $true
     Write-Output ('Development pilot bundle created: ' + $OutputDirectory)
 } catch {

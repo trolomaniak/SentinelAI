@@ -87,6 +87,46 @@ jobs:
           path: artifacts/agent/win-x64/SentinelAI.Agent.exe
           if-no-files-found: error
 
+  core-service-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Run Core hosting and persistence tests
+        shell: pwsh
+        run: dotnet run --project tests/SentinelAI.Core.Tests/SentinelAI.Core.Tests.csproj --configuration Release
+      - name: Run portable Core service installer tests
+        shell: pwsh
+        run: |
+          ./tests/core-service/Workflow.Tests.ps1
+          ./tests/core-service/Health.Tests.ps1
+      - name: Prepare signed development pilot bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $keys = Join-Path $env:RUNNER_TEMP ('sentinelai-service-keys-' + [Guid]::NewGuid().ToString('N'))
+          dotnet run --project tools/update-dev --configuration Release -- keygen --directory $keys --key-id dev-service-ci
+          if ($LASTEXITCODE -ne 0) { throw 'Development key generation failed.' }
+          try {
+            ./scripts/publish-pilot-windows.ps1 -Version 1.0.0 -DevelopmentPrivateKey (Join-Path $keys 'dev-service-ci.private.pem') -KeyId dev-service-ci
+            $publicKey = Join-Path $env:RUNNER_TEMP 'sentinelai-service-ci.public.pem'
+            Copy-Item -LiteralPath (Join-Path $keys 'dev-service-ci.public.pem') -Destination $publicKey
+          } finally {
+            Remove-Item -LiteralPath $keys -Recurse -Force
+          }
+      - name: Publish desktop for independent-lifetime acceptance
+        shell: bash
+        run: ./scripts/publish-desktop-windows.sh
+      - name: Verify native Core service lifecycle and recovery
+        shell: pwsh
+        run: |
+          ./tests/core-service/Windows.Acceptance.ps1 -BundleDirectory ./artifacts/pilot/win-x64/1.0.0 `
+            -PublicKeyPath (Join-Path $env:RUNNER_TEMP 'sentinelai-service-ci.public.pem') `
+            -KeyId dev-service-ci -Environment development -Channel pilot `
+            -DesktopExecutablePath ./artifacts/desktop/win-x64/SentinelAI.Desktop.exe
+
   package-desktop-windows:
     runs-on: windows-latest
     steps:
