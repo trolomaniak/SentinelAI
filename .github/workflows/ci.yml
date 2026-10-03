@@ -96,7 +96,16 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Run Core hosting and persistence tests
         shell: pwsh
-        run: dotnet run --project tests/SentinelAI.Core.Tests/SentinelAI.Core.Tests.csproj --configuration Release
+        run: |
+          dotnet run --project tests/SentinelAI.Core.Tests/SentinelAI.Core.Tests.csproj --configuration Release *> "$env:RUNNER_TEMP\sentinelai-core-test.log"
+          $testExitCode = $LASTEXITCODE
+          $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-core-test.log" | Select-Object -Last 35
+          $tail
+          if ($testExitCode -ne 0) {
+            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows Core hosting test::$message"
+          }
+          exit $testExitCode
       - name: Run portable Core service installer tests
         shell: pwsh
         run: |
@@ -139,7 +148,16 @@ jobs:
         run: dotnet run --project tests/SentinelAI.Desktop.Tests/SentinelAI.Desktop.Tests.csproj --configuration Release
       - name: Run native WPF navigation and DPI tests
         shell: pwsh
-        run: dotnet run --project tests/SentinelAI.Desktop.Windows.Tests/SentinelAI.Desktop.Windows.Tests.csproj --configuration Release --runtime win-x64
+        run: |
+          dotnet run --project tests/SentinelAI.Desktop.Windows.Tests/SentinelAI.Desktop.Windows.Tests.csproj --configuration Release --runtime win-x64 *> "$env:RUNNER_TEMP\sentinelai-desktop-test.log"
+          $testExitCode = $LASTEXITCODE
+          $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-desktop-test.log" | Select-Object -Last 35
+          $tail
+          if ($testExitCode -ne 0) {
+            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Native WPF navigation test::$message"
+          }
+          exit $testExitCode
       - name: Publish self-contained Windows desktop
         shell: bash
         run: ./scripts/publish-desktop-windows.sh
