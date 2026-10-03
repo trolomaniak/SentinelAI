@@ -21,7 +21,22 @@ jobs:
       - name: Restore and build solution and dashboard
         run: ./scripts/build.sh
       - name: Run backend, desktop foundation and dashboard tests
-        run: ./scripts/test.sh
+        run: |
+          set +e
+          ./scripts/test.sh > "$RUNNER_TEMP/sentinelai-regression-test.log" 2>&1
+          test_exit_code=$?
+          tail -n 35 "$RUNNER_TEMP/sentinelai-regression-test.log"
+          if [ "$test_exit_code" -ne 0 ]; then
+            python3 - <<'PY'
+          import os
+          from pathlib import Path
+          lines = Path(os.environ['RUNNER_TEMP'], 'sentinelai-regression-test.log').read_text(errors='replace').splitlines()
+          message = '\n'.join(line for line in lines[-35:] if not line.startswith('{'))[-3800:]
+          message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print('::error title=Regression tests::' + message)
+          PY
+          fi
+          exit "$test_exit_code"
 
   package-agent-windows:
     runs-on: windows-latest
@@ -102,7 +117,9 @@ jobs:
           $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-core-test.log" | Select-Object -Last 35
           $tail
           if ($testExitCode -ne 0) {
-            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            $message = (($tail | Where-Object { -not $_.StartsWith('{') }) -join "`n")
+            if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Output "::error title=Windows Core hosting test::$message"
           }
           exit $testExitCode

@@ -25,12 +25,20 @@ internal static class Program
         }
 
         var app = new TestApp();
-        app.InitializeComponent();
         app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var dispatcher = Dispatcher.CurrentDispatcher;
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
         try
         {
+            // Load real production dictionaries by their owning assembly. The
+            // published-GUI acceptance separately verifies App's composition.
+            foreach (var resource in new[] { "Themes/Light.xaml", "Themes/Controls.xaml" })
+            {
+                app.Resources.MergedDictionaries.Add(new ResourceDictionary
+                {
+                    Source = new Uri($"pack://application:,,,/SentinelAI.Desktop;component/{resource}", UriKind.Absolute)
+                });
+            }
             // TestApp suppresses the startup callback scheduled by Application's
             // constructor, while retaining the production XAML resources.
             var tests = RunAsync(app);
@@ -53,7 +61,7 @@ internal static class Program
         }
     }
 
-    private static async Task RunAsync(App app)
+    private static async Task RunAsync(Application app)
     {
         using var bindings = new BindingTrace();
         var bindingSource = PresentationTraceSources.DataBindingSource;
@@ -220,12 +228,12 @@ internal static class Program
         public void Dispose() => Disposed = true;
     }
 
-    private sealed class TestApp : App
+    private sealed class TestApp : Application
     {
         protected override void OnStartup(StartupEventArgs e)
         {
-            // Never invoke App.OnStartup: this separate test executable injects
-            // its own fake client and creates exactly one tested window.
+            // This separate test executable injects its own fake client and
+            // creates exactly one tested window rather than running the host.
         }
     }
 
