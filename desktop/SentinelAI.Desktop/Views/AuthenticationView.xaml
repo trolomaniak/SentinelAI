@@ -1,0 +1,77 @@
+<UserControl x:Class="SentinelAI.Desktop.Views.AuthenticationView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:auth="clr-namespace:SentinelAI.Desktop.Foundation;assembly=SentinelAI.Desktop.Foundation"
+             x:Name="Root" AutomationProperties.AutomationId="AuthenticationView">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel MaxWidth="520" HorizontalAlignment="Stretch" Margin="0,0,0,12">
+            <TextBlock Text="Your local workspace" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,12,0,8"
+                       AutomationProperties.AutomationId="AuthenticationStatusText" AutomationProperties.LiveSetting="Polite" />
+            <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                       Foreground="{DynamicResource PrimaryTextBrush}" AutomationProperties.AutomationId="AuthenticationErrorText"
+                       AutomationProperties.LiveSetting="Assertive" />
+            <StackPanel x:Name="CredentialPanel">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSignedIn}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding SetupOnly, ElementName=Root}" Value="True" />
+                                    <Condition Binding="{Binding State}" Value="{x:Static auth:AuthenticationState.SignedOut}" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <TextBlock Text="Username" Margin="0,8,0,4" />
+                <TextBox x:Name="UsernameInput" Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}"
+                         MaxLength="256" AutomationProperties.AutomationId="AuthenticationUsername" AutomationProperties.Name="Administrator username" />
+                <TextBlock Text="Password" Margin="0,12,0,4" />
+                <PasswordBox x:Name="PasswordInput" MaxLength="1024" Padding="8"
+                             AutomationProperties.AutomationId="AuthenticationPassword" AutomationProperties.Name="Administrator password" />
+                <Button x:Name="SignInButton" Content="Sign in" Click="OnSignIn" Margin="0,16,0,0"
+                        IsEnabled="{Binding CanSignIn}" AutomationProperties.AutomationId="SignInButton">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding State}" Value="{x:Static auth:AuthenticationState.SetupRequired}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                <DataTrigger Binding="{Binding SetupOnly, ElementName=Root}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button x:Name="CreateAdministratorButton" Content="Create administrator" Click="OnCreateAdministrator"
+                        Margin="0,16,0,0" IsEnabled="{Binding CanCreateAdministrator}" AutomationProperties.AutomationId="CreateAdministratorButton">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers><DataTrigger Binding="{Binding State}" Value="{x:Static auth:AuthenticationState.SetupRequired}"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </StackPanel>
+            <Button Content="Open initial setup as administrator" Click="OnElevatedSetup" Margin="0,12,0,0"
+                    AutomationProperties.AutomationId="ElevatedSetupButton">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers><DataTrigger Binding="{Binding RequiresElevation}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+            <Button Content="Check again" Click="OnRefresh" Margin="0,12,0,0" AutomationProperties.AutomationId="RefreshAuthenticationButton" />
+            <StackPanel>
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers><DataTrigger Binding="{Binding IsSignedIn}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <TextBlock Text="{Binding DisplayName}" AutomationProperties.AutomationId="AdministratorNameText" />
+                <Button Content="Sign out" Click="OnSignOut" Margin="0,12,0,0" AutomationProperties.AutomationId="SignOutButton" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

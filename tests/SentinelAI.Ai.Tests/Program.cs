@@ -517,7 +517,10 @@ sealed class RemoteConnectionFilter : Microsoft.AspNetCore.Hosting.IStartupFilte
     {
         app.Use((context, continuation) =>
         {
-            context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.20");
+            // Create the Core test session locally; all other requests remain
+            // simulated as remote plaintext, including the gateway transport test.
+            if (!context.Request.Path.StartsWithSegments("/api/auth/login"))
+                context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.20");
             return continuation(context);
         });
         next(app);

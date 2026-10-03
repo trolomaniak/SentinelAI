@@ -4,7 +4,7 @@ Core can run as the managed `SentinelAICore` Windows Service on Windows 11 x64. 
 
 ## Install
 
-Follow [pilot package preparation and Core installation](PILOT.md) using a fresh development/test environment, a trusted bootstrap installer and a separately provisioned public key. Initialize the administrator through `Start-SentinelAICore.ps1`, then stop that exact console process before registering the service. Bootstrap input stays in the child console process's environment. Service mode rejects bootstrap environment credentials and refuses a database without an initialized administrator.
+Follow [pilot package preparation and Core installation](PILOT.md) using a fresh development/test environment, a trusted bootstrap installer and a separately provisioned public key. Initialize the administrator through [native Desktop setup](DESKTOP-AUTH.md) before registering the service. The existing `Start-SentinelAICore.ps1` console alternative remains available; stop that exact console process before service registration. Desktop setup uses a private Core stdin pipe; legacy console bootstrap stays in the child console environment. Service mode rejects bootstrap environment credentials and refuses a database without an initialized administrator.
 
 Open PowerShell **as Administrator** from a trusted checkout or the packaged installer directory:
 

@@ -1,5 +1,7 @@
 # Native acceptance of the published GUI. Run on an interactive Windows x64
 # desktop; a live Core, administrator credentials and a browser are unnecessary.
+# Authentication protects production navigation; signed-in page navigation is
+# exercised separately by the focused WPF and live authentication acceptance.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$ExecutablePath,
@@ -112,28 +114,25 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($windowHandle))
 if ($null -eq $root -or $root.Current.ProcessId -ne $desktopProcessId) { throw 'UI Automation did not attach to the exact desktop child.' }
-$navCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'NavigationList')
-$navigation = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $navCondition)
-if ($null -eq $navigation) { throw 'The published window has no accessible native navigation.' }
-$itemCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem)
-$items = $navigation.FindAll([System.Windows.Automation.TreeScope]::Descendants, $itemCondition)
-if ($items.Count -lt 2) { throw 'Native navigation has fewer than two placeholder pages.' }
-$headingCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'PageHeading')
-for ($index = 0; $index -lt $items.Count; $index++) {
-    $item = $items[$index]
-    $expectedTitle = $item.Current.Name
-    $selection = [System.Windows.Automation.SelectionItemPattern]$item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-    $selection.Select()
-    $wait = [Diagnostics.Stopwatch]::StartNew()
-    $matched = $false
-    while ($wait.Elapsed.TotalSeconds -lt 5) {
-        $heading = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $headingCondition)
-        if ($null -ne $heading -and $heading.Current.Name -ceq $expectedTitle) { $matched = $true; break }
-        Start-Sleep -Milliseconds 50
-    }
-    if (-not $matched) { throw ('Selecting a native navigation item did not render its placeholder heading: ' + $expectedTitle) }
+function Find-Control([string]$id) {
+    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
+    return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
-Write-Output ('Native UI Automation verified ' + $items.Count + ' placeholder pages.')
+$wait = [Diagnostics.Stopwatch]::StartNew()
+while ($wait.Elapsed.TotalSeconds -lt 10 -and $null -eq (Find-Control 'AuthenticationView')) { Start-Sleep -Milliseconds 50 }
+$authentication = Find-Control 'AuthenticationView'
+if ($null -eq $authentication -or $authentication.Current.IsOffscreen) { throw 'The published window did not show native authentication.' }
+$password = Find-Control 'AuthenticationPassword'
+if ($null -eq $password -or -not $password.Current.IsPassword) { throw 'Native authentication has no protected password control.' }
+$navigation = Find-Control 'NavigationList'
+if ($null -ne $navigation -and -not $navigation.Current.IsOffscreen -and $navigation.Current.IsEnabled) {
+    throw 'Production navigation was available without a Core-authenticated desktop session.'
+}
+$identity = Find-Control 'AdministratorNameText'
+if ($null -ne $identity -and -not $identity.Current.IsOffscreen -and -not [string]::IsNullOrWhiteSpace($identity.Current.Name)) {
+    throw 'The unauthenticated desktop displayed an administrator session.'
+}
+Write-Output 'Native UI Automation verified protected authentication and signed-out navigation.'
 '@
     $probeHost = Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/WindowsPowerShell/v1.0/powershell.exe'
     Assert-DesktopAcceptance (Test-Path -LiteralPath $probeHost -PathType Leaf) 'The native Windows UI Automation probe host is unavailable.'
@@ -145,8 +144,8 @@ Write-Output ('Native UI Automation verified ' + $items.Count + ' placeholder pa
     $probeProcess = [Diagnostics.Process]::Start($probeStart)
     $null = $probeProcess.Handle
     Assert-DesktopAcceptance ($probeProcess.WaitForExit($TimeoutSeconds * 1000)) 'Native UI Automation did not finish before the deadline.'
-    Assert-DesktopAcceptance ($probeProcess.ExitCode -eq 0) 'Published placeholder-page UI Automation failed.'
-    Assert-DesktopAcceptance (-not $desktop.HasExited) 'The published desktop exited during native navigation.'
+    Assert-DesktopAcceptance ($probeProcess.ExitCode -eq 0) 'Published signed-out authentication UI Automation failed.'
+    Assert-DesktopAcceptance (-not $desktop.HasExited) 'The published desktop exited during native authentication checks.'
 
     Assert-DesktopAcceptance ([SentinelAIDesktopAcceptance.NativeWindow]::PostMessage($windowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) 'The native close request failed.'
     Assert-DesktopAcceptance ($desktop.WaitForExit($TimeoutSeconds * 1000)) 'Desktop did not shut down gracefully before the deadline.'

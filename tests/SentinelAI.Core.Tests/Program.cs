@@ -300,6 +300,7 @@ try
     }
 
     await CoreServiceHostingTests.RunAsync();
+    await DesktopAuthenticationTests.RunAsync();
     Console.WriteLine("Core integration tests passed.");
 }
 finally

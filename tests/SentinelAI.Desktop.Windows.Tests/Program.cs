@@ -10,6 +10,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using SentinelAI.Desktop;
 using SentinelAI.Desktop.Foundation;
+using SentinelAI.Desktop.Views;
 
 internal static class Program
 {
@@ -157,6 +158,83 @@ internal static class Program
             bindingSource.Listeners.Remove(bindings);
             bindingSource.Switch.Level = originalLevel;
         }
+        await AuthenticationViewsAsync();
+    }
+
+    private static async Task AuthenticationViewsAsync()
+    {
+        using var health = new FakeCoreClient();
+        using var shell = new ShellViewModel(health, "auth-test");
+        var client = new FakeAuthenticationClient();
+        var setup = new FakeAdministratorSetup();
+        using var model = new AuthenticationViewModel(client, setup);
+        var window = new MainWindow(shell, model);
+        try
+        {
+            window.Show();
+            await WaitForAsync(() => model.State == AuthenticationState.SetupRequired, "Fresh native Desktop did not offer administrator creation.");
+            var panel = RequireControl<AuthenticationView>(window, "AuthenticationPanel");
+            var password = (PasswordBox)panel.FindName("PasswordInput");
+            var create = (Button)panel.FindName("CreateAdministratorButton");
+            var signin = (Button)panel.FindName("SignInButton");
+            var navigation = RequireControl<ListBox>(window, "NavigationList");
+            Ensure(!navigation.IsEnabled && create.IsVisible && !signin.IsVisible, "First-run navigation was not protected.");
+            model.Username = "wpf-admin";
+            password.Password = "Wpf-Test-Only-Secret!";
+            var passwordPeer = new System.Windows.Automation.Peers.PasswordBoxAutomationPeer(password);
+            Ensure(passwordPeer.IsPassword(), "Native password input was not marked protected for accessibility.");
+            if (passwordPeer.GetPattern(System.Windows.Automation.Peers.PatternInterface.Value) is System.Windows.Automation.Provider.IValueProvider value)
+                Ensure(string.IsNullOrEmpty(value.Value), "Native password input exposed its secret through accessibility.");
+            create.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Ensure(password.Password.Length == 0, "Bootstrap submission retained the native password input.");
+            await WaitForAsync(() => model.State == AuthenticationState.SignedOut, "Native bootstrap did not return to sign-in.");
+            Ensure(setup.Created && !client.SignedIn, "Bootstrap bypassed Core's separate authentication boundary.");
+            password.Password = "wrong-test-password";
+            signin.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitForAsync(() => !model.IsBusy, "Invalid native sign-in did not finish.");
+            Ensure(!model.IsSignedIn && model.ErrorText == "The username or password is incorrect." && password.Password.Length == 0,
+                "Invalid native credentials were not handled safely.");
+            client.AllowSignIn = true;
+            password.Password = "Wpf-Test-Only-Secret!";
+            signin.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitForAsync(() => model.IsSignedIn && navigation.IsEnabled, "Authenticated native navigation did not become available.");
+            Ensure(password.Password.Length == 0 && !signin.IsVisible, "Signed-in native UI retained credential entry.");
+            client.Session = SessionStatus.Expired;
+            await model.CheckSessionAsync();
+            await FlushAsync();
+            Ensure(!model.IsSignedIn && !navigation.IsEnabled && signin.IsVisible, "Expired native session left workspace access available.");
+            model.Username = "wpf-admin";
+            password.Password = "Wpf-Test-Only-Secret!";
+            signin.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitForAsync(() => model.IsSignedIn, "Explicit native reconnect failed.");
+            model.SignOut();
+            await FlushAsync();
+            Ensure(model.Username.Length == 0 && password.Password.Length == 0 && !navigation.IsEnabled, "Native sign-out retained local authentication material.");
+            window.Close();
+            Ensure(client.Disposed && setup.Disposed, "Native close did not release authentication adapters.");
+        }
+        finally { if (window.IsVisible) window.Close(); }
+    }
+
+    private sealed class FakeAuthenticationClient : IAuthenticationClient
+    {
+        public bool AllowSignIn, SignedIn, Disposed;
+        public SessionStatus Session = SessionStatus.Authenticated;
+        public Task<AuthenticationResult> SignInAsync(string username, ReadOnlyMemory<char> password, CancellationToken token)
+        {
+            SignedIn = AllowSignIn; Session = SessionStatus.Authenticated;
+            return Task.FromResult(new AuthenticationResult(AllowSignIn ? AuthenticationOutcome.Authenticated : AuthenticationOutcome.InvalidCredentials, AllowSignIn ? username : null));
+        }
+        public Task<SessionResult> ValidateSessionAsync(CancellationToken token) => Task.FromResult(new SessionResult(Session, Session == SessionStatus.Authenticated ? "wpf-admin" : null));
+        public void SignOut() => SignedIn = false;
+        public void Dispose() { Disposed = true; SignOut(); }
+    }
+    private sealed class FakeAdministratorSetup : IAdministratorSetupClient
+    {
+        public bool Created, Disposed;
+        public Task<AdministratorSetupState> GetStateAsync(CancellationToken token) => Task.FromResult(Created ? AdministratorSetupState.Initialized : AdministratorSetupState.Required);
+        public Task<AdministratorSetupResult> InitializeAsync(string username, ReadOnlyMemory<char> password, CancellationToken token) { Created = true; return Task.FromResult(AdministratorSetupResult.Created); }
+        public void Dispose() => Disposed = true;
     }
 
     private static T RequireControl<T>(Window window, string name) where T : FrameworkElement
