@@ -18,9 +18,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Restore and build backend and dashboard
+      - name: Restore and build solution and dashboard
         run: ./scripts/build.sh
-      - name: Run backend tests
+      - name: Run backend, desktop foundation and dashboard tests
         run: ./scripts/test.sh
 
   package-agent-windows:
@@ -85,4 +85,29 @@ jobs:
         with:
           name: SentinelAI.Agent-win-x64
           path: artifacts/agent/win-x64/SentinelAI.Agent.exe
+          if-no-files-found: error
+
+  package-desktop-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Run desktop foundation tests
+        shell: pwsh
+        run: dotnet run --project tests/SentinelAI.Desktop.Tests/SentinelAI.Desktop.Tests.csproj --configuration Release
+      - name: Run native WPF navigation and DPI tests
+        shell: pwsh
+        run: dotnet run --project tests/SentinelAI.Desktop.Windows.Tests/SentinelAI.Desktop.Windows.Tests.csproj --configuration Release --runtime win-x64
+      - name: Publish self-contained Windows desktop
+        shell: bash
+        run: ./scripts/publish-desktop-windows.sh
+      - name: Verify published desktop opens and shuts down gracefully
+        shell: pwsh
+        run: ./tests/desktop/Windows.Acceptance.ps1 -ExecutablePath ./artifacts/desktop/win-x64/SentinelAI.Desktop.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SentinelAI.Desktop-win-x64
+          path: artifacts/desktop/win-x64/
           if-no-files-found: error

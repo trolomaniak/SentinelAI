@@ -14,6 +14,7 @@ dotnet run --project "$repo_root/tests/SentinelAI.Licensing.Tests/SentinelAI.Lic
 dotnet run --project "$repo_root/tests/SentinelAI.LicenseApi.Tests/SentinelAI.LicenseApi.Tests.csproj" --configuration Release --no-build --no-restore
 dotnet run --project "$repo_root/tests/SentinelAI.Ai.Tests/SentinelAI.Ai.Tests.csproj" --configuration Release --no-build --no-restore
 dotnet run --project "$repo_root/tests/SentinelAI.Updates.Tests/SentinelAI.Updates.Tests.csproj" --configuration Release --no-build --no-restore
+dotnet run --project "$repo_root/tests/SentinelAI.Desktop.Tests/SentinelAI.Desktop.Tests.csproj" --configuration Release --no-build --no-restore
 
 if command -v pwsh >/dev/null 2>&1; then
   pwsh -NoLogo -NoProfile -NonInteractive -File "$repo_root/tests/pilot/Workflow.Tests.ps1"

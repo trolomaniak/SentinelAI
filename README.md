@@ -26,6 +26,10 @@ Core listens at `http://127.0.0.1:5000` by default. Set `ASPNETCORE_URLS` to cha
 
 `GET /api/health` is public. `POST /api/auth/login` accepts JSON with `username` and `password` and returns a short-lived bearer access token when credentials are valid. Send it as `Authorization: Bearer <accessToken>` to `GET /api/admin/me`. Invalid credentials receive the same `401` response. Login attempts are rate-limited. Tokens expire after 15 minutes and are invalidated when Core restarts.
 
+## Native Windows desktop
+
+The separate .NET 10 WPF `SentinelAI.Desktop` foundation provides a native Windows x64 shell, version display, placeholder navigation and a bounded local Core health check. Run `./scripts/publish-desktop-windows.sh` to produce the self-contained application directory at `artifacts/desktop/win-x64`, then open `SentinelAI.Desktop.exe` on Windows. Existing dashboard workflows remain available through Core; their native screens and desktop authentication are later tasks. See [desktop structure, startup and Windows validation](desktop/README.md).
+
 ## Signed subscription leases
 
 The separate [License API](cloud/license-api/README.md) issues a seven-day signed lease containing organization and Core installation IDs, plan, endpoint limit, enabled features, issue time, and full-mode expiration. Its activation credential selects an operator-configured entitlement; client requests cannot choose their own plan or limits. The development issuer uses ECDSA P-256/SHA-256 (ES256), an asymmetric equivalent allowed by TASK-010, without an external crypto dependency.
