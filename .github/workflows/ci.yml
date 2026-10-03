@@ -148,10 +148,18 @@ jobs:
       - name: Verify native Core service lifecycle and recovery
         shell: pwsh
         run: |
-          ./tests/core-service/Windows.Acceptance.ps1 -BundleDirectory ./artifacts/pilot/win-x64/1.0.0 `
-            -PublicKeyPath (Join-Path $env:RUNNER_TEMP 'sentinelai-service-ci.public.pem') `
-            -KeyId dev-service-ci -Environment development -Channel pilot `
-            -DesktopExecutablePath ./artifacts/desktop/win-x64/SentinelAI.Desktop.exe
+          try {
+            ./tests/core-service/Windows.Acceptance.ps1 -BundleDirectory ./artifacts/pilot/win-x64/1.0.0 `
+              -PublicKeyPath (Join-Path $env:RUNNER_TEMP 'sentinelai-service-ci.public.pem') `
+              -KeyId dev-service-ci -Environment development -Channel pilot `
+              -DesktopExecutablePath ./artifacts/desktop/win-x64/SentinelAI.Desktop.exe
+          } catch {
+            $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
+            if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Native Core service acceptance::$message"
+            throw
+          }
 
   package-desktop-windows:
     runs-on: windows-latest
