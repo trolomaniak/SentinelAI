@@ -146,7 +146,11 @@ function Assert-PilotCoreOrigin {
 }
 
 function Assert-PilotTrustedPath {
-    param([Parameter(Mandatory=$true)][string]$Path, [switch]$AllowServiceWrite, [switch]$AllowServiceParent, [switch]$Tree)
+    param([Parameter(Mandatory=$true)][string]$Path, [switch]$AllowServiceWrite, [switch]$AllowServiceParent, [switch]$Tree,
+          [string]$ServiceWriteSid, [string]$ServiceWriteRoot)
+    if ($ServiceWriteSid -and (-not $ServiceWriteRoot -or $ServiceWriteSid -notmatch '\AS-1-5-80-(\d+-){4}\d+\z')) {
+        throw 'A scoped virtual-service SID and data root are required.'
+    }
     $operator = Get-PilotCurrentOperatorSid
     $trusted = @($script:AdministratorsSid, $script:SystemSid, $script:TrustedInstallerSid, $operator)
     $pending = New-Object 'System.Collections.Generic.Queue[string]'
@@ -167,7 +171,12 @@ function Assert-PilotTrustedPath {
         $isAncestor = -not [string]::Equals($current, $Path, [StringComparison]::OrdinalIgnoreCase) -and
             $Path.StartsWith($current.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
         $currentTrusted = $trusted
-        if ($AllowServiceWrite -or ($AllowServiceParent -and $isAncestor)) { $currentTrusted += $script:ServiceSid }
+        $serviceScope = -not $ServiceWriteSid -or
+            [string]::Equals($current.TrimEnd('\'), $ServiceWriteRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase) -or
+            $current.StartsWith($ServiceWriteRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
+        if ($serviceScope -and ($AllowServiceWrite -or ($AllowServiceParent -and $isAncestor))) {
+            $currentTrusted += $(if ($ServiceWriteSid) { $ServiceWriteSid } else { $script:ServiceSid })
+        }
         $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
         if ($owner -notin $currentTrusted) { throw 'An existing installation path has an untrusted owner. Provision a protected location first.' }
         $rights = [Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor
@@ -503,10 +512,11 @@ function Wait-PilotAgentEnrollment {
 }
 
 function Read-PilotInstallationReceipt {
-    param([string]$Path, [string]$Component, [string]$CodeDirectory, [string]$DataDirectory)
+    param([string]$Path, [string]$Component, [string]$CodeDirectory, [string]$DataDirectory,
+          [string]$ServiceWriteSid, [string]$ServiceWriteRoot)
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
     [void](Assert-PilotPath -Path $Path -MustExist -File)
-    Assert-PilotTrustedPath -Path $Path -AllowServiceParent:($Component -eq 'Agent')
+    Assert-PilotTrustedPath -Path $Path -AllowServiceParent:($Component -eq 'Agent' -or [bool]$ServiceWriteSid) -ServiceWriteSid $ServiceWriteSid -ServiceWriteRoot $ServiceWriteRoot
     try {
         $json = Read-PilotUtf8Document -Path $Path -MaximumBytes 4096
         $receipt = Read-PilotStrictJson -Json $json
@@ -595,9 +605,9 @@ function Assert-PilotObjectProperties {
 
 function Assert-PilotExistingConfiguration {
     param([string]$Path, [ValidateSet('Core','Agent')][string]$Component, [string]$DataDirectory,
-          [string]$CoreUrl, [string]$CoreCertificateSha256)
+          [string]$CoreUrl, [string]$CoreCertificateSha256, [string]$ServiceWriteSid, [string]$ServiceWriteRoot)
     [void](Assert-PilotPath -Path $Path -MustExist -File)
-    Assert-PilotTrustedPath -Path $Path -AllowServiceParent:($Component -eq 'Agent')
+    Assert-PilotTrustedPath -Path $Path -AllowServiceParent:($Component -eq 'Agent' -or [bool]$ServiceWriteSid) -ServiceWriteSid $ServiceWriteSid -ServiceWriteRoot $ServiceWriteRoot
     $config = Read-PilotStrictJson -Json (Read-PilotUtf8Document -Path $Path -MaximumBytes 8192)
     if ($Component -eq 'Core') {
         Assert-PilotObjectProperties -Object $config -Names @('urls','SentinelAI')

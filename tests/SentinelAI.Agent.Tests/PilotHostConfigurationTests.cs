@@ -192,7 +192,8 @@ internal static class PilotHostConfigurationTests
                 File.WriteAllText(agentConfig, JsonSerializer.Serialize(new { Agent = new
                 {
                     CoreUrl = origin, DataDirectory = agentDirectory, EnrollmentTokenFile = tokenPath,
-                    HeartbeatInterval = "00:00:00.100", RetryDelay = "00:00:00.050", MaxRetryDelay = "00:00:00.200"
+                    // Leave headroom under Core's real heartbeat rate limit while installer checks run.
+                    HeartbeatInterval = "00:00:03", RetryDelay = "00:00:00.050", MaxRetryDelay = "00:00:00.200"
                 } }));
 
                 var logs = new CapturingLoggerProvider();

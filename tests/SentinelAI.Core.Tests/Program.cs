@@ -120,8 +120,8 @@ try
         var passwordBytes = Encoding.UTF8.GetBytes(password);
         foreach (var file in Directory.EnumerateFiles(dataDirectory, "*", SearchOption.AllDirectories))
         {
-            var contents = await File.ReadAllBytesAsync(file);
-            Ensure(contents.AsSpan().IndexOf(passwordBytes) < 0, "A Core data file contains the plaintext password.");
+            Ensure((await ReadSharedDataFileAsync(file)).AsSpan().IndexOf(passwordBytes) < 0,
+                "A Core data file contains the plaintext password.");
         }
 
         var devices = app.Services.GetRequiredService<DeviceStore>();
@@ -299,6 +299,7 @@ try
         await AlertApiTests.VerifyRemoteHttpAsync(client, accessToken, alertTestState.AlertId);
     }
 
+    await CoreServiceHostingTests.RunAsync();
     Console.WriteLine("Core integration tests passed.");
 }
 finally
@@ -348,7 +349,7 @@ static async Task<(Guid EndpointId, string Credential, CoreIdentity CoreIdentity
     var tokenBytes = Encoding.ASCII.GetBytes(issuedToken.Token);
     foreach (var file in Directory.EnumerateFiles(dataDirectory, "*", SearchOption.AllDirectories))
     {
-        Ensure((await File.ReadAllBytesAsync(file)).AsSpan().IndexOf(tokenBytes) < 0,
+        Ensure((await ReadSharedDataFileAsync(file)).AsSpan().IndexOf(tokenBytes) < 0,
             "Core stored an enrollment token in plaintext.");
     }
 
@@ -805,6 +806,17 @@ static async Task<string> EnsureNoCredentialLeakAsync(HttpResponseMessage respon
     Ensure(!body.Contains(username, StringComparison.Ordinal), "An authentication failure revealed the administrator username.");
     Ensure(!body.Contains(password, StringComparison.Ordinal), "An authentication failure revealed the administrator password.");
     return body;
+}
+
+static async Task<byte[]> ReadSharedDataFileAsync(string path)
+{
+    // SQLite keeps pooled writable handles open. Read with compatible sharing
+    // on Windows while retaining the full-file plaintext credential checks.
+    await using var source = new FileStream(path, FileMode.Open, FileAccess.Read,
+        FileShare.ReadWrite, bufferSize: 4096, FileOptions.Asynchronous);
+    using var contents = new MemoryStream();
+    await source.CopyToAsync(contents);
+    return contents.ToArray();
 }
 
 static void Ensure(bool condition, string message)
