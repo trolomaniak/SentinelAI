@@ -35,6 +35,75 @@ if ([string]::IsNullOrWhiteSpace($WorkDirectory)) {
 $WorkDirectory = Assert-PilotPath $WorkDirectory
 if (Test-Path -LiteralPath $WorkDirectory) { throw 'Acceptance requires a new work directory; existing files will not be adopted.' }
 New-PilotProtectedDirectory -Path $WorkDirectory -Kind Container
+
+# Hosted runners build in shared checkout/temp ancestors. Stage only this
+# trusted test build's public verifier, signed payload and separately supplied
+# public key into fresh protected locations; production installer checks stay
+# unchanged. Stream bytes into create-new files rather than copying source ACLs.
+function Copy-CoreServiceAcceptanceFile {
+    param([string]$Source, [string]$Destination)
+    $Source = Assert-PilotPath -Path $Source -MustExist -File
+    [void](Assert-PilotPath -Path $Destination -File)
+    if (Test-Path -LiteralPath $Destination) { throw 'Acceptance staging never adopts or overwrites existing files.' }
+    Assert-PilotTrustedPath -Path $Destination
+    $expectedHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash
+    $sourceStream = $null; $destinationStream = $null
+    try {
+        $sourceStream = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        $destinationStream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $sourceStream.CopyTo($destinationStream)
+        $destinationStream.Flush($true)
+    } finally {
+        if ($null -ne $destinationStream) { $destinationStream.Dispose() }
+        if ($null -ne $sourceStream) { $sourceStream.Dispose() }
+    }
+    if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash -cne $expectedHash -or
+        (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -cne $expectedHash) {
+        throw 'Acceptance staging changed generated build bytes.'
+    }
+    Assert-PilotTrustedPath -Path $Destination
+}
+
+function Copy-CoreServiceAcceptanceTree {
+    param([string]$Source, [string]$Destination)
+    $Source = Assert-PilotPath -Path $Source -MustExist
+    if (Test-Path -LiteralPath $Destination) { throw 'Acceptance staging requires a new verifier directory.' }
+    New-PilotDirectoryWithAcl -Path $Destination -Kind Container
+    $pending = New-Object 'System.Collections.Generic.Queue[object]'
+    $pending.Enqueue([pscustomobject]@{ Source = $Source; Destination = $Destination })
+    $count = 0
+    while ($pending.Count -ne 0) {
+        $directory = $pending.Dequeue()
+        foreach ($item in Get-ChildItem -LiteralPath $directory.Source -Force) {
+            if (++$count -gt 8192) { throw 'The acceptance verifier tree is too large.' }
+            $target = Join-Path $directory.Destination $item.Name
+            if ($item.PSIsContainer) {
+                # Check links before descending, including on Windows PowerShell.
+                [void](Assert-PilotPath -Path $item.FullName -MustExist)
+                New-PilotDirectoryWithAcl -Path $target -Kind Container
+                $pending.Enqueue([pscustomobject]@{ Source = $item.FullName; Destination = $target })
+            } else { Copy-CoreServiceAcceptanceFile -Source $item.FullName -Destination $target }
+        }
+    }
+    Assert-PilotTrustedPath -Path $Destination -Tree
+}
+
+$stagedBundle = Join-Path $WorkDirectory 'Bundle'
+$stagedTrust = Join-Path $WorkDirectory 'Trust'
+New-PilotDirectoryWithAcl -Path $stagedBundle -Kind Container
+New-PilotDirectoryWithAcl -Path $stagedTrust -Kind Container
+foreach ($name in @('core.zip', 'core.manifest.json')) {
+    Copy-CoreServiceAcceptanceFile -Source (Join-Path $BundleDirectory $name) -Destination (Join-Path $stagedBundle $name)
+}
+Copy-CoreServiceAcceptanceTree -Source (Join-Path $BundleDirectory 'updater') -Destination (Join-Path $stagedBundle 'updater')
+$stagedPublicKey = Join-Path $stagedTrust 'core-service.public.pem'
+Copy-CoreServiceAcceptanceFile -Source $PublicKeyPath -Destination $stagedPublicKey
+Set-PilotFileAcl -Path $stagedPublicKey -Kind Receipt
+Assert-PilotTrustedPath -Path $stagedBundle -Tree
+Assert-PilotTrustedPath -Path $stagedPublicKey
+$BundleDirectory = $stagedBundle
+$PublicKeyPath = $stagedPublicKey
+
 $coreCode = Join-Path $WorkDirectory 'Core Code'
 $coreData = Join-Path $WorkDirectory 'Core Data'
 $configurationPath = Join-Path $coreData 'pilot-config.json'
