@@ -30,7 +30,9 @@ public static class CoreHost
 
     // The service-policy branch is testable on any host; SCM lifetime activation remains
     // exclusively controlled by the official Windows service detector.
-    internal static WebApplication Build(string[] args, bool isWindowsService, Action<WebApplicationBuilder>? configureBuilder = null)
+    internal static WebApplication Build(string[] args, bool isWindowsService,
+        Action<WebApplicationBuilder>? configureBuilder = null,
+        Action<WebApplication>? configureBeforeAuthentication = null)
     {
         var pilot = PilotHostConfiguration.Read(args, agent: false);
         CoreServiceHosting.ValidateStartup(isWindowsService, pilot.Values is not null,
@@ -71,7 +73,7 @@ public static class CoreHost
 
         builder.Services.Configure<PasswordHasherOptions>(options =>
         {
-            options.IterationCount = 310_000;
+            options.IterationCount = AdminStore.PasswordHashIterations;
         });
         builder.Services.AddSingleton<IPasswordHasher<AdminRecord>, PasswordHasher<AdminRecord>>();
         builder.Services.AddSingleton<AdminStore>();
@@ -190,8 +192,18 @@ public static class CoreHost
         }
 
         app.UseRouting();
+        configureBeforeAuthentication?.Invoke(app);
         app.Use(async (context, next) =>
         {
+            // Reject remote plaintext before minimal-API body binding reads a password.
+            if ((context.Request.Path.StartsWithSegments("/api/auth/login") ||
+                 context.Request.Path.StartsWithSegments("/api/admin/me")) &&
+                !IsLocalOrHttps(context))
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
             if (context.Request.Path.StartsWithSegments("/api/admin/license") ||
                 context.Request.Path.StartsWithSegments("/api/admin/reports") ||
                 context.Request.Path == "/api/admin/incidents/export" ||
@@ -352,10 +364,14 @@ public static class CoreHost
                     new ClaimsPrincipal(identity));
             })
             .AllowAnonymous()
-            .RequireRateLimiting("login");
+            .RequireRateLimiting("login")
+            .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
 
-        app.MapGet("/api/admin/me", (ClaimsPrincipal user) =>
-                Results.Ok(new { username = user.Identity?.Name, role = "administrator" }))
+        app.MapGet("/api/admin/me", (HttpContext context, ClaimsPrincipal user) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Ok(new { username = user.Identity?.Name, role = "administrator" });
+            })
             .RequireAuthorization();
 
         app.MapGet("/api/admin/devices", async (

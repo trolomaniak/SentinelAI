@@ -48,10 +48,12 @@
         </Border>
         <Grid Grid.Column="1" Margin="24">
             <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
+                <RowDefinition x:Name="AuthenticationRow" Height="Auto" />
+                <RowDefinition x:Name="PageRow" Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <ContentControl x:Name="PageContent" Content="{Binding CurrentPage}"
+            <views:AuthenticationView x:Name="AuthenticationPanel" Visibility="Collapsed" />
+            <ContentControl x:Name="PageContent" Grid.Row="1" Content="{Binding CurrentPage}"
                             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
                 <ContentControl.ContentTemplate>
                     <DataTemplate>
@@ -59,7 +61,7 @@
                     </DataTemplate>
                 </ContentControl.ContentTemplate>
             </ContentControl>
-            <Border Grid.Row="1" Margin="0,20,0,0" Padding="16" CornerRadius="8"
+            <Border Grid.Row="2" Margin="0,20,0,0" Padding="16" CornerRadius="8"
                     Background="{DynamicResource SurfaceBrush}"
                     BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                 <Grid>

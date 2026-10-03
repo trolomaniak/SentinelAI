@@ -28,11 +28,11 @@ Core listens at `http://127.0.0.1:5000` by default. Set `ASPNETCORE_URLS` to cha
 
 ## Native Windows desktop
 
-The separate .NET 10 WPF `SentinelAI.Desktop` foundation provides a native Windows x64 shell, version display, placeholder navigation and a bounded local Core health check. Run `./scripts/publish-desktop-windows.sh` to produce the self-contained application directory at `artifacts/desktop/win-x64`, then open `SentinelAI.Desktop.exe` on Windows. Existing dashboard workflows remain available through Core; their native screens and desktop authentication are later tasks. See [desktop structure, startup and Windows validation](desktop/README.md).
+The separate .NET 10 WPF `SentinelAI.Desktop` provides native Windows x64 administrator setup, sign-in, sign-out and session handling, with a shell and placeholder navigation available after sign-in. Run `./scripts/publish-desktop-windows.sh` to produce the self-contained application directory at `artifacts/desktop/win-x64`, then open `SentinelAI.Desktop.exe` on Windows. See [desktop authentication](docs/DESKTOP-AUTH.md) and [desktop structure and Windows validation](desktop/README.md). Existing dashboard workflows remain available through Core; their native screens are later tasks.
 
 ## Core Windows Service
 
-Core supports Windows Service hosting as `SentinelAICore` while retaining the console commands above. The [Core service guide](docs/CORE-SERVICE.md) covers signed pilot installation, console-only administrator initialization, the limited virtual service account, protected persistent storage, delayed automatic startup, recovery and service-only removal. Core runs independently of the desktop window. Registration requires an explicitly elevated PowerShell terminal and an initialized pilot installation; service arguments contain only the nonsecret configuration path.
+Core supports Windows Service hosting as `SentinelAICore` while retaining the console commands above. The [Core service guide](docs/CORE-SERVICE.md) covers signed pilot installation, local administrator initialization, the limited virtual service account, protected persistent storage, delayed automatic startup, recovery and service-only removal. Core runs independently of the desktop window. Registration requires an explicitly elevated PowerShell terminal and an initialized pilot installation; service arguments contain only the nonsecret configuration path.
 
 ## Signed subscription leases
 

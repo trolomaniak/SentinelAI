@@ -5,8 +5,12 @@ namespace SentinelAI.Core.Persistence;
 
 public sealed record AdminRecord(string Username, string PasswordHash);
 
+internal enum AdministratorInitializationResult { Created, AlreadyInitialized }
+internal enum AdministratorSetupState { Required, Initialized }
+
 public sealed class AdminStore
 {
+    internal const int PasswordHashIterations = 310_000;
     private const string BootstrapUsernameVariable = "SENTINELAI_BOOTSTRAP_USERNAME";
     private const string BootstrapPasswordVariable = "SENTINELAI_BOOTSTRAP_PASSWORD";
     private const string DatabaseFileName = "sentinelai.db";
@@ -48,6 +52,17 @@ public sealed class AdminStore
         InitializeAsync(allowBootstrap: true, cancellationToken);
 
     internal async Task InitializeAsync(bool allowBootstrap, CancellationToken cancellationToken = default)
+        => _ = await InitializeCoreAsync(allowBootstrap,
+            () => (Environment.GetEnvironmentVariable(BootstrapUsernameVariable)?.Trim(),
+                Environment.GetEnvironmentVariable(BootstrapPasswordVariable)), cancellationToken);
+
+    internal Task<AdministratorInitializationResult> InitializeWithCredentialsAsync(
+        string username, string password, CancellationToken cancellationToken = default) =>
+        InitializeCoreAsync(allowBootstrap: true, () => (username, password), cancellationToken);
+
+    private async Task<AdministratorInitializationResult> InitializeCoreAsync(
+        bool allowBootstrap, Func<(string? Username, string? Password)> credentials,
+        CancellationToken cancellationToken)
     {
         if (!allowBootstrap && !File.Exists(DatabasePath))
             throw SetupRequired();
@@ -84,8 +99,7 @@ public sealed class AdminStore
         {
             if (!allowBootstrap)
                 throw SetupRequired();
-            var username = Environment.GetEnvironmentVariable(BootstrapUsernameVariable)?.Trim();
-            var password = Environment.GetEnvironmentVariable(BootstrapPasswordVariable);
+            var (username, password) = credentials();
             if (string.IsNullOrWhiteSpace(username) || password is null || password.Length < 12)
             {
                 throw new InvalidOperationException(
@@ -118,7 +132,64 @@ public sealed class AdminStore
         {
             File.SetUnixFileMode(DatabasePath, FileMode);
         }
+
+        return createdAdministrator ? AdministratorInitializationResult.Created :
+            AdministratorInitializationResult.AlreadyInitialized;
     }
+
+    /// <summary>Observe first-run state without creating a directory, SQLite file, or table.</summary>
+    internal async Task<AdministratorSetupState> ReadSetupStateAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var dataAttributes = File.GetAttributes(_dataDirectory);
+            if ((dataAttributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != FileAttributes.Directory ||
+                new DirectoryInfo(_dataDirectory).LinkTarget is not null)
+                throw new InvalidOperationException("Administrator storage is unavailable.");
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return AdministratorSetupState.Required;
+        }
+        catch (FileNotFoundException)
+        {
+            return AdministratorSetupState.Required;
+        }
+
+        if (!OperatingSystem.IsWindows() && HasSharedAccess(File.GetUnixFileMode(_dataDirectory)))
+            throw new InvalidOperationException("Administrator storage is unavailable.");
+
+        try
+        {
+            var databaseAttributes = File.GetAttributes(DatabasePath);
+            if ((databaseAttributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 ||
+                new FileInfo(DatabasePath).LinkTarget is not null)
+                throw new InvalidOperationException("Administrator storage is unavailable.");
+        }
+        catch (FileNotFoundException)
+        {
+            return AdministratorSetupState.Required;
+        }
+
+        if (!OperatingSystem.IsWindows() && HasSharedAccess(File.GetUnixFileMode(DatabasePath)))
+            throw new InvalidOperationException("Administrator storage is unavailable.");
+
+        await using var connection = CreateConnection(SqliteOpenMode.ReadOnly);
+        await connection.OpenAsync(cancellationToken);
+        await using var table = connection.CreateCommand();
+        table.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'Administrators';";
+        if (Convert.ToInt64(await table.ExecuteScalarAsync(cancellationToken)) == 0)
+            return AdministratorSetupState.Required;
+
+        await using var count = connection.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM Administrators;";
+        return Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken)) > 0 ?
+            AdministratorSetupState.Initialized : AdministratorSetupState.Required;
+    }
+
+    private static bool HasSharedAccess(UnixFileMode mode) =>
+        (mode & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                 UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0;
 
     private static InvalidOperationException SetupRequired() =>
         new("Core service startup requires an existing local administrator. Complete local setup before starting the service.");

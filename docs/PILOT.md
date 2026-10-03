@@ -36,6 +36,8 @@ For a different local port, supply the same explicit loopback `-CoreUrl`, for ex
 
 ## Install and enroll Agent
 
+For native administrator setup at the default paths and port, install Core as above, then follow [Desktop administrator setup](DESKTOP-AUTH.md) instead of starting the console launcher. Create the first administrator in Desktop, register/start Core using the [Core service workflow](CORE-SERVICE.md), then sign in. The console workflow remains available for custom-path/port development. Desktop never installs or controls Core's service.
+
 In an elevated PowerShell terminal, while Core is running:
 
 ```powershell

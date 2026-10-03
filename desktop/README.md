@@ -1,4 +1,4 @@
-# Native desktop foundation
+# Native desktop
 
 `SentinelAI.Desktop` is a native WPF application for Windows x64 on .NET 10. It opens its own Windows window with standard window controls. Its Overview, Devices, Alerts, Risk, Reports and Settings pages are placeholders; they do not yet expose the browser dashboard's workflows.
 
@@ -17,11 +17,11 @@ Linux can restore and cross-compile the Windows projects through `EnableWindowsT
 
 ## Boundaries and lifecycle
 
-- `SentinelAI.Desktop` contains the composition root, WPF views, semantic theme resources and Windows DPI manifest.
-- `SentinelAI.Desktop.Foundation` contains navigation, observable shell state, the refresh command and the `ICoreClient` service boundary. It has no WPF or third-party dependency.
-- The only implemented Core operation is a bounded, unauthenticated health check against the fixed `http://127.0.0.1:5000/api/health` endpoint. The UI accepts no destination. Redirects and proxy routing are disabled for this loopback check; failures appear as an unavailable connection without preventing navigation.
-- The window opens immediately and checks Core asynchronously. **Check connection** refreshes the same endpoint. Closing the window cancels pending work and disposes the client; the application writes no desktop configuration, passwords or credentials.
-- The title is SentinelAI, and the visible version comes from the application's build metadata. No Core service installation, authentication, credential persistence, screen migration or updater behavior is implemented by this foundation.
+- `SentinelAI.Desktop` contains WPF views, Windows installation/connected-peer trust adapters, semantic theme resources and the DPI manifest.
+- `SentinelAI.Desktop.Foundation` contains navigation, observable shell/authentication state and bounded Core clients behind service interfaces. It has no WPF or third-party dependency.
+- First-run setup uses the trusted installed Core's local one-shot command and existing operator filesystem authority. Normal sign-in uses Core's existing authoritative API; the connected TCP peer must belong to the trusted Core process before credentials can be transmitted. See [setup and authentication](../docs/DESKTOP-AUTH.md).
+- The window opens immediately and checks Core asynchronously. Navigation remains disabled until authenticated. Bearers stay in memory for at most 15 minutes; sign-out, expiry, restart and connection loss clear the local session. Reconnection requires explicit sign-in. Closing the window cancels pending work, clears credentials and leaves Core running.
+- A separate setup-only window can request UAC approval for initial creation; the normal desktop runs without elevation. Desktop does not install or control Core's service, migrate dashboard screens or perform updates.
 
 The light palette uses semantic `DynamicResource` brush keys, and common controls have shared styles. A later dark/light feature can replace the palette without changing view models or page layouts. WPF logical units, flexible grid sizing, wrapped text, scrolling and layout rounding provide the scaling foundation. The process requests PerMonitorV2 awareness and runs without elevation.
 
@@ -35,12 +35,12 @@ bash ./scripts/publish-desktop-windows.sh
 pwsh -NoLogo -NoProfile -NonInteractive -File tests/desktop/Windows.Acceptance.ps1 -ExecutablePath artifacts/desktop/win-x64/SentinelAI.Desktop.exe
 ```
 
-The Windows test runner opens the actual WPF views and checks bindings, placeholder navigation, keyboard focus, representative window sizes, DPI awareness and disposal. The acceptance script launches the published executable, verifies its native window and navigation, and requests a graceful close. The dedicated Windows CI job runs both before uploading the application directory.
+The Windows test runner checks actual WPF authentication, password clearing, gated placeholder navigation, keyboard focus, layout, DPI and disposal. The standalone acceptance script launches the published executable, verifies its native signed-out window and requests a graceful close. The dedicated Windows CI job runs both before uploading the application directory. The Core-service Windows CI job additionally runs `tests/desktop/Authentication.Acceptance.ps1` against the signed installed Core and published desktop, covering real bootstrap, sign-in/out, listener rejection and restart/reconnect.
 
 Physical scaling remains a practical manual check on a Windows desktop:
 
 1. At 100%, 125%, 150% and 200% Windows display scaling, open the executable and resize between its minimum and a maximized window.
-2. Visit each navigation item using the mouse and keyboard. Verify headings, descriptions, focus indicators and the connection strip remain readable; page content should scroll when space is limited.
+2. Check setup/sign-in controls, then sign in and visit each navigation item using the mouse and keyboard. Verify headings, descriptions, focus indicators and the connection strip remain readable; page content should scroll when space is limited.
 3. If monitors use different scaling, move the window between them and repeat navigation and resizing. Text should remain sharp and controls should follow the destination monitor's scale.
 4. Close the application during a connection check and verify that it exits promptly.
 
