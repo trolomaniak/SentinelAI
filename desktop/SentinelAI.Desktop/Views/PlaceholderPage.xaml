@@ -1,0 +1,23 @@
+<UserControl x:Class="SentinelAI.Desktop.Views.PlaceholderPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                  Padding="0,0,4,0">
+        <StackPanel>
+            <TextBlock x:Name="PageHeading" Text="{Binding Title}" FontSize="28" FontWeight="SemiBold"
+                       TextWrapping="Wrap" AutomationProperties.AutomationId="PageHeading" />
+            <TextBlock Text="{Binding Description}" Margin="0,10,0,0" TextWrapping="Wrap"
+                       Foreground="{DynamicResource SecondaryTextBrush}" />
+            <Border Background="{DynamicResource SurfaceBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                    CornerRadius="8" Padding="24" Margin="0,24,0,0">
+                <StackPanel>
+                    <TextBlock Text="Workspace preview" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock Text="This section will be available in a later release."
+                               Margin="0,10,0,0" TextWrapping="Wrap"
+                               Foreground="{DynamicResource SecondaryTextBrush}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

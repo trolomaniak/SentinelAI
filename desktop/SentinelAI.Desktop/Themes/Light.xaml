@@ -1,0 +1,15 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Semantic palette keys allow a later theme to replace colors without changing views. -->
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F5F9" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#17233A" />
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#566479" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#2463D7" />
+    <SolidColorBrush x:Key="AccentForegroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#DDE4EF" />
+    <SolidColorBrush x:Key="NavigationBackgroundBrush" Color="#16233B" />
+    <SolidColorBrush x:Key="NavigationForegroundBrush" Color="#F1F5FC" />
+    <SolidColorBrush x:Key="NavigationSecondaryBrush" Color="#BCCAE0" />
+    <SolidColorBrush x:Key="NavigationSelectedBrush" Color="#2E4468" />
+</ResourceDictionary>
