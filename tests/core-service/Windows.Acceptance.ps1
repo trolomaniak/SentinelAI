@@ -22,6 +22,8 @@ $managementScript = Join-Path $installerDirectory 'Manage-SentinelAICoreService.
 Import-Module (Join-Path $installerDirectory 'PilotInstaller.psm1') -Force -DisableNameChecking
 Assert-PilotSupportedHost
 if (-not [Environment]::UserInteractive) { throw 'Desktop-exit acceptance requires an interactive Windows session.' }
+$BundleDirectory = (Resolve-Path -LiteralPath $BundleDirectory).ProviderPath
+$PublicKeyPath = (Resolve-Path -LiteralPath $PublicKeyPath).ProviderPath
 $DesktopExecutablePath = (Resolve-Path -LiteralPath $DesktopExecutablePath).ProviderPath
 if (-not (Test-Path -LiteralPath $DesktopExecutablePath -PathType Leaf)) { throw 'The published native desktop is required for full service acceptance.' }
 if ($null -ne (Get-CimInstance -ClassName Win32_Service -Filter "Name='SentinelAICore'")) {
