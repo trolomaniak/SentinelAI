@@ -44,7 +44,7 @@
 - Implemented native first-run administrator creation through the trusted installed Core's bounded, one-shot local CLI. Core owns password hashing and atomic SQLite initialization; existing administrators cannot be overwritten. Setup retains the installing operator's existing filesystem authority, with a separate UAC-approved setup-only window when needed. Service mode still refuses bootstrap.
 - Added Core-authoritative Desktop sign-in, generic invalid-credential errors, local sign-out, memory-only bounded bearer lifetime, periodic session validation and explicit reconnect after expiry/restart. Navigation is gated by the active session. Credentials are cleared on submission/sign-out/close; no credential persistence, automatic login or Core service control is introduced.
 - Fixed local origin trust uses administrator-controlled SCM configuration and the actual established TCP connection's owner before any HTTP credential write. Operator-only console fallback verifies the trusted installation and exact executable/configuration command. Core rejects remote plaintext login/identity access before body binding; HTTPS remains supported.
-- Full `./scripts/build.sh` and `./scripts/test.sh` passed with zero .NET warnings/errors: 69 new Core setup/authentication assertions, 176 portable Desktop assertions, all existing Agent/Core/rules/scoring/licensing/AI/update/pilot/service regressions and 63 dashboard tests (zero failures/skips). TASK-011 remains satisfied. Windows WPF tests cross-build cleanly; Desktop publishes as self-contained PE x64 GUI with the existing DPI/asInvoker manifest. All 14 changed/affected PowerShell scripts and CI blocks parse, and the embedded native authentication probe compiles. Actual Windows WPF/published Desktop-to-installed-Core acceptance is pending CI; no native result is assumed yet.
+- Full `./scripts/build.sh` and `./scripts/test.sh` passed with zero .NET warnings/errors: 69 new Core setup/authentication assertions, 176 portable Desktop assertions, all existing Agent/Core/rules/scoring/licensing/AI/update/pilot/service regressions and 63 dashboard tests (zero failures/skips). TASK-011 remains satisfied. Windows WPF tests cross-build cleanly; Desktop publishes as self-contained PE x64 GUI with the existing DPI/asInvoker manifest. All 14 changed/affected PowerShell scripts and CI blocks parse, and the embedded native authentication probe compiles. All four jobs passed in [CI run `37159470813`](https://github.com/trolomaniak/SentinelAI/actions/runs/37159470813) on exact implementation `70c476737360b2d10050b07eb281ecfa171132b3`: full Linux regressions, actual Windows WPF/published GUI, Windows Agent tests/service smoke and signed Core installation/lifecycle plus real Desktop bootstrap/authentication. Native authentication verifies administrator creation through the published PasswordBox UI, existing login, identical wrong/unknown errors, local sign-out, foreign-listener rejection, real Core restart/explicit reconnect and unchanged Core lifetime after Desktop closes. Independent security/native/scope reviews and final diff inspection found no remaining blocker; TASK-018 Definition of Done is satisfied.
 
 ## Current architecture
 
@@ -93,6 +93,7 @@ See `.agent/DECISIONS.md`, `docs/PILOT.md`, `docs/UPDATES.md`, `docs/REPORTING.m
 
 ## Known issues
 
+- TASK-018 has no remaining Definition-of-Done blocker. Native CI uses the elevated installing operator; interactive UAC consent/setup from an unelevated Desktop remains a separate manual Windows check. Desktop currently supports only the existing default local Core paths and port; remote hosts/custom installations, persistent sessions and native data pages are outside TASK-018.
 - TASK-017 has no remaining acceptance blocker; actual Windows service/account/ACL/lifecycle/recovery/desktop-close checks passed in CI. Core service installation supports the existing loopback pilot configuration; remote TLS provisioning, transactional upgrades, state/account migrations and persistent service-log collection remain outside this task. Virtual accounts can authenticate to domain resources as the machine account; no new domain/ambient-auth access is enabled.
 
 - TASK-016 actual Windows WPF/published GUI launch/navigation/layout/DPI/shutdown checks passed in CI; physical multi-monitor scaling remains a documented manual check. The desktop is a placeholder foundation with a fixed loopback health check, without authentication, native security screens, theme selection or an installer.
@@ -186,20 +187,20 @@ Each native deployment item below has an implementation and automated acceptance
 
 ## TASK-018 Definition of Done
 
-- [ ] Fresh installation completes administrator bootstrap from the actual published Desktop (native acceptance pending).
-- [ ] Existing installation signs in from the actual published Desktop (native acceptance pending).
+- [x] Fresh signed installation completes administrator bootstrap from the actual published Desktop on Windows.
+- [x] Existing installation signs in from the actual published Desktop against the managed Core service.
 - [x] Sign-out cancels pending operations and invalidates/erases the local session, with automated portable/WPF assertions.
-- [x] Core restart/session expiry returns Desktop to safe signed-out state, verified by Core and portable session tests; native restart/reconnect acceptance pending.
+- [x] Core restart/session expiry returns Desktop to safe signed-out state, verified by Core/portable/WPF tests and actual Windows service restart/reconnect acceptance.
 - [x] Unknown usernames and wrong passwords remain indistinguishable in Core and Desktop errors.
 - [x] Automated tests cover first-run setup, creation/races/no replacement, sign-in/out, expiry, cancellation, restart/reconnect and unavailable/untrusted connections.
 - [x] Status, architecture, preserved decisions and setup/operation documentation are updated; no future task is implemented.
 
 ## Next task
 
-TASK-017 merged through PR #20 at `22d9a2be12040e5f7ad60b575941aae124f151d1`. TASK-018 is implemented on `codex/task-018-desktop-bootstrap-auth` with final regression/native acceptance and review in progress. TASK-019 must not start until TASK-018 satisfies its Definition of Done and merges, as explicitly instructed by the operator. TASK-016 merged by explicit operator instruction and now has successful native desktop CI evidence. TASK-015 full native Agent enrollment acceptance and pilot release transfer remain earlier separate outstanding work.
+TASK-017 merged through PR #20 at `22d9a2be12040e5f7ad60b575941aae124f151d1`. TASK-018 is complete in scoped PR #21 on `codex/task-018-desktop-bootstrap-auth`; all local/native CI checks and final reviews pass. Merge is explicitly authorized by the operator and will occur after the final documentation checks. TASK-019 must not start until TASK-018 satisfies its Definition of Done and merges, as explicitly instructed by the operator. TASK-016 merged by explicit operator instruction and now has successful native desktop CI evidence. TASK-015 full native Agent enrollment acceptance and pilot release transfer remain earlier separate outstanding work.
 
 ## Last verified commit
 
-`22d9a2be12040e5f7ad60b575941aae124f151d1` — merged main for TASK-017 (PR #20), confirmed from connected GitHub. Its final head `e18d1321264b7df73ab0471998b73eaefe4510ed` passed all four jobs in [CI run `37139657858`](https://github.com/trolomaniak/SentinelAI/actions/runs/37139657858) on 2026-10-03, including actual Windows acceptance. TASK-018 is not yet recorded as verified or merged.
+`70c476737360b2d10050b07eb281ecfa171132b3` — exact TASK-018 implementation verified by all four successful jobs in [CI run `37159470813`](https://github.com/trolomaniak/SentinelAI/actions/runs/37159470813) on 2026-10-03, full local builds/tests/Desktop publishing and independent security/native/scope reviews. PR #21 targets merged TASK-017 main `22d9a2be12040e5f7ad60b575941aae124f151d1`. The follow-up records native results and changes only completion documentation.
 
 Release provenance: merged main `6e36d015bc8db24c67c17f34e222caff78349f40` has the identical verified source tree. Fresh Windows publishing, exact embedded commit/version, both signed manifests, package extraction/layout, full bundle and all release asset checksums passed on 2026-10-02. The release follow-up changes only this status on `codex/release-v1.0.0-pilot.1`; it does not claim native Windows acceptance or a published release.

@@ -36,3 +36,5 @@ On a fresh elevated interactive Windows x64 test machine without the default Cor
 ```
 
 The acceptance fixture stages generated public inputs into fresh protected directories, installs signed Core files, creates the administrator through the actual published desktop, registers the existing managed service, and verifies real sign-in, generic invalid credentials, sign-out, foreign-listener rejection, restart/reconnect and independent Core lifetime. It retains protected test state and removes only its installer-owned service. Private signing keys and synthetic password values never become source/release assets. Record native CI results in [development status](../.agent/STATUS.md) before declaring verification complete.
+
+The native fixture runs under the elevated installing operator. The interactive UAC prompt and the setup window opened from an unelevated Desktop require a separate manual Windows check; CI does not automatically approve that prompt.
