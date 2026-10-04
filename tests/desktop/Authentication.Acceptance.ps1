@@ -159,8 +159,8 @@ namespace SentinelAIDesktopAuthenticationAcceptance {
         public static void TypePassword(string password) {
             if (String.IsNullOrEmpty(password) || password.Length > 256) throw new InvalidOperationException("Synthetic input is invalid.");
             // Finish with Tab in the same native input batch. The fixture waits
-            // for the following action to gain focus before UIA Invoke, proving
-            // the preceding password keystrokes were actually processed.
+            // for the following action to gain focus before native Enter. Keep
+            // submission on the input queue, like the preceding keystrokes.
             var inputs = new Input[password.Length * 2 + 2];
             try {
                 for (int index = 0; index < password.Length; index++) {
@@ -177,6 +177,13 @@ namespace SentinelAIDesktopAuthenticationAcceptance {
                 if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
                     throw new InvalidOperationException("Native protected password input was incomplete.");
             } finally { Array.Clear(inputs, 0, inputs.Length); }
+        }
+        public static void SubmitFocusedAction() {
+            var inputs = new Input[2];
+            inputs[0].Type = 1; inputs[0].Data.Keyboard.Key = 13;
+            inputs[1] = inputs[0]; inputs[1].Data.Keyboard.Flags = 2;
+            if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
+                throw new InvalidOperationException("Native authentication submit input was incomplete.");
         }
     }
 }
@@ -227,6 +234,14 @@ function Test-AuthenticationControl([string]$Id, [bool]$RequireEnabled = $true) 
 function Invoke-AuthenticationControl([string]$Id) {
     Wait-AuthenticationAcceptance { Test-AuthenticationControl $Id } 'A required native authentication action was unavailable.'
     $control = Find-AuthenticationControl $Id
+    if ($Id -in @('SignInButton', 'CreateAdministratorButton')) {
+        # UIA Invoke runs at dispatcher Send priority and can overtake queued
+        # native text input. Submit through the same keyboard path instead.
+        Assert-AuthenticationAcceptance ($control.Current.HasKeyboardFocus -and
+            [SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $script:desktop.MainWindowHandle) 'The native authentication submit action did not own foreground focus.'
+        [SentinelAIDesktopAuthenticationAcceptance.Native]::SubmitFocusedAction()
+        return
+    }
     $invoke = [System.Windows.Automation.InvokePattern]$control.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     $invoke.Invoke()
 }
