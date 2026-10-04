@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Automation;
 using System.Windows.Data;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Desktop;
@@ -46,7 +47,7 @@ internal static partial class Program
             Ensure(grid.Columns.Count == 7 && grid.Columns.Any(column => Equals(column.Header, "Connectivity")) &&
                 grid.Columns.Any(column => Equals(column.Header, "Configured firewall posture")),
                 "Connectivity and configured security posture were not distinct columns.");
-            ((Button)view.FindName("NextDevicesPageButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            DeviceButton(view, "NextDevicesPageButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await FlushAsync();
             Ensure(devices.PageNumber == 2 && grid.Items.Count == 100, "Native paging did not move through the fleet.");
             var search = Descendants<TextBox>(view).Single();
@@ -56,7 +57,7 @@ internal static partial class Program
             Ensure(devices.VisibleDevices.Count == 1 && devices.PageNumber == 1, "Native search did not filter/reset paging.");
             grid.SelectedItem = devices.VisibleDevices[0];
             await FlushAsync();
-            ((Button)view.FindName("OpenDeviceButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            DeviceButton(view, "OpenDeviceButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitForAsync(() => devices.DetailState == DeviceDetailState.Ready, "Endpoint detail did not open natively.");
             await FlushAsync();
             Ensure(devices.Detail?.EndpointId == client.Items[0].EndpointId &&
@@ -73,14 +74,14 @@ internal static partial class Program
             Ensure(client.ListCalls == readsBeforeValidation && ReferenceEquals(devices.Detail, openDetail) &&
                 devices.DetailState == DeviceDetailState.Ready,
                 "Periodic authentication validation refreshed the fleet or closed native detail.");
-            ((Button)view.FindName("BackToDevicesButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            DeviceButton(view, "BackToDevicesButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await FlushAsync();
             search.Text = "device-003";
             search.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
             await FlushAsync();
             grid.SelectedItem = devices.VisibleDevices.Single();
             await FlushAsync();
-            ((Button)view.FindName("OpenDeviceButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            DeviceButton(view, "OpenDeviceButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitForAsync(() => devices.DetailState == DeviceDetailState.Ready, "Inventory-free native detail did not open.");
             Ensure(devices.Detail!.Device.Health == DeviceHealth.Unknown &&
                 devices.Detail.InventoryStatusText.Contains("No inventory", StringComparison.OrdinalIgnoreCase) &&
@@ -129,6 +130,9 @@ internal static partial class Program
             bindingSource.Switch.Level = originalLevel;
         }
     }
+
+    private static Button DeviceButton(DevicesView view, string id) => Descendants<Button>(view)
+        .Single(button => AutomationProperties.GetAutomationId(button) == id);
 
     private sealed class NativeDeviceClient : IDevicesClient
     {
