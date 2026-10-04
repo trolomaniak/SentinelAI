@@ -112,32 +112,73 @@ function Invoke-NativeRiskReportsAcceptance {
             return 'save_action_pending'
         } catch { return 'diagnostic_unavailable' }
     }
+    function Get-WritableReportFileName([object]$Element) {
+        if ($null -eq $Element) { return $null }
+        try {
+            $pattern = $null
+            if ($Element.Current.IsEnabled -and $Element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern) -and
+                -not ([System.Windows.Automation.ValuePattern]$pattern).Current.IsReadOnly) {
+                return [pscustomobject]@{ Element = $Element; ValuePattern = [System.Windows.Automation.ValuePattern]$pattern }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+        return $null
+    }
+    function Find-NativeReportFileName([object]$Dialog) {
+        if ($null -eq $Dialog) { return $null }
+        $edit = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
+        $combo = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ComboBox)
+        $editableType = [System.Windows.Automation.OrCondition]::new($edit, $combo)
+        # Modern dialogs can expose ValuePattern directly on the filename host
+        # or its ComboBox rather than on a descendant Edit. 1152 is the classic
+        # common-dialog edt1 filename ID. Every search stays under a known
+        # filename ID, never an arbitrary address/search edit in the dialog.
+        foreach ($id in @('FileNameControlHost', '1001', '1148', '1152')) {
+            $identity = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
+            $hosts = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $identity)
+            if ($hosts.Count -gt 16) { throw 'The native report filename host count exceeded its bound.' }
+            foreach ($hostControl in $hosts) {
+                $writable = Get-WritableReportFileName $hostControl
+                if ($null -ne $writable) { return $writable }
+                $children = $hostControl.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editableType)
+                if ($children.Count -gt 32) { throw 'The native report filename child count exceeded its bound.' }
+                foreach ($child in $children) {
+                    $writable = Get-WritableReportFileName $child
+                    if ($null -ne $writable) { return $writable }
+                }
+            }
+        }
+        return $null
+    }
+    function Get-NativeReportFileNameCategory([object]$Dialog) {
+        try {
+            $known = 0
+            foreach ($id in @('FileNameControlHost', '1001', '1148', '1152')) {
+                $identity = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
+                $count = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $identity).Count
+                $known += [Math]::Min($count, 16)
+            }
+            return 'known_filename_hosts_' + $known
+        } catch { return 'filename_metadata_unavailable' }
+    }
+    function Find-NativeReportSaveButton([object]$Dialog) {
+        $identity = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')
+        $button = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+        $control = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.AndCondition]::new($identity, $button))
+        if ($null -ne $control -and $control.Current.IsEnabled) { return $control }
+        return $null
+    }
     function Save-NativeSecurityReport([string]$Destination) {
         Assert-AuthenticationAcceptance (-not (Test-Path -LiteralPath $Destination)) 'Native report acceptance must not overwrite an existing destination.'
         Invoke-AuthenticationControl 'SaveReportButton'
         try { Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportSaveDialog) } 'The actual native security-report save dialog did not open.' }
         catch { throw ('The actual native security-report save dialog did not open. Save result: ' + (Get-NativeReportSaveCategory) + '.') }
         $dialog = Find-NativeReportSaveDialog
-        $fileName = $null
-        foreach ($id in @('1001', '1148')) {
-            $identity = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
-            $edit = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
-            $fileName = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.AndCondition]::new($identity, $edit))
-            if ($null -ne $fileName) { break }
-        }
-        if ($null -eq $fileName) {
-            $hostId = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'FileNameControlHost')
-            $hostControl = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $hostId)
-            if ($null -ne $hostControl) {
-                $edit = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
-                $fileName = $hostControl.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $edit)
-            }
-        }
-        Assert-AuthenticationAcceptance ($null -ne $fileName) 'The native report dialog filename control was unavailable.'
-        ([System.Windows.Automation.ValuePattern]$fileName.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($Destination)
-        $saveId = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')
-        $saveButton = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $saveId)
-        Assert-AuthenticationAcceptance ($null -ne $saveButton -and $saveButton.Current.IsEnabled) 'The native report dialog save action was unavailable.'
+        try { Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportFileName $dialog) } 'The native report dialog filename control was unavailable.' }
+        catch { throw ('The native report dialog filename control was unavailable. Filename result: ' + (Get-NativeReportFileNameCategory $dialog) + '.') }
+        $fileName = Find-NativeReportFileName $dialog
+        $fileName.ValuePattern.SetValue($Destination)
+        Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportSaveButton $dialog) } 'The native report dialog save action was unavailable.'
+        $saveButton = Find-NativeReportSaveButton $dialog
         ([System.Windows.Automation.InvokePattern]$saveButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
         Wait-AuthenticationAcceptance { $null -eq (Find-NativeReportSaveDialog) -and (Test-Path -LiteralPath $Destination -PathType Leaf) -and
             (Test-AuthenticationControl 'SaveReportButton') } 'The native report save did not finish writing its selected file.'
