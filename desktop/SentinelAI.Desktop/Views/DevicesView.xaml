@@ -1,0 +1,214 @@
+<UserControl x:Class="SentinelAI.Desktop.Views.DevicesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:devices="clr-namespace:SentinelAI.Desktop.Foundation;assembly=SentinelAI.Desktop.Foundation"
+             AutomationProperties.AutomationId="DevicesView"
+             SizeChanged="OnViewSizeChanged">
+    <UserControl.Resources>
+        <DataTemplate x:Key="DeviceFactTemplate">
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="140" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Margin="0,0,16,0"
+                           Foreground="{DynamicResource SecondaryTextBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="{Binding Label, StringFormat='DeviceFact_{0}'}" />
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <Button Content="Back to devices" Click="OnBack" HorizontalAlignment="Left" Margin="0,0,0,16"
+                AutomationProperties.AutomationId="BackToDevicesButton">
+            <Button.Style>
+                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers><DataTrigger Binding="{Binding IsShowingDetail}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
+    <ScrollViewer x:Name="PageScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,4,0">
+        <StackPanel>
+            <StackPanel x:Name="PageHeader">
+                <TextBlock Text="Devices" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="Devices" />
+                <TextBlock Text="Connectivity reflects heartbeats. Firewall posture reflects the latest reported configuration."
+                           Margin="0,10,0,20" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" />
+            </StackPanel>
+            <StackPanel>
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsShowingDetail}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <StackPanel x:Name="ListToolbar">
+                    <WrapPanel Margin="0,0,0,8">
+                        <StackPanel Width="220" Margin="0,0,12,8">
+                            <TextBlock Text="Search hostname or operating system" Margin="0,0,0,4" TextWrapping="Wrap" />
+                            <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Padding="6" MaxLength="256"
+                                     AutomationProperties.AutomationId="DeviceSearchInput" AutomationProperties.Name="Search devices" />
+                        </StackPanel>
+                        <StackPanel Width="140" Margin="0,0,12,8">
+                            <TextBlock Text="Connectivity" Margin="0,0,0,4" />
+                            <ComboBox SelectedValue="{Binding HealthFilter}" SelectedValuePath="Tag" Padding="6"
+                                      AutomationProperties.AutomationId="DeviceHealthFilter" AutomationProperties.Name="Filter by connectivity">
+                                <ComboBoxItem Content="All states" Tag="{x:Static devices:DeviceHealthFilter.All}" />
+                                <ComboBoxItem Content="Healthy" Tag="{x:Static devices:DeviceHealthFilter.Healthy}" />
+                                <ComboBoxItem Content="Warning" Tag="{x:Static devices:DeviceHealthFilter.Warning}" />
+                                <ComboBoxItem Content="Offline" Tag="{x:Static devices:DeviceHealthFilter.Offline}" />
+                                <ComboBoxItem Content="Unknown" Tag="{x:Static devices:DeviceHealthFilter.Unknown}" />
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Width="170" Margin="0,0,12,8">
+                            <TextBlock Text="Sort by" Margin="0,0,0,4" />
+                            <ComboBox SelectedValue="{Binding SortBy}" SelectedValuePath="Tag" Padding="6"
+                                      AutomationProperties.AutomationId="DeviceSortColumn" AutomationProperties.Name="Sort devices">
+                                <ComboBoxItem Content="Hostname" Tag="{x:Static devices:DeviceSortColumn.Name}" />
+                                <ComboBoxItem Content="Operating system" Tag="{x:Static devices:DeviceSortColumn.OperatingSystem}" />
+                                <ComboBoxItem Content="Connectivity" Tag="{x:Static devices:DeviceSortColumn.Health}" />
+                                <ComboBoxItem Content="Last heartbeat" Tag="{x:Static devices:DeviceSortColumn.LastSeen}" />
+                                <ComboBoxItem Content="Last inventory" Tag="{x:Static devices:DeviceSortColumn.InventoryCollected}" />
+                                <ComboBoxItem Content="Agent version" Tag="{x:Static devices:DeviceSortColumn.AgentVersion}" />
+                            </ComboBox>
+                        </StackPanel>
+                        <CheckBox Content="Descending" IsChecked="{Binding SortDescending}" VerticalAlignment="Center" Margin="0,16,12,8"
+                                  AutomationProperties.AutomationId="DeviceSortDescending" />
+                    </WrapPanel>
+                    <WrapPanel Margin="0,0,0,8">
+                        <Button Content="Refresh" Click="OnRefresh" Margin="0,0,8,8" AutomationProperties.AutomationId="RefreshDevicesButton">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ListState}" Value="{x:Static devices:DeviceListState.Loading}">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Content="Clear filters" Click="OnClearFilters" Margin="0,0,8,8" AutomationProperties.AutomationId="ClearDeviceFiltersButton" />
+                        <Button Content="Open endpoint" Click="OnOpenDetail" Margin="0,0,8,8" AutomationProperties.AutomationId="OpenDeviceButton">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedDevice}" Value="{x:Null}"><Setter Property="IsEnabled" Value="False" /></DataTrigger>
+                                        <DataTrigger Binding="{Binding ListState}" Value="{x:Static devices:DeviceListState.Loading}"><Setter Property="IsEnabled" Value="False" /></DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </WrapPanel>
+                    <TextBlock Text="{Binding ListStatusText}" TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="DeviceListStatus" AutomationProperties.LiveSetting="Polite">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ListState}" Value="{x:Static devices:DeviceListState.Ready}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+                <!-- A finite height keeps rows virtualized even when the page itself must scroll at the minimum window size. -->
+                <DataGrid x:Name="DevicesGrid" Height="240" ItemsSource="{Binding VisibleDevices}" SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
+                          AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False"
+                          CanUserReorderColumns="False" CanUserSortColumns="False" SelectionMode="Single" SelectionUnit="FullRow"
+                          EnableRowVirtualization="True" EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                          ScrollViewer.CanContentScroll="True" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                          RowDetailsVisibilityMode="Collapsed" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                          Background="{DynamicResource SurfaceBrush}" RowBackground="{DynamicResource SurfaceBrush}"
+                          AlternatingRowBackground="{DynamicResource WindowBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}"
+                          BorderBrush="{DynamicResource BorderBrush}" HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
+                          MouseDoubleClick="OnRowDoubleClick" AutomationProperties.AutomationId="DevicesGrid" AutomationProperties.Name="Enrolled endpoints">
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow"><Setter Property="AutomationProperties.Name" Value="{Binding Name}" /></Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.ColumnHeaderStyle>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                            <Setter Property="Padding" Value="8" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                        </Style>
+                    </DataGrid.ColumnHeaderStyle>
+                    <DataGrid.CellStyle>
+                        <Style TargetType="DataGridCell"><Setter Property="Padding" Value="8,6" /></Style>
+                    </DataGrid.CellStyle>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Hostname" Binding="{Binding Name}" Width="180" />
+                        <DataGridTextColumn Header="Operating system" Binding="{Binding OperatingSystemText}" Width="260" />
+                        <DataGridTextColumn Header="Agent version" Binding="{Binding AgentVersionText}" Width="130" />
+                        <DataGridTextColumn Header="Connectivity" Binding="{Binding HealthLabel}" Width="130" />
+                        <DataGridTextColumn Header="Last heartbeat (UTC)" Binding="{Binding LastSeenText}" Width="190" />
+                        <DataGridTextColumn Header="Last inventory (UTC)" Binding="{Binding InventoryCollectedText}" Width="190" />
+                        <DataGridTextColumn Header="Configured firewall posture" Binding="{Binding FirewallSummary}" Width="230" />
+                    </DataGrid.Columns>
+                </DataGrid>
+                <WrapPanel x:Name="ListPaging" Margin="0,12,0,0">
+                    <Button Content="Previous" Click="OnPreviousPage" IsEnabled="{Binding CanPreviousPage}" Margin="0,0,8,8"
+                            AutomationProperties.AutomationId="PreviousDevicesPageButton" />
+                    <Button Content="Next" Click="OnNextPage" IsEnabled="{Binding CanNextPage}" Margin="0,0,12,8"
+                            AutomationProperties.AutomationId="NextDevicesPageButton" />
+                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="DevicesPageSummary">
+                        <TextBlock.Text>
+                            <MultiBinding StringFormat="Page {0} of {1} · {2} matching of {3} enrolled">
+                                <Binding Path="PageNumber" /><Binding Path="TotalPages" /><Binding Path="FilteredCount" /><Binding Path="TotalDevices" />
+                            </MultiBinding>
+                        </TextBlock.Text>
+                    </TextBlock>
+                </WrapPanel>
+            </StackPanel>
+            <StackPanel>
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers><DataTrigger Binding="{Binding IsShowingDetail}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <TextBlock Text="{Binding DetailStatusText}" TextWrapping="Wrap" Margin="0,0,0,16" AutomationProperties.AutomationId="DeviceDetailStatus" AutomationProperties.LiveSetting="Polite">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding DetailState}" Value="{x:Static devices:DeviceDetailState.Ready}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers><DataTrigger Binding="{Binding DetailState}" Value="{x:Static devices:DeviceDetailState.Ready}"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <TextBlock Text="{Binding Detail.Name}" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,16"
+                               AutomationProperties.AutomationId="DeviceDetailHostname" />
+                    <TextBlock Text="{Binding Detail.InventoryStatusText}" TextWrapping="Wrap" Margin="0,0,0,16"
+                               AutomationProperties.AutomationId="DeviceInventoryStatus" />
+                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+                        <StackPanel>
+                            <TextBlock Text="Endpoint and inventory" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,16" />
+                            <ItemsControl ItemsSource="{Binding Detail.Facts}" ItemTemplate="{StaticResource DeviceFactTemplate}"
+                                          AutomationProperties.AutomationId="DeviceDetailFacts" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,16,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Latest configured security posture" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <TextBlock Text="Firewall values describe reported profile settings. Connectivity is shown separately above. Missing values remain Unknown."
+                                       Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="0,0,0,16" />
+                            <ItemsControl ItemsSource="{Binding Detail.PostureFacts}" ItemTemplate="{StaticResource DeviceFactTemplate}"
+                                          AutomationProperties.AutomationId="DevicePostureFacts" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+    </Grid>
+</UserControl>

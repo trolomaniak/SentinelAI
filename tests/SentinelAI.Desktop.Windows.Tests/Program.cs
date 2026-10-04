@@ -12,7 +12,7 @@ using SentinelAI.Desktop;
 using SentinelAI.Desktop.Foundation;
 using SentinelAI.Desktop.Views;
 
-internal static class Program
+internal static partial class Program
 {
     private static int _assertions;
 
@@ -159,6 +159,7 @@ internal static class Program
             bindingSource.Switch.Level = originalLevel;
         }
         await AuthenticationViewsAsync();
+        await DevicesViewsAsync();
     }
 
     private static async Task AuthenticationViewsAsync()

@@ -70,7 +70,8 @@ public sealed class DeviceReadStore(AdminStore admins)
             HealthState(lastSeen, now),
             lastSeen,
             inventory?.AgentVersion,
-            SummarizeSecurityPosture(inventory?.SecurityPosture));
+            SummarizeSecurityPosture(inventory?.SecurityPosture),
+            inventory?.CollectedUtc);
         return new DeviceDetail(
             summary,
             inventory?.CollectedUtc,

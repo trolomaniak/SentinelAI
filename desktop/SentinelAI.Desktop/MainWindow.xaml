@@ -7,6 +7,12 @@
         Background="{DynamicResource WindowBackgroundBrush}"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         AutomationProperties.AutomationId="SentinelAIMainWindow">
+    <Window.Resources>
+        <DataTemplate x:Key="PlaceholderTemplate"><views:PlaceholderPage /></DataTemplate>
+        <DataTemplate x:Key="DevicesTemplate">
+            <views:DevicesView DataContext="{Binding Devices, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </DataTemplate>
+    </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="200" />
@@ -55,11 +61,6 @@
             <views:AuthenticationView x:Name="AuthenticationPanel" Visibility="Collapsed" />
             <ContentControl x:Name="PageContent" Grid.Row="1" Content="{Binding CurrentPage}"
                             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
-                <ContentControl.ContentTemplate>
-                    <DataTemplate>
-                        <views:PlaceholderPage />
-                    </DataTemplate>
-                </ContentControl.ContentTemplate>
             </ContentControl>
             <Border Grid.Row="2" Margin="0,20,0,0" Padding="16" CornerRadius="8"
                     Background="{DynamicResource SurfaceBrush}"

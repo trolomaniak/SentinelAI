@@ -9,6 +9,7 @@ public partial class App : Application
 {
     private ShellViewModel? _shell;
     private AuthenticationViewModel? _authentication;
+    private DevicesViewModel? _devices;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -25,14 +26,16 @@ public partial class App : Application
             }
             client = new HttpCoreClient();
             var coreServices = new WindowsCoreServices();
-            _authentication = new AuthenticationViewModel(coreServices.CreateAuthenticationClient(), coreServices.CreateAdministratorSetupClient());
+            var authenticationClient = coreServices.CreateAuthenticationClient();
+            _authentication = new AuthenticationViewModel(authenticationClient, coreServices.CreateAdministratorSetupClient());
+            _devices = new DevicesViewModel((IDevicesClient)authenticationClient);
             var assembly = typeof(App).Assembly;
             var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion.Split('+')[0]
                 ?? assembly.GetName().Version?.ToString(3)
                 ?? "Unknown";
             _shell = new ShellViewModel(client, version);
-            MainWindow = new MainWindow(_shell, _authentication);
+            MainWindow = new MainWindow(_shell, _authentication, _devices);
             MainWindow.Show();
         }
         catch (Exception)
@@ -50,6 +53,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _shell?.Dispose();
+        _devices?.Dispose();
         _authentication?.Dispose();
         base.OnExit(e);
     }

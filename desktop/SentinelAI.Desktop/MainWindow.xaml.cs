@@ -10,16 +10,23 @@ public partial class MainWindow : Window
     private readonly ShellViewModel _viewModel;
     private readonly AuthenticationViewModel? _authentication;
     private readonly DispatcherTimer? _sessionTimer;
+    public DevicesViewModel? Devices { get; }
     private bool _closed;
+    private bool _workspaceAuthorized;
 
     public MainWindow(ShellViewModel viewModel) : this(viewModel, null) { }
 
-    public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication)
+    public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication) : this(viewModel, authentication, null) { }
+
+    public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication, DevicesViewModel? devices)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
         _viewModel = viewModel;
         _authentication = authentication;
+        Devices = devices;
+        _viewModel.PropertyChanged += OnShellPageChanged;
+        if (devices is not null) devices.SessionExpired += OnDeviceSessionExpired;
         AuthenticationPanel.DataContext = authentication;
         DataContext = viewModel;
         if (authentication is not null)
@@ -31,6 +38,7 @@ public partial class MainWindow : Window
             SetWorkspaceAccess();
         }
         Loaded += OnLoaded;
+        SetPagePresentation();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -57,16 +65,45 @@ public partial class MainWindow : Window
     private void SetWorkspaceAccess()
     {
         var authorized = _authentication?.IsSignedIn ?? true;
+        var authorizationChanged = authorized != _workspaceAuthorized;
+        _workspaceAuthorized = authorized;
         NavigationList.IsEnabled = authorized;
         PageContent.Visibility = authorized ? Visibility.Visible : Visibility.Collapsed;
         AuthenticationRow.Height = authorized ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
         PageRow.Height = authorized ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        if (!authorized) Devices?.Clear();
+        else if (authorizationChanged) RefreshDevicesIfSelected();
+    }
+
+    private void OnShellPageChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!_closed && e.PropertyName == nameof(ShellViewModel.CurrentPage))
+        {
+            SetPagePresentation();
+            RefreshDevicesIfSelected();
+        }
+    }
+
+    private void SetPagePresentation() => PageContent.ContentTemplate = (DataTemplate)FindResource(
+        Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices ? "DevicesTemplate" : "PlaceholderTemplate");
+
+    private async void RefreshDevicesIfSelected()
+    {
+        if (!_closed && Devices is not null && (_authentication?.IsSignedIn ?? true) &&
+            _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
+    }
+
+    private void OnDeviceSessionExpired(object? sender, EventArgs e)
+    {
+        if (!_closed) Dispatcher.InvokeAsync(() => _authentication?.SignOut());
     }
 
     protected override void OnClosed(EventArgs e)
     {
         _closed = true;
         Loaded -= OnLoaded;
+        _viewModel.PropertyChanged -= OnShellPageChanged;
+        if (Devices is not null) { Devices.SessionExpired -= OnDeviceSessionExpired; Devices.Dispose(); }
         _sessionTimer?.Stop();
         if (_sessionTimer is not null) _sessionTimer.Tick -= OnSessionTick;
         if (_authentication is not null)

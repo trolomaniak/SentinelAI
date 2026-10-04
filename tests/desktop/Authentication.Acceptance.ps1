@@ -12,7 +12,8 @@ param(
     [Parameter(Mandatory = $true)][string]$ExecutablePath,
     [ValidateSet('development', 'production')][string]$Environment = 'development',
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
-    [ValidateRange(30, 600)][int]$TimeoutSeconds = 180
+    [ValidateRange(30, 600)][int]$TimeoutSeconds = 180,
+    [switch]$VerifyDevices
 )
 
 Set-StrictMode -Version Latest
@@ -36,6 +37,7 @@ if ($PSVersionTable.PSEdition -ne 'Desktop') {
         $arguments += ' -' + $pair[0] + ' ' + (Quote-Argument $pair[1])
     }
     $arguments += ' -TimeoutSeconds ' + $TimeoutSeconds
+    if ($VerifyDevices) { $arguments += ' -VerifyDevices' }
     $nativeStart = [Diagnostics.ProcessStartInfo]::new()
     $nativeStart.FileName = $nativeHost; $nativeStart.Arguments = $arguments
     $nativeStart.UseShellExecute = $false
@@ -360,6 +362,10 @@ try {
     Set-AuthenticationCredential $username $password
     Invoke-AuthenticationControl 'SignInButton'
     Wait-AuthenticationAcceptance { Test-AuthenticationControl 'SignOutButton' } 'Desktop could not explicitly reconnect after Core restart.'
+    if ($VerifyDevices) {
+        . (Join-Path $PSScriptRoot 'Devices.Acceptance.ps1')
+        Invoke-NativeDevicesAcceptance
+    }
     Assert-NoCredentialArguments $desktop
     Assert-NoCredentialArguments $coreProcess
 
