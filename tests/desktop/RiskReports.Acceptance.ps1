@@ -83,13 +83,40 @@ function Invoke-NativeRiskReportsAcceptance {
     function Find-NativeReportSaveDialog {
         $process = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $script:desktop.Id)
         $title = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'Save security report')
+        $window = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)
+        $condition = [System.Windows.Automation.AndCondition]::new([System.Windows.Automation.Condition[]]@($process, $title, $window))
+        # Owned common dialogs can appear beneath their owner in the automation
+        # tree rather than as direct desktop children. Search only the held app's
+        # descendants, with its exact PID/title/window type, before the existing
+        # top-level fallback. Never scan other applications' descendant trees.
+        $dialog = $script:root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        if ($null -ne $dialog) { return $dialog }
         return [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children,
-            [System.Windows.Automation.AndCondition]::new($process, $title))
+            $condition)
+    }
+    function Get-NativeReportSaveCategory {
+        try {
+            $script:desktop.Refresh()
+            if ($script:desktop.HasExited) { return 'desktop_exited' }
+            $status = Find-AuthenticationControl 'ReportSaveStatus'
+            if ($null -ne $status) {
+                switch ($status.Current.Name) {
+                    'Choose a destination for the generated HTML report.' { return 'dialog_waiting' }
+                    'The report was not saved.' { return 'save_failed' }
+                    'Save cancelled. The generated report remains available.' { return 'save_cancelled' }
+                }
+            }
+            $save = Find-AuthenticationControl 'SaveReportButton'
+            if ($null -eq $save -or $save.Current.IsOffscreen) { return 'save_workspace_unavailable' }
+            if ($save.Current.IsEnabled) { return 'save_action_idle' }
+            return 'save_action_pending'
+        } catch { return 'diagnostic_unavailable' }
     }
     function Save-NativeSecurityReport([string]$Destination) {
         Assert-AuthenticationAcceptance (-not (Test-Path -LiteralPath $Destination)) 'Native report acceptance must not overwrite an existing destination.'
         Invoke-AuthenticationControl 'SaveReportButton'
-        Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportSaveDialog) } 'The actual native security-report save dialog did not open.'
+        try { Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportSaveDialog) } 'The actual native security-report save dialog did not open.' }
+        catch { throw ('The actual native security-report save dialog did not open. Save result: ' + (Get-NativeReportSaveCategory) + '.') }
         $dialog = Find-NativeReportSaveDialog
         $fileName = $null
         foreach ($id in @('1001', '1148')) {
