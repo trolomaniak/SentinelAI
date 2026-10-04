@@ -161,7 +161,7 @@ internal static class AlertApiTests
 
     public static async Task VerifyRemoteHttpAsync(HttpClient client, string token, Guid alertId)
     {
-        foreach (var path in new[] { ListPath, $"{ListPath}/{alertId:D}" })
+        foreach (var path in new[] { ListPath, ListPath + $"?endpointId={Guid.NewGuid():D}", $"{ListPath}/{alertId:D}" })
         {
             using var response = await SendAsync(client, HttpMethod.Get, path, "Bearer", token);
             Check(response.StatusCode == HttpStatusCode.Forbidden,
@@ -179,7 +179,7 @@ internal static class AlertApiTests
         foreach (var scheme in new[] { "", "SentinelAgent" })
         {
             var authorization = scheme == "" ? "" : $"{endpointId:D}.{credential}";
-            foreach (var read in new[] { ListPath, path })
+            foreach (var read in new[] { ListPath, ListPath + $"?endpointId={endpointId:D}", path })
             {
                 using var response = await SendAsync(client, HttpMethod.Get, read, scheme, authorization);
                 Check(response.StatusCode == HttpStatusCode.Unauthorized,
@@ -203,7 +203,13 @@ internal static class AlertApiTests
         foreach (var query in new[]
                  {
                      "severity=invalid", "status=closed", "offset=-1", "offset=text", "limit=0",
-                     "limit=201", "limit=text"
+                     "limit=201", "limit=text", "endpointId=", "endpointId=not-a-guid",
+                     "endpointId=00000000-0000-0000-0000-000000000000",
+                     "endpointId=" + Guid.NewGuid().ToString("N"),
+                     "endpointId=%20" + Guid.NewGuid().ToString("D"),
+                     "endpointId=" + Guid.NewGuid().ToString("D") + "%20",
+                     "endpointId=" + Guid.NewGuid().ToString("D") + "&endpointId=" + Guid.NewGuid().ToString("D"),
+                     "endpointId=" + Guid.NewGuid().ToString("D") + "&EndpointId=" + Guid.NewGuid().ToString("D")
                  })
         {
             using var response = await SendAsync(client, HttpMethod.Get, ListPath + "?" + query, "Bearer", token);
@@ -242,6 +248,12 @@ internal static class AlertApiTests
         Check(investigating.GetProperty("total").GetInt64() == 1 &&
               investigating.GetProperty("alerts")[0].GetProperty("alertId").GetGuid() == alertId,
             "Combined alert filters included unrelated statuses/severities.");
+        var scoped = await ReadAsync(client, ListPath + $"?endpointId={endpointId:D}&severity=high&status=investigating", token);
+        Check(scoped.GetRawText() == investigating.GetRawText(),
+            "Endpoint filtering changed matching severity/status results or pagination metadata.");
+        var absent = await ReadAsync(client, ListPath + $"?endpointId={Guid.NewGuid():D}&severity=high&status=investigating", token);
+        Check(absent.GetProperty("total").GetInt64() == 0 && absent.GetProperty("alerts").GetArrayLength() == 0,
+            "A valid unmatched endpoint filter returned another endpoint's alerts or count.");
         var empty = await ReadAsync(client, ListPath + "?severity=critical", token);
         Check(empty.GetProperty("total").GetInt64() == 0 && empty.GetProperty("alerts").GetArrayLength() == 0,
             "An unmatched severity filter did not return an empty list.");
@@ -342,7 +354,10 @@ internal static class AlertApiTests
                 if (restart == 0)
                     await VerifyAtomicPersistenceAsync(app, client, token, database, risky, list);
                 else
+                {
                     await VerifyConcurrentUpdatesAsync(client, token, firstId, detail);
+                    await VerifyEndpointFilterPagesAsync(client, token, risky);
+                }
                 await app.StopAsync();
             }
         }
@@ -351,6 +366,58 @@ internal static class AlertApiTests
             SqliteConnection.ClearAllPools();
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private static async Task VerifyEndpointFilterPagesAsync(HttpClient client, string token, InventoryReport risky)
+    {
+        // This copied/backfilled test installation is isolated from the primary
+        // Core tests. Enroll/report a second real synthetic endpoint so filtering
+        // must exclude matching severity/status rows owned by another endpoint.
+        using var issue = await SendAsync(client, HttpMethod.Post, "/api/admin/enrollment-tokens", "Bearer", token, new { });
+        Check(issue.StatusCode == HttpStatusCode.OK, "The endpoint filter fixture could not issue an enrollment token.");
+        using var issued = JsonDocument.Parse(await issue.Content.ReadAsStringAsync());
+        using var enroll = await client.PostAsJsonAsync("/api/agent/enroll", new
+        {
+            installationId = Guid.NewGuid(),
+            enrollmentToken = issued.RootElement.GetProperty("token").GetString()
+        });
+        Check(enroll.StatusCode == HttpStatusCode.OK, "The endpoint filter fixture could not enroll its second endpoint.");
+        using var enrollment = JsonDocument.Parse(await enroll.Content.ReadAsStringAsync());
+        var endpointId = enrollment.RootElement.GetProperty("endpointId").GetGuid();
+        var credential = enrollment.RootElement.GetProperty("agentCredential").GetString()!;
+        await UploadAsync(client, risky with
+        {
+            EndpointId = endpointId,
+            Hostname = "endpoint-filter-synthetic",
+            CollectedUtc = risky.CollectedUtc.AddTicks(1)
+        }, credential);
+
+        var all = await ReadAsync(client, ListPath, token);
+        Check(all.GetProperty("total").GetInt64() == 6, "The endpoint filter fixture did not retain both endpoints' tracked alerts.");
+        var endpoint = await ReadAsync(client, ListPath + $"?endpointId={endpointId:D}", token);
+        Check(endpoint.GetProperty("total").GetInt64() == 3 &&
+              endpoint.GetProperty("alerts").EnumerateArray().All(alert => alert.GetProperty("endpointId").GetGuid() == endpointId),
+            "Endpoint filtering included alerts or counts owned by another endpoint.");
+        var query = ListPath + $"?endpointId={endpointId:D}&severity=high&status=open";
+        var combined = await ReadAsync(client, query, token);
+        Check(combined.GetProperty("total").GetInt64() == 2 && combined.GetProperty("alerts").GetArrayLength() == 2 &&
+              combined.GetProperty("alerts").EnumerateArray().All(alert => alert.GetProperty("endpointId").GetGuid() == endpointId &&
+                  alert.GetProperty("severity").GetString() == "high" && Status(alert) == "open"),
+            "Combined endpoint/severity/status filtering included unrelated rows or an unfiltered total.");
+        var first = await ReadAsync(client, query + "&offset=0&limit=1", token);
+        var second = await ReadAsync(client, query + "&offset=1&limit=1", token);
+        var pastEnd = await ReadAsync(client, query + "&offset=2&limit=1", token);
+        foreach (var page in new[] { first, second, pastEnd })
+            Check(page.GetProperty("total").GetInt64() == 2 && page.GetProperty("limit").GetInt32() == 1,
+                "Filtered paging did not retain the filtered unpaged total or requested bound.");
+        Check(first.GetProperty("alerts").GetArrayLength() == 1 && second.GetProperty("alerts").GetArrayLength() == 1 &&
+              first.GetProperty("alerts")[0].GetProperty("alertId").GetGuid() == combined.GetProperty("alerts")[0].GetProperty("alertId").GetGuid() &&
+              second.GetProperty("alerts")[0].GetProperty("alertId").GetGuid() == combined.GetProperty("alerts")[1].GetProperty("alertId").GetGuid() &&
+              first.GetProperty("offset").GetInt32() == 0 && second.GetProperty("offset").GetInt32() == 1 &&
+              pastEnd.GetProperty("offset").GetInt32() == 2 && pastEnd.GetProperty("alerts").GetArrayLength() == 0,
+            "Filtered endpoint pages duplicated/omitted rows or changed stable page metadata.");
+        var uppercase = await ReadAsync(client, ListPath + "?endpointId=" + endpointId.ToString("D").ToUpperInvariant(), token);
+        Check(uppercase.GetRawText() == endpoint.GetRawText(), "Canonical uppercase endpoint IDs did not select the same endpoint.");
     }
 
     private static async Task VerifyAtomicPersistenceAsync(WebApplication app, HttpClient client,

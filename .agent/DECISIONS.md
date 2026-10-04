@@ -118,3 +118,8 @@
 
 - Reuse the private authentication client's session, trust gate and HTTP handler for read-only device APIs. Views/view models receive typed public data and outcomes only; no token exposure, persistence-store access or credential copying is introduced.
 - Add an optional inventory timestamp to the existing Core list DTO, derived from the retained report without a migration. Filter/sort the full accepted list before 100-row UI paging; explicitly reject oversized responses/fleets instead of silently truncating them. Core retains all heartbeat thresholds; configured posture remains a separate nullable observation.
+
+## 2026-10-04 — TASK-020 native Alerts and incidents
+
+- Keep persistent alert lifecycle, positive-observation reopening, history and optimistic versions entirely in Core. Add only an optional endpoint filter to its existing list query so endpoint/severity/status filtering precedes the page and count; retain existing defaults, order and public DTOs without a migration.
+- Reuse the same private Desktop authentication owner and verified transport for bounded typed reads and explicit versioned status writes. Render all dynamic data as literal native text. On conflict, fetch current detail once and require a fresh operator choice; on an uncertain write response, require a detail refresh and never retry the write automatically. Status changes record review decisions and never modify endpoint configuration.

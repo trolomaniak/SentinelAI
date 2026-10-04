@@ -160,6 +160,7 @@ internal static partial class Program
         }
         await AuthenticationViewsAsync();
         await DevicesViewsAsync();
+        await AlertsViewsAsync();
     }
 
     private static async Task AuthenticationViewsAsync()

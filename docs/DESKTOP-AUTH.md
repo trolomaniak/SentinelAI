@@ -1,6 +1,6 @@
 # Desktop administrator setup and sign-in
 
-The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. The browser dashboard remains available; Devices provides a native list and endpoint details; the other workspace pages remain placeholders.
+The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. The browser dashboard remains available; Devices provides a native list and endpoint details, and Alerts provides the native tracked-incident workflow; the other workspace pages remain placeholders.
 
 ## Fresh installation
 
