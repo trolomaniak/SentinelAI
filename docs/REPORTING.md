@@ -4,9 +4,11 @@ TASK-013 adds administrator-generated standalone HTML security reports. Core rea
 
 ## Generate a report
 
-Sign in to Core, open **Reports**, select the start and end dates, then generate and download the HTML file. The default is the previous complete calendar month in UTC. Open the file without a network connection. Browser printing also supports saving the HTML as PDF; Core does not add a PDF rendering service.
+Sign in through Desktop or the dashboard, open **Reports**, select the start and end dates, then generate the HTML file. Desktop's **Generate report** holds Core's exact attachment in owned memory and displays period/filename/size/status. **Save HTML** opens the native destination picker and saves only after explicit confirmation, without an embedded preview or automatic opening. Date edits, leaving Reports, sign-out and closing erase retained bytes and cancel pending work; already saved exports remain. The default is the previous complete calendar month in UTC. Open the saved file yourself without a network connection. Browser printing also supports saving the HTML as PDF; Core does not add a PDF rendering service. See [native report operation, bounds and verification](DESKTOP-RISK-REPORTS.md).
 
 The administrator API is `GET /api/admin/reports/security?from=2026-09-01&to=2026-09-30`. It requires the existing administrator bearer token and HTTPS outside loopback, returns `text/html` as an attachment and uses `Cache-Control: no-store`. Tokens are sent in the authorization header only, never in the download URL or file.
+
+Desktop requires strict UTF-8 and Core's attachment, `no-store`, `nosniff` and exact restrictive CSP headers, with a 30-second complete-response deadline and an 8 MiB byte limit. The native saver uses a date-derived suggestion, rejects final link/directory destinations, stages bytes in the confirmed destination directory and moves them into place; it never trusts a server-supplied save path. This changes only the report delivery workflow, preserving Core's privacy projection and local/Safe Mode generation.
 
 Only `from` and `to` are accepted, once each. Both must be exact `yyyy-MM-dd` dates. Dates are inclusive UTC calendar days: the example includes September 1 at midnight and excludes October 1 at midnight. The range must be ordered and contain at most 366 days. Invalid parameters return `400`.
 

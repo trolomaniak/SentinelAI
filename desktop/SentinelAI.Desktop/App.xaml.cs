@@ -11,6 +11,8 @@ public partial class App : Application
     private AuthenticationViewModel? _authentication;
     private DevicesViewModel? _devices;
     private AlertsViewModel? _alerts;
+    private RiskViewModel? _risk;
+    private ReportsViewModel? _reports;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -31,13 +33,15 @@ public partial class App : Application
             _authentication = new AuthenticationViewModel(authenticationClient, coreServices.CreateAdministratorSetupClient());
             _devices = new DevicesViewModel((IDevicesClient)authenticationClient);
             _alerts = new AlertsViewModel((IAlertsClient)authenticationClient, (IDevicesClient)authenticationClient);
+            _risk = new RiskViewModel((IRiskClient)authenticationClient);
+            _reports = new ReportsViewModel((IReportsClient)authenticationClient, new WindowsReportSaveService(() => MainWindow));
             var assembly = typeof(App).Assembly;
             var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion.Split('+')[0]
                 ?? assembly.GetName().Version?.ToString(3)
                 ?? "Unknown";
             _shell = new ShellViewModel(client, version);
-            MainWindow = new MainWindow(_shell, _authentication, _devices, _alerts);
+            MainWindow = new MainWindow(_shell, _authentication, _devices, _alerts, _risk, _reports);
             MainWindow.Show();
         }
         catch (Exception)
@@ -57,6 +61,8 @@ public partial class App : Application
         _shell?.Dispose();
         _devices?.Dispose();
         _alerts?.Dispose();
+        _risk?.Dispose();
+        _reports?.Dispose();
         _authentication?.Dispose();
         base.OnExit(e);
     }

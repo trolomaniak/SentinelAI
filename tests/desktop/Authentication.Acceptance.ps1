@@ -14,7 +14,8 @@ param(
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
     [ValidateRange(30, 600)][int]$TimeoutSeconds = 180,
     [switch]$VerifyDevices,
-    [switch]$VerifyAlerts
+    [switch]$VerifyAlerts,
+    [switch]$VerifyRiskReports
 )
 
 Set-StrictMode -Version Latest
@@ -40,6 +41,7 @@ if ($PSVersionTable.PSEdition -ne 'Desktop') {
     $arguments += ' -TimeoutSeconds ' + $TimeoutSeconds
     if ($VerifyDevices) { $arguments += ' -VerifyDevices' }
     if ($VerifyAlerts) { $arguments += ' -VerifyAlerts' }
+    if ($VerifyRiskReports) { $arguments += ' -VerifyRiskReports' }
     $nativeStart = [Diagnostics.ProcessStartInfo]::new()
     $nativeStart.FileName = $nativeHost; $nativeStart.Arguments = $arguments
     $nativeStart.UseShellExecute = $false
@@ -432,6 +434,10 @@ try {
     if ($VerifyAlerts) {
         . (Join-Path $PSScriptRoot 'Alerts.Acceptance.ps1')
         Invoke-NativeAlertsAcceptance
+    }
+    if ($VerifyRiskReports) {
+        . (Join-Path $PSScriptRoot 'RiskReports.Acceptance.ps1')
+        Invoke-NativeRiskReportsAcceptance
     }
     Assert-NoCredentialArguments $desktop
     Assert-NoCredentialArguments $coreProcess

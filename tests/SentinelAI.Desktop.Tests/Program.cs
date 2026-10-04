@@ -13,6 +13,11 @@ assertions += await DevicesViewModelTests.RunAsync();
 assertions += await HttpAlertRequestsTests.RunAsync();
 assertions += await AlertsViewModelTests.RunAsync();
 assertions += await AlertsViewModelConcurrencyTests.RunAsync();
+assertions += await HttpRiskReadsTests.RunAsync();
+assertions += await RiskViewModelTests.RunAsync();
+assertions += await HttpReportRequestsTests.RunAsync();
+assertions += await ReportsViewModelTests.RunAsync();
+assertions += await ReportFileWriterTests.RunAsync();
 Console.WriteLine($"Desktop foundation: {assertions} assertions passed.");
 
 void Ensure(bool condition, string message)

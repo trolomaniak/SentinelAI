@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../shared/contracts/SentinelAI.Contracts.csproj" />
+    <ProjectReference Include="../../scoring/SentinelAI.Scoring.csproj" />
   </ItemGroup>
 </Project>
