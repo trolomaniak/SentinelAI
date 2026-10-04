@@ -8,6 +8,8 @@ await ShellLifecycleTestsAsync();
 await HealthResponseTestsAsync();
 await HealthCancellationTestsAsync();
 assertions += await AuthenticationTests.RunAsync();
+assertions += await HttpDeviceReadsTests.RunAsync();
+assertions += await DevicesViewModelTests.RunAsync();
 Console.WriteLine($"Desktop foundation: {assertions} assertions passed.");
 
 void Ensure(bool condition, string message)

@@ -31,7 +31,12 @@ public partial class AuthenticationView : UserControl
     private void OnModelChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(AuthenticationViewModel.State) or nameof(AuthenticationViewModel.IsSignedIn))
-            Dispatcher.InvokeAsync(() => PasswordInput.Clear());
+        {
+            // Clear before the next input opportunity. Queuing a clear from the
+            // UI thread can erase a newly entered reconnect password instead.
+            if (Dispatcher.CheckAccess()) PasswordInput.Clear();
+            else Dispatcher.InvokeAsync(() => PasswordInput.Clear());
+        }
     }
 
     private async void OnSignIn(object sender, RoutedEventArgs e) => await SubmitAsync(create: false);

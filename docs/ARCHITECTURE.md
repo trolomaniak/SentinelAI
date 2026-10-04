@@ -10,8 +10,14 @@ The supported installer configuration remains loopback HTTP, with the existing H
 
 # Desktop authentication
 
-The WPF shell uses a portable authentication state model and Core's existing login/session authority. Bearers remain private in memory, refresh tokens are discarded, and passwords are never model-bound or persisted. Sign-out invalidates pending completions; expiry, `401`, restart or connection loss closes the local session. Navigation placeholders are gated behind authentication.
+The WPF shell uses a portable authentication state model and Core's existing login/session authority. Bearers remain private in memory, refresh tokens are discarded, and passwords are never model-bound or persisted. Sign-out invalidates pending completions; expiry, `401`, restart or connection loss closes the local session. Workspace navigation is gated behind authentication.
 
 First-run detection and creation use one-shot commands in the trusted installed Core executable against the existing protected configuration. Creation accepts bounded credentials through private redirected stdin, uses the same hasher/atomic SQLite transaction, and cannot replace an administrator. The helper starts no HTTP listener. UAC is confined to a separate initial-setup window when required; normal sign-in remains unelevated and does not require access to SQLite or protected setup files.
 
 SCM's administrator-controlled registration identifies the managed Core process. The native authentication transport verifies ownership of the actual connected TCP tuple before HTTP can write secrets, closing the port-occupation race of a simple pre-request listener check. Console fallback retains existing operator filesystem trust. Service identity/ACL/bootstrap policy remain unchanged, and remote plaintext login is rejected before credential body binding. See [desktop authentication](DESKTOP-AUTH.md).
+
+# Native Desktop devices
+
+Devices uses read-only administrator API calls through the same private authentication client and connected-peer-verified transport. No bearer is exposed to views/view models, and Desktop never reads SQLite or enrollment credentials. Core remains authoritative for healthy/warning/offline/unknown; configured security posture and inventory observation times are displayed separately.
+
+Core's list response adds an optional inventory timestamp derived from the existing stored report. This avoids one detail request per fleet row, with no schema migration or change to existing fields. Desktop validates bounded public DTOs, filters/sorts the complete accepted list, and presents 100-row pages in a recycling native DataGrid. Detail shows only the public typed inventory fields already exposed by Core. Cancellation/generation checks reject obsolete results; sign-out clears all device state. See [native device operation](DESKTOP-DEVICES.md).

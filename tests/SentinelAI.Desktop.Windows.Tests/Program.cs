@@ -12,7 +12,7 @@ using SentinelAI.Desktop;
 using SentinelAI.Desktop.Foundation;
 using SentinelAI.Desktop.Views;
 
-internal static class Program
+internal static partial class Program
 {
     private static int _assertions;
 
@@ -159,6 +159,7 @@ internal static class Program
             bindingSource.Switch.Level = originalLevel;
         }
         await AuthenticationViewsAsync();
+        await DevicesViewsAsync();
     }
 
     private static async Task AuthenticationViewsAsync()
@@ -201,12 +202,17 @@ internal static class Program
             Ensure(password.Password.Length == 0 && !signin.IsVisible, "Signed-in native UI retained credential entry.");
             client.Session = SessionStatus.Expired;
             await model.CheckSessionAsync();
-            await FlushAsync();
-            Ensure(!model.IsSignedIn && !navigation.IsEnabled && signin.IsVisible, "Expired native session left workspace access available.");
+            // Enter new credentials before draining dispatcher work to ensure
+            // an old expiry notification cannot clear the reconnect password.
             model.Username = "wpf-admin";
             password.Password = "Wpf-Test-Only-Secret!";
+            await FlushAsync();
+            Ensure(!model.IsSignedIn && !navigation.IsEnabled && signin.IsVisible, "Expired native session left workspace access available.");
+            Ensure(password.Password == "Wpf-Test-Only-Secret!", "A deferred expiry notification erased newly entered reconnect credentials.");
             signin.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitForAsync(() => model.IsSignedIn, "Explicit native reconnect failed.");
+            Ensure(client.LastPasswordLength == "Wpf-Test-Only-Secret!".Length && password.Password.Length == 0,
+                "Native reconnect did not submit the new password and clear its input.");
             model.SignOut();
             await FlushAsync();
             Ensure(model.Username.Length == 0 && password.Password.Length == 0 && !navigation.IsEnabled, "Native sign-out retained local authentication material.");
@@ -219,9 +225,11 @@ internal static class Program
     private sealed class FakeAuthenticationClient : IAuthenticationClient
     {
         public bool AllowSignIn, SignedIn, Disposed;
+        public int LastPasswordLength;
         public SessionStatus Session = SessionStatus.Authenticated;
         public Task<AuthenticationResult> SignInAsync(string username, ReadOnlyMemory<char> password, CancellationToken token)
         {
+            LastPasswordLength = password.Length;
             SignedIn = AllowSignIn; Session = SessionStatus.Authenticated;
             return Task.FromResult(new AuthenticationResult(AllowSignIn ? AuthenticationOutcome.Authenticated : AuthenticationOutcome.InvalidCredentials, AllowSignIn ? username : null));
         }

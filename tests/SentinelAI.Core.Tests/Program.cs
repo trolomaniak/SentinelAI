@@ -475,12 +475,14 @@ static async Task VerifyDeviceReadApiAsync(
                enrolled.OperatingSystem == "Windows 11 26H2 10.0.26200.0" &&
                enrolled.AgentVersion == inventory.AgentVersion && enrolled.HealthState == "healthy" &&
                enrolled.LastSeenUtc == lastHeartbeatUtc &&
+               enrolled.InventoryCollectedUtc == inventory.CollectedUtc &&
                enrolled.SecurityPostureSummary == "Firewall enabled on all profiles",
             "The administrator device list did not expose current, display-ready endpoint data.");
 
         var awaitingHeartbeat = devices.FirstOrDefault(device => device.HealthState == "unknown")
             ?? throw new Exception("An enrolled endpoint without a heartbeat was omitted from the device list.");
         Ensure(awaitingHeartbeat.LastSeenUtc is null &&
+               awaitingHeartbeat.InventoryCollectedUtc is null &&
                awaitingHeartbeat.OperatingSystem is null && awaitingHeartbeat.AgentVersion is null &&
                awaitingHeartbeat.SecurityPostureSummary == "Firewall status unknown",
             "An enrolled endpoint without a heartbeat or inventory was not shown as unknown.");

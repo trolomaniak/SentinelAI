@@ -11,7 +11,7 @@ namespace SentinelAI.Desktop.Foundation;
 /// Authenticates only with a composition-selected, trusted Core origin. Passwords are
 /// borrowed for one request; bearer material stays private, in memory, for at most 15 minutes.
 /// </summary>
-public sealed class HttpAuthenticationClient : IAuthenticationClient
+public sealed partial class HttpAuthenticationClient : IAuthenticationClient, IDevicesClient
 {
     private const int MaximumUsernameCharacters = 256;
     private const int MaximumPasswordCharacters = 1024;

@@ -9,7 +9,8 @@ public sealed record DeviceListItem(
     string HealthState,
     DateTimeOffset? LastSeenUtc,
     string? AgentVersion,
-    string SecurityPostureSummary);
+    string SecurityPostureSummary,
+    DateTimeOffset? InventoryCollectedUtc = null);
 
 public sealed record DeviceDetail(
     DeviceListItem Device,

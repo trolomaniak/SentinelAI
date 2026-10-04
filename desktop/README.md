@@ -1,6 +1,6 @@
 # Native desktop
 
-`SentinelAI.Desktop` is a native WPF application for Windows x64 on .NET 10. It opens its own Windows window with standard window controls. Its Overview, Devices, Alerts, Risk, Reports and Settings pages are placeholders; they do not yet expose the browser dashboard's workflows.
+`SentinelAI.Desktop` is a native WPF application for Windows x64 on .NET 10. It opens its own Windows window with standard window controls. Devices now lists enrolled endpoints and opens native endpoint details. Overview, Alerts, Risk, Reports and Settings remain placeholders.
 
 ## Build and run
 
@@ -35,7 +35,7 @@ bash ./scripts/publish-desktop-windows.sh
 pwsh -NoLogo -NoProfile -NonInteractive -File tests/desktop/Windows.Acceptance.ps1 -ExecutablePath artifacts/desktop/win-x64/SentinelAI.Desktop.exe
 ```
 
-The Windows test runner checks actual WPF authentication, password clearing, gated placeholder navigation, keyboard focus, layout, DPI and disposal. The standalone acceptance script launches the published executable, verifies its native signed-out window and requests a graceful close. The dedicated Windows CI job runs both before uploading the application directory. The Core-service Windows CI job additionally runs `tests/desktop/Authentication.Acceptance.ps1` against the signed installed Core and published desktop, covering real bootstrap, sign-in/out, listener rejection and restart/reconnect.
+The Windows test runner checks actual WPF authentication, password clearing, gated navigation, native Devices filtering/paging/virtualization/details, keyboard focus, layout, DPI and disposal. The standalone acceptance script launches the published executable, verifies its native signed-out window and requests a graceful close. The dedicated Windows CI job runs both before uploading the application directory. The Core-service Windows CI job additionally runs `tests/desktop/Authentication.Acceptance.ps1` against the signed installed Core and published desktop, covering real bootstrap, sign-in/out, listener rejection, restart/reconnect and Devices against synthetic enrolled endpoints. See [device operation and limits](../docs/DESKTOP-DEVICES.md).
 
 Physical scaling remains a practical manual check on a Windows desktop:
 

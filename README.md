@@ -28,7 +28,7 @@ Core listens at `http://127.0.0.1:5000` by default. Set `ASPNETCORE_URLS` to cha
 
 ## Native Windows desktop
 
-The separate .NET 10 WPF `SentinelAI.Desktop` provides native Windows x64 administrator setup, sign-in, sign-out and session handling, with a shell and placeholder navigation available after sign-in. Run `./scripts/publish-desktop-windows.sh` to produce the self-contained application directory at `artifacts/desktop/win-x64`, then open `SentinelAI.Desktop.exe` on Windows. See [desktop authentication](docs/DESKTOP-AUTH.md) and [desktop structure and Windows validation](desktop/README.md). Existing dashboard workflows remain available through Core; their native screens are later tasks.
+The separate .NET 10 WPF `SentinelAI.Desktop` provides native Windows x64 administrator setup, sign-in, sign-out and session handling, with a native Devices list and endpoint details available after sign-in. Run `./scripts/publish-desktop-windows.sh` to produce the self-contained application directory at `artifacts/desktop/win-x64`, then open `SentinelAI.Desktop.exe` on Windows. See [native Devices](docs/DESKTOP-DEVICES.md), [desktop authentication](docs/DESKTOP-AUTH.md) and [desktop structure and Windows validation](desktop/README.md). Existing dashboard workflows remain available through Core; the remaining native screens are later tasks.
 
 ## Core Windows Service
 
