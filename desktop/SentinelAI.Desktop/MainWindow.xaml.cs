@@ -11,6 +11,7 @@ public partial class MainWindow : Window
     private readonly AuthenticationViewModel? _authentication;
     private readonly DispatcherTimer? _sessionTimer;
     public DevicesViewModel? Devices { get; }
+    public AlertsViewModel? Alerts { get; }
     private bool _closed;
     private bool _workspaceAuthorized;
 
@@ -18,15 +19,19 @@ public partial class MainWindow : Window
 
     public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication) : this(viewModel, authentication, null) { }
 
-    public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication, DevicesViewModel? devices)
+    public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication, DevicesViewModel? devices) : this(viewModel, authentication, devices, null) { }
+
+    public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication, DevicesViewModel? devices, AlertsViewModel? alerts)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
         _viewModel = viewModel;
         _authentication = authentication;
         Devices = devices;
+        Alerts = alerts;
         _viewModel.PropertyChanged += OnShellPageChanged;
         if (devices is not null) devices.SessionExpired += OnDeviceSessionExpired;
+        if (alerts is not null) alerts.SessionExpired += OnDeviceSessionExpired;
         AuthenticationPanel.DataContext = authentication;
         DataContext = viewModel;
         if (authentication is not null)
@@ -71,8 +76,8 @@ public partial class MainWindow : Window
         PageContent.Visibility = authorized ? Visibility.Visible : Visibility.Collapsed;
         AuthenticationRow.Height = authorized ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
         PageRow.Height = authorized ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        if (!authorized) Devices?.Clear();
-        else if (authorizationChanged) RefreshDevicesIfSelected();
+        if (!authorized) { Devices?.Clear(); Alerts?.Clear(); }
+        else if (authorizationChanged) RefreshCurrentPage();
     }
 
     private void OnShellPageChanged(object? sender, PropertyChangedEventArgs e)
@@ -80,17 +85,19 @@ public partial class MainWindow : Window
         if (!_closed && e.PropertyName == nameof(ShellViewModel.CurrentPage))
         {
             SetPagePresentation();
-            RefreshDevicesIfSelected();
+            RefreshCurrentPage();
         }
     }
 
     private void SetPagePresentation() => PageContent.ContentTemplate = (DataTemplate)FindResource(
-        Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices ? "DevicesTemplate" : "PlaceholderTemplate");
+        Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices ? "DevicesTemplate" :
+        Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts ? "AlertsTemplate" : "PlaceholderTemplate");
 
-    private async void RefreshDevicesIfSelected()
+    private async void RefreshCurrentPage()
     {
-        if (!_closed && Devices is not null && (_authentication?.IsSignedIn ?? true) &&
-            _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
+        if (_closed || !(_authentication?.IsSignedIn ?? true)) return;
+        if (Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
+        else if (Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts) await Alerts.RefreshAsync();
     }
 
     private void OnDeviceSessionExpired(object? sender, EventArgs e)
@@ -104,6 +111,7 @@ public partial class MainWindow : Window
         Loaded -= OnLoaded;
         _viewModel.PropertyChanged -= OnShellPageChanged;
         if (Devices is not null) { Devices.SessionExpired -= OnDeviceSessionExpired; Devices.Dispose(); }
+        if (Alerts is not null) { Alerts.SessionExpired -= OnDeviceSessionExpired; Alerts.Dispose(); }
         _sessionTimer?.Stop();
         if (_sessionTimer is not null) _sessionTimer.Tick -= OnSessionTick;
         if (_authentication is not null)

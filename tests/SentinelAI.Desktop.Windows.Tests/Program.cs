@@ -160,6 +160,7 @@ internal static partial class Program
         }
         await AuthenticationViewsAsync();
         await DevicesViewsAsync();
+        await AlertsViewsAsync();
     }
 
     private static async Task AuthenticationViewsAsync()
@@ -175,6 +176,8 @@ internal static partial class Program
             window.Show();
             await WaitForAsync(() => model.State == AuthenticationState.SetupRequired, "Fresh native Desktop did not offer administrator creation.");
             var panel = RequireControl<AuthenticationView>(window, "AuthenticationPanel");
+            var credentials = (StackPanel)panel.FindName("CredentialPanel");
+            var username = (TextBox)panel.FindName("UsernameInput");
             var password = (PasswordBox)panel.FindName("PasswordInput");
             var create = (Button)panel.FindName("CreateAdministratorButton");
             var signin = (Button)panel.FindName("SignInButton");
@@ -190,18 +193,53 @@ internal static partial class Program
             Ensure(password.Password.Length == 0, "Bootstrap submission retained the native password input.");
             await WaitForAsync(() => model.State == AuthenticationState.SignedOut, "Native bootstrap did not return to sign-in.");
             Ensure(setup.Created && !client.SignedIn, "Bootstrap bypassed Core's separate authentication boundary.");
+            var pendingSignIn = new TaskCompletionSource<AuthenticationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            client.NextSignIn = pendingSignIn.Task;
             password.Password = "wrong-test-password";
             signin.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            await WaitForAsync(() => !model.IsBusy, "Invalid native sign-in did not finish.");
+            await FlushAsync();
+            Ensure(model.IsBusy && !credentials.IsEnabled && !username.IsEnabled && !password.IsEnabled && !signin.IsEnabled,
+                "Pending authentication allowed native credential entry before completion.");
+            Ensure(password.Password.Length == 0 && client.SignInCalls == 1,
+                "Pending authentication retained input or submitted more than once.");
+            pendingSignIn.SetResult(new AuthenticationResult(AuthenticationOutcome.InvalidCredentials));
+            await WaitForAsync(() => !model.IsBusy && credentials.IsEnabled && username.IsEnabled && password.IsEnabled && signin.IsEnabled,
+                "Completed native sign-in did not restore credential input readiness.");
             Ensure(!model.IsSignedIn && model.ErrorText == "The username or password is incorrect." && password.Password.Length == 0,
                 "Invalid native credentials were not handled safely.");
+            Ensure(client.SignInCalls == 1, "Failed native sign-in retried automatically.");
             client.AllowSignIn = true;
             password.Password = "Wpf-Test-Only-Secret!";
+            await FlushAsync();
+            Ensure(password.Password == "Wpf-Test-Only-Secret!", "Authentication completion erased credentials entered after input became ready.");
             signin.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitForAsync(() => model.IsSignedIn && navigation.IsEnabled, "Authenticated native navigation did not become available.");
             Ensure(password.Password.Length == 0 && !signin.IsVisible, "Signed-in native UI retained credential entry.");
             client.Session = SessionStatus.Expired;
-            await model.CheckSessionAsync();
+            var stateInputWrites = 0;
+            var signedInNotifications = 0;
+            var retainedInputThroughSignedIn = false;
+            System.ComponentModel.PropertyChangedEventHandler enterAfterState = (_, args) =>
+            {
+                if (args.PropertyName == nameof(AuthenticationViewModel.State) && model.State == AuthenticationState.SignedOut)
+                {
+                    // Deliberately inject input reentrantly between notifications;
+                    // the next IsSignedIn notification must not clear it again.
+                    stateInputWrites++;
+                    password.Password = "Wpf-Test-Only-Secret!";
+                }
+                else if (args.PropertyName == nameof(AuthenticationViewModel.IsSignedIn))
+                {
+                    signedInNotifications++;
+                    retainedInputThroughSignedIn = password.Password == "Wpf-Test-Only-Secret!";
+                }
+            };
+            model.PropertyChanged += enterAfterState;
+            try { await model.CheckSessionAsync(); }
+            finally { model.PropertyChanged -= enterAfterState; }
+            Ensure(stateInputWrites == 1 && signedInNotifications == 1 && retainedInputThroughSignedIn,
+                "A second notification in the same state update erased fresh native credentials.");
+            Ensure(password.Password == "Wpf-Test-Only-Secret!", "Session expiry erased credentials entered after its state notification.");
             // Enter new credentials before draining dispatcher work to ensure
             // an old expiry notification cannot clear the reconnect password.
             model.Username = "wpf-admin";
@@ -225,11 +263,18 @@ internal static partial class Program
     private sealed class FakeAuthenticationClient : IAuthenticationClient
     {
         public bool AllowSignIn, SignedIn, Disposed;
-        public int LastPasswordLength;
+        public int LastPasswordLength, SignInCalls;
+        public Task<AuthenticationResult>? NextSignIn;
         public SessionStatus Session = SessionStatus.Authenticated;
         public Task<AuthenticationResult> SignInAsync(string username, ReadOnlyMemory<char> password, CancellationToken token)
         {
+            SignInCalls++;
             LastPasswordLength = password.Length;
+            if (NextSignIn is { } next)
+            {
+                NextSignIn = null;
+                return next;
+            }
             SignedIn = AllowSignIn; Session = SessionStatus.Authenticated;
             return Task.FromResult(new AuthenticationResult(AllowSignIn ? AuthenticationOutcome.Authenticated : AuthenticationOutcome.InvalidCredentials, AllowSignIn ? username : null));
         }

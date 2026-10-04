@@ -30,10 +30,10 @@ public partial class AuthenticationView : UserControl
 
     private void OnModelChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(AuthenticationViewModel.State) or nameof(AuthenticationViewModel.IsSignedIn))
+        if (e.PropertyName == nameof(AuthenticationViewModel.State))
         {
-            // Clear before the next input opportunity. Queuing a clear from the
-            // UI thread can erase a newly entered reconnect password instead.
+            // Clear once per state notification, before the next input opportunity.
+            // The same update also notifies IsSignedIn, after fresh input may arrive.
             if (Dispatcher.CheckAccess()) PasswordInput.Clear();
             else Dispatcher.InvokeAsync(() => PasswordInput.Clear());
         }

@@ -15,6 +15,7 @@
                 <StackPanel.Style>
                     <Style TargetType="StackPanel">
                         <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsBusy}" Value="True"><Setter Property="IsEnabled" Value="False" /></DataTrigger>
                             <DataTrigger Binding="{Binding IsSignedIn}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>

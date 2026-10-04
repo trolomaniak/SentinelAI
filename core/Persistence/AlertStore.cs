@@ -142,12 +142,17 @@ public sealed class AlertStore(AdminStore admins)
         string? status,
         int offset,
         int limit,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? endpointId = null)
     {
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction(deferred: true);
-        const string filter = "WHERE ($severity IS NULL OR Severity = $severity) AND ($status IS NULL OR Status = $status)";
+        const string filter = """
+            WHERE ($severity IS NULL OR Severity = $severity)
+              AND ($status IS NULL OR Status = $status)
+              AND ($endpointId IS NULL OR EndpointId = $endpointId)
+            """;
         long total;
         await using (var count = connection.CreateCommand())
         {
@@ -155,6 +160,7 @@ public sealed class AlertStore(AdminStore admins)
             count.CommandText = "SELECT COUNT(*) FROM TrackedAlerts " + filter + ";";
             count.Parameters.AddWithValue("$severity", (object?)severity ?? DBNull.Value);
             count.Parameters.AddWithValue("$status", (object?)status ?? DBNull.Value);
+            count.Parameters.AddWithValue("$endpointId", (object?)endpointId?.ToString("D") ?? DBNull.Value);
             total = (long)(await count.ExecuteScalarAsync(cancellationToken) ?? 0L);
         }
 
@@ -167,6 +173,7 @@ public sealed class AlertStore(AdminStore admins)
                 """;
             query.Parameters.AddWithValue("$severity", (object?)severity ?? DBNull.Value);
             query.Parameters.AddWithValue("$status", (object?)status ?? DBNull.Value);
+            query.Parameters.AddWithValue("$endpointId", (object?)endpointId?.ToString("D") ?? DBNull.Value);
             query.Parameters.AddWithValue("$limit", limit);
             query.Parameters.AddWithValue("$offset", offset);
             await using var reader = await query.ExecuteReaderAsync(cancellationToken);

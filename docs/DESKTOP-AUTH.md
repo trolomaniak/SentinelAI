@@ -1,6 +1,6 @@
 # Desktop administrator setup and sign-in
 
-The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. The browser dashboard remains available; Devices provides a native list and endpoint details; the other workspace pages remain placeholders.
+The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. The browser dashboard remains available; Devices provides a native list and endpoint details, and Alerts provides the native tracked-incident workflow; the other workspace pages remain placeholders.
 
 ## Fresh installation
 
@@ -18,7 +18,7 @@ Sign in with the existing Core administrator. Desktop uses Core's existing `/api
 
 The fixed local destination accepts no UI-selected host or path. Redirects, proxies, cookies and ambient authentication are disabled. For managed Core, administrator-controlled SCM registration identifies the expected virtual account, executable and live PID. Before HTTP can transmit a password or bearer, the connected TCP peer's exact server-side connection tuple must belong to that Core process. This prevents an unrelated process occupying port 5000 from receiving credentials. Console fallback additionally requires the operator's existing trusted installation access and exact executable/configuration command.
 
-Passwords enter a native `PasswordBox`, are cleared on submission, and pass only through short-lived buffers erased after use. There is no password binding, credential file, argument, logging or crash-report collection. Bearers stay private in memory for at most Core's 15-minute session lifetime; refresh tokens are discarded. **Sign out** erases the local session, clears inputs and invalidates pending operations. It does not revoke other Core sessions.
+Passwords enter a native `PasswordBox`, are cleared on submission, and pass only through short-lived buffers erased after use. Credential fields are disabled while authentication is pending; each state notification clears the old input once before fresh entry becomes available. There is no password binding, credential file, argument, logging or crash-report collection. Bearers stay private in memory for at most Core's 15-minute session lifetime; refresh tokens are discarded. **Sign out** erases the local session, clears inputs and invalidates pending operations. It does not revoke other Core sessions.
 
 The desktop revalidates an active session every five seconds. Local expiry, Core `401`, Core restart or connection loss returns it to a safe signed-out state. Reconnection requires explicit sign-in; it never replays a saved password. Closing either desktop window clears its own state and leaves Core running. Core rejects remote plaintext login before reading credentials; normal HTTPS authentication remains supported by Core.
 

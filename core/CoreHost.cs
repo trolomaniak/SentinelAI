@@ -502,13 +502,13 @@ public static class CoreHost
                     return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
 
-                if (!TryReadAlertQuery(context.Request.Query, out var severity, out var status,
+                if (!TryReadAlertQuery(context.Request.Query, out var severity, out var status, out var endpointId,
                         out var offset, out var limit))
                 {
                     return Results.BadRequest();
                 }
 
-                return Results.Ok(await alerts.ListAsync(severity, status, offset, limit, cancellationToken));
+                return Results.Ok(await alerts.ListAsync(severity, status, offset, limit, cancellationToken, endpointId));
             })
             .RequireAuthorization();
 
@@ -729,11 +729,13 @@ public static class CoreHost
         IQueryCollection query,
         out string? severity,
         out string? status,
+        out Guid? endpointId,
         out int offset,
         out int limit)
     {
         severity = null;
         status = null;
+        endpointId = null;
         offset = 0;
         limit = 50;
         if (query.TryGetValue("severity", out var severityValues))
@@ -746,6 +748,14 @@ public static class CoreHost
         {
             if (statusValues.Count != 1 || !AlertStore.IsValidStatus(statusValues[0])) return false;
             status = statusValues[0];
+        }
+
+        if (query.TryGetValue("endpointId", out var endpointValues))
+        {
+            if (endpointValues.Count != 1 || endpointValues[0]?.Length != 36 ||
+                !Guid.TryParseExact(endpointValues[0], "D", out var parsedEndpointId) ||
+                parsedEndpointId == Guid.Empty) return false;
+            endpointId = parsedEndpointId;
         }
 
         if (query.TryGetValue("offset", out var offsetValues) &&

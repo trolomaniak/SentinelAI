@@ -1,6 +1,6 @@
 # Native desktop
 
-`SentinelAI.Desktop` is a native WPF application for Windows x64 on .NET 10. It opens its own Windows window with standard window controls. Devices now lists enrolled endpoints and opens native endpoint details. Overview, Alerts, Risk, Reports and Settings remain placeholders.
+`SentinelAI.Desktop` is a native WPF application for Windows x64 on .NET 10. It opens its own Windows window with standard window controls. Devices lists enrolled endpoints and opens native endpoint details. Alerts provides native tracked-incident detail, typed evidence/history and versioned operator status decisions. Overview, Risk, Reports and Settings remain placeholders. See [incident operation and verification](../docs/DESKTOP-ALERTS.md).
 
 ## Build and run
 

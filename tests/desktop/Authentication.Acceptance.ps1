@@ -13,7 +13,8 @@ param(
     [ValidateSet('development', 'production')][string]$Environment = 'development',
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
     [ValidateRange(30, 600)][int]$TimeoutSeconds = 180,
-    [switch]$VerifyDevices
+    [switch]$VerifyDevices,
+    [switch]$VerifyAlerts
 )
 
 Set-StrictMode -Version Latest
@@ -38,6 +39,7 @@ if ($PSVersionTable.PSEdition -ne 'Desktop') {
     }
     $arguments += ' -TimeoutSeconds ' + $TimeoutSeconds
     if ($VerifyDevices) { $arguments += ' -VerifyDevices' }
+    if ($VerifyAlerts) { $arguments += ' -VerifyAlerts' }
     $nativeStart = [Diagnostics.ProcessStartInfo]::new()
     $nativeStart.FileName = $nativeHost; $nativeStart.Arguments = $arguments
     $nativeStart.UseShellExecute = $false
@@ -152,28 +154,49 @@ namespace SentinelAIDesktopAuthenticationAcceptance {
         }
         [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] input, int size);
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool SetForegroundWindow(IntPtr handle);
+        [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
-        public static void TypePassword(string password) {
-            if (String.IsNullOrEmpty(password) || password.Length > 256) throw new InvalidOperationException("Synthetic input is invalid.");
-            // Finish with Tab in the same native input batch. The fixture waits
-            // for the following action to gain focus before UIA Invoke, proving
-            // the preceding password keystrokes were actually processed.
-            var inputs = new Input[password.Length * 2 + 2];
+        public static void TypePassword(string password, IntPtr expectedWindow) {
+            if (String.IsNullOrEmpty(password) || password.Length > 256 || expectedWindow == IntPtr.Zero)
+                throw new InvalidOperationException("Synthetic input is invalid.");
+            // Pace native Unicode pairs to allow normal text-input processing,
+            // rather than flooding the interactive runner with one burst. The
+            // 256-character bound requests at most 5.12 seconds of pacing;
+            // a ten-second input deadline also bounds slow scheduling. Never resend.
+            var inputs = new Input[2];
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
             try {
                 for (int index = 0; index < password.Length; index++) {
-                    inputs[index * 2].Type = 1;
-                    inputs[index * 2].Data.Keyboard.Scan = password[index];
-                    inputs[index * 2].Data.Keyboard.Flags = 4;
-                    inputs[index * 2 + 1] = inputs[index * 2];
-                    inputs[index * 2 + 1].Data.Keyboard.Flags = 6;
+                    if (elapsed.Elapsed.TotalSeconds >= 10)
+                        throw new InvalidOperationException("Native password input exceeded its deadline.");
+                    if (GetForegroundWindow() != expectedWindow)
+                        throw new InvalidOperationException("Native password input lost foreground ownership.");
+                    inputs[0].Type = 1;
+                    inputs[0].Data.Keyboard.Scan = password[index];
+                    inputs[0].Data.Keyboard.Flags = 4;
+                    inputs[1] = inputs[0];
+                    inputs[1].Data.Keyboard.Flags = 6;
+                    if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
+                        throw new InvalidOperationException("Native protected password input was incomplete.");
+                    System.Threading.Thread.Sleep(20);
                 }
-                inputs[password.Length * 2].Type = 1;
-                inputs[password.Length * 2].Data.Keyboard.Key = 9;
-                inputs[password.Length * 2 + 1] = inputs[password.Length * 2];
-                inputs[password.Length * 2 + 1].Data.Keyboard.Flags = 2;
-                if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
-                    throw new InvalidOperationException("Native protected password input was incomplete.");
+                if (elapsed.Elapsed.TotalSeconds >= 10)
+                    throw new InvalidOperationException("Native password input exceeded its deadline.");
+                if (GetForegroundWindow() != expectedWindow)
+                    throw new InvalidOperationException("Native password input lost foreground ownership.");
+                Array.Clear(inputs, 0, inputs.Length);
+                inputs[0].Type = 1; inputs[0].Data.Keyboard.Key = 9;
+                inputs[1] = inputs[0]; inputs[1].Data.Keyboard.Flags = 2;
+                if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
+                    throw new InvalidOperationException("Native password focus transfer was incomplete.");
             } finally { Array.Clear(inputs, 0, inputs.Length); }
+        }
+        public static void SubmitFocusedAction() {
+            var inputs = new Input[2];
+            inputs[0].Type = 1; inputs[0].Data.Keyboard.Key = 13;
+            inputs[1] = inputs[0]; inputs[1].Data.Keyboard.Flags = 2;
+            if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
+                throw new InvalidOperationException("Native authentication submit input was incomplete.");
         }
     }
 }
@@ -201,7 +224,17 @@ function Wait-AuthenticationAcceptance([scriptblock]$Condition, [string]$Message
         if ($null -ne $script:desktop -and $script:desktop.HasExited) { throw 'The tested Desktop exited during authentication.' }
         Start-Sleep -Milliseconds 100
     }
-    throw $Message
+    # Only fixed, locally rendered errors become diagnostic categories. Never
+    # include response bodies, passwords, token material or arbitrary UI strings.
+    $category = switch (Get-AuthenticationError) {
+        'The username or password is incorrect.' { 'credentials_rejected'; break }
+        'The local Core connection could not be trusted.' { 'untrusted_core'; break }
+        'Local Core is unavailable. Start or restore Core, then try again.' { 'core_unavailable'; break }
+        'Too many sign-in attempts. Try again later.' { 'throttled'; break }
+        'Your session has expired. Sign in again.' { 'session_expired'; break }
+        default { 'no_safe_error' }
+    }
+    throw ($Message + ' Authentication result: ' + $category + '.')
 }
 function Find-AuthenticationControl([string]$Id) {
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
@@ -214,6 +247,14 @@ function Test-AuthenticationControl([string]$Id, [bool]$RequireEnabled = $true) 
 function Invoke-AuthenticationControl([string]$Id) {
     Wait-AuthenticationAcceptance { Test-AuthenticationControl $Id } 'A required native authentication action was unavailable.'
     $control = Find-AuthenticationControl $Id
+    if ($Id -in @('SignInButton', 'CreateAdministratorButton')) {
+        # UIA Invoke runs at dispatcher Send priority and can overtake queued
+        # native text input. Submit through the same keyboard path instead.
+        Assert-AuthenticationAcceptance ($control.Current.HasKeyboardFocus -and
+            [SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $script:desktop.MainWindowHandle) 'The native authentication submit action did not own foreground focus.'
+        [SentinelAIDesktopAuthenticationAcceptance.Native]::SubmitFocusedAction()
+        return
+    }
     $invoke = [System.Windows.Automation.InvokePattern]$control.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
     $invoke.Invoke()
 }
@@ -222,6 +263,7 @@ function Set-AuthenticationCredential([string]$Name, [string]$Secret) {
     $user = Find-AuthenticationControl 'AuthenticationUsername'
     $value = [System.Windows.Automation.ValuePattern]$user.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     $value.SetValue($Name)
+    Assert-AuthenticationAcceptance ($value.Current.Value -ceq $Name) 'Native administrator input did not retain the supplied username.'
     $secretControl = Find-AuthenticationControl 'AuthenticationPassword'
     Assert-AuthenticationAcceptance $secretControl.Current.IsPassword 'Authentication input exposed a non-password control.'
     $pattern = $null
@@ -233,8 +275,14 @@ function Set-AuthenticationCredential([string]$Name, [string]$Secret) {
     }
     [void][SentinelAIDesktopAuthenticationAcceptance.Native]::SetForegroundWindow($script:desktop.MainWindowHandle)
     $secretControl.SetFocus()
-    [SentinelAIDesktopAuthenticationAcceptance.Native]::TypePassword($Secret)
     Wait-AuthenticationAcceptance {
+        $focusedPassword = Find-AuthenticationControl 'AuthenticationPassword'
+        return [SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $script:desktop.MainWindowHandle -and
+            $null -ne $focusedPassword -and $focusedPassword.Current.HasKeyboardFocus
+    } 'The tested password input did not own foreground keyboard focus.'
+    [SentinelAIDesktopAuthenticationAcceptance.Native]::TypePassword($Secret, $script:desktop.MainWindowHandle)
+    Wait-AuthenticationAcceptance {
+        if ([SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -ne $script:desktop.MainWindowHandle) { return $false }
         foreach ($id in @('SignInButton', 'CreateAdministratorButton')) {
             $action = Find-AuthenticationControl $id
             if ($null -ne $action -and -not $action.Current.IsOffscreen -and $action.Current.HasKeyboardFocus) { return $true }
@@ -243,6 +291,7 @@ function Set-AuthenticationCredential([string]$Name, [string]$Secret) {
     } 'Native credential input did not finish at the submit action.'
 }
 function Get-AuthenticationError {
+    if ($null -eq $script:root) { return '' }
     $control = Find-AuthenticationControl 'AuthenticationErrorText'
     if ($null -eq $control -or $control.Current.IsOffscreen) { return '' }
     return $control.Current.Name
@@ -379,6 +428,10 @@ try {
     if ($VerifyDevices) {
         . (Join-Path $PSScriptRoot 'Devices.Acceptance.ps1')
         Invoke-NativeDevicesAcceptance
+    }
+    if ($VerifyAlerts) {
+        . (Join-Path $PSScriptRoot 'Alerts.Acceptance.ps1')
+        Invoke-NativeAlertsAcceptance
     }
     Assert-NoCredentialArguments $desktop
     Assert-NoCredentialArguments $coreProcess

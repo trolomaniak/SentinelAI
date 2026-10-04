@@ -10,6 +10,9 @@ await HealthCancellationTestsAsync();
 assertions += await AuthenticationTests.RunAsync();
 assertions += await HttpDeviceReadsTests.RunAsync();
 assertions += await DevicesViewModelTests.RunAsync();
+assertions += await HttpAlertRequestsTests.RunAsync();
+assertions += await AlertsViewModelTests.RunAsync();
+assertions += await AlertsViewModelConcurrencyTests.RunAsync();
 Console.WriteLine($"Desktop foundation: {assertions} assertions passed.");
 
 void Ensure(bool condition, string message)

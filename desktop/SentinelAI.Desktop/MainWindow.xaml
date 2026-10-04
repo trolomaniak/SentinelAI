@@ -12,6 +12,9 @@
         <DataTemplate x:Key="DevicesTemplate">
             <views:DevicesView DataContext="{Binding Devices, RelativeSource={RelativeSource AncestorType=Window}}" />
         </DataTemplate>
+        <DataTemplate x:Key="AlertsTemplate">
+            <views:AlertsView DataContext="{Binding Alerts, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </DataTemplate>
     </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
