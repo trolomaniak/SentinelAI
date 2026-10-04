@@ -155,7 +155,10 @@ namespace SentinelAIDesktopAuthenticationAcceptance {
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
         public static void TypePassword(string password) {
             if (String.IsNullOrEmpty(password) || password.Length > 256) throw new InvalidOperationException("Synthetic input is invalid.");
-            var inputs = new Input[password.Length * 2];
+            // Finish with Tab in the same native input batch. The fixture waits
+            // for the following action to gain focus before UIA Invoke, proving
+            // the preceding password keystrokes were actually processed.
+            var inputs = new Input[password.Length * 2 + 2];
             try {
                 for (int index = 0; index < password.Length; index++) {
                     inputs[index * 2].Type = 1;
@@ -164,6 +167,10 @@ namespace SentinelAIDesktopAuthenticationAcceptance {
                     inputs[index * 2 + 1] = inputs[index * 2];
                     inputs[index * 2 + 1].Data.Keyboard.Flags = 6;
                 }
+                inputs[password.Length * 2].Type = 1;
+                inputs[password.Length * 2].Data.Keyboard.Key = 9;
+                inputs[password.Length * 2 + 1] = inputs[password.Length * 2];
+                inputs[password.Length * 2 + 1].Data.Keyboard.Flags = 2;
                 if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
                     throw new InvalidOperationException("Native protected password input was incomplete.");
             } finally { Array.Clear(inputs, 0, inputs.Length); }
@@ -227,6 +234,13 @@ function Set-AuthenticationCredential([string]$Name, [string]$Secret) {
     [void][SentinelAIDesktopAuthenticationAcceptance.Native]::SetForegroundWindow($script:desktop.MainWindowHandle)
     $secretControl.SetFocus()
     [SentinelAIDesktopAuthenticationAcceptance.Native]::TypePassword($Secret)
+    Wait-AuthenticationAcceptance {
+        foreach ($id in @('SignInButton', 'CreateAdministratorButton')) {
+            $action = Find-AuthenticationControl $id
+            if ($null -ne $action -and -not $action.Current.IsOffscreen -and $action.Current.HasKeyboardFocus) { return $true }
+        }
+        return $false
+    } 'Native credential input did not finish at the submit action.'
 }
 function Get-AuthenticationError {
     $control = Find-AuthenticationControl 'AuthenticationErrorText'
