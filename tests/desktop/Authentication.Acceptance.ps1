@@ -154,6 +154,7 @@ namespace SentinelAIDesktopAuthenticationAcceptance {
         }
         [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] input, int size);
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool SetForegroundWindow(IntPtr handle);
+        [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
         public static void TypePassword(string password) {
             if (String.IsNullOrEmpty(password) || password.Length > 256) throw new InvalidOperationException("Synthetic input is invalid.");
@@ -203,7 +204,17 @@ function Wait-AuthenticationAcceptance([scriptblock]$Condition, [string]$Message
         if ($null -ne $script:desktop -and $script:desktop.HasExited) { throw 'The tested Desktop exited during authentication.' }
         Start-Sleep -Milliseconds 100
     }
-    throw $Message
+    # Only fixed, locally rendered errors become diagnostic categories. Never
+    # include response bodies, passwords, token material or arbitrary UI strings.
+    $category = switch (Get-AuthenticationError) {
+        'The username or password is incorrect.' { 'credentials_rejected'; break }
+        'The local Core connection could not be trusted.' { 'untrusted_core'; break }
+        'Local Core is unavailable. Start or restore Core, then try again.' { 'core_unavailable'; break }
+        'Too many sign-in attempts. Try again later.' { 'throttled'; break }
+        'Your session has expired. Sign in again.' { 'session_expired'; break }
+        default { 'no_safe_error' }
+    }
+    throw ($Message + ' Authentication result: ' + $category + '.')
 }
 function Find-AuthenticationControl([string]$Id) {
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
@@ -235,8 +246,14 @@ function Set-AuthenticationCredential([string]$Name, [string]$Secret) {
     }
     [void][SentinelAIDesktopAuthenticationAcceptance.Native]::SetForegroundWindow($script:desktop.MainWindowHandle)
     $secretControl.SetFocus()
+    Wait-AuthenticationAcceptance {
+        $focusedPassword = Find-AuthenticationControl 'AuthenticationPassword'
+        return [SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $script:desktop.MainWindowHandle -and
+            $null -ne $focusedPassword -and $focusedPassword.Current.HasKeyboardFocus
+    } 'The tested password input did not own foreground keyboard focus.'
     [SentinelAIDesktopAuthenticationAcceptance.Native]::TypePassword($Secret)
     Wait-AuthenticationAcceptance {
+        if ([SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -ne $script:desktop.MainWindowHandle) { return $false }
         foreach ($id in @('SignInButton', 'CreateAdministratorButton')) {
             $action = Find-AuthenticationControl $id
             if ($null -ne $action -and -not $action.Current.IsOffscreen -and $action.Current.HasKeyboardFocus) { return $true }
@@ -245,6 +262,7 @@ function Set-AuthenticationCredential([string]$Name, [string]$Secret) {
     } 'Native credential input did not finish at the submit action.'
 }
 function Get-AuthenticationError {
+    if ($null -eq $script:root) { return '' }
     $control = Find-AuthenticationControl 'AuthenticationErrorText'
     if ($null -eq $control -or $control.Current.IsOffscreen) { return '' }
     return $control.Current.Name
