@@ -28,7 +28,7 @@ Core listens at `http://127.0.0.1:5000` by default. Set `ASPNETCORE_URLS` to cha
 
 ## Native Windows desktop
 
-The separate .NET 10 WPF `SentinelAI.Desktop` provides native Windows x64 administrator setup, sign-in, sign-out and session handling, with native Devices and Alerts/incident workspaces available after sign-in. Run `./scripts/publish-desktop-windows.sh` to produce the self-contained application directory at `artifacts/desktop/win-x64`, then open `SentinelAI.Desktop.exe` on Windows. See [native Devices](docs/DESKTOP-DEVICES.md), [native Alerts](docs/DESKTOP-ALERTS.md), [desktop authentication](docs/DESKTOP-AUTH.md) and [desktop structure and Windows validation](desktop/README.md). Existing dashboard workflows remain available through Core; the remaining native screens are later tasks.
+The separate .NET 10 WPF `SentinelAI.Desktop` provides native Windows x64 administrator setup, sign-in, sign-out and session handling, with native Devices, Alerts/incidents, Risk and Reports workspaces available after sign-in. Run `./scripts/publish-desktop-windows.sh` to produce the self-contained application directory at `artifacts/desktop/win-x64`, then open `SentinelAI.Desktop.exe` on Windows. See [native Devices](docs/DESKTOP-DEVICES.md), [native Alerts](docs/DESKTOP-ALERTS.md), [native Risk and Reports](docs/DESKTOP-RISK-REPORTS.md), [desktop authentication](docs/DESKTOP-AUTH.md) and [desktop structure and Windows validation](desktop/README.md). Existing dashboard workflows remain available through Core; Overview and Settings remain native placeholders.
 
 ## Core Windows Service
 
@@ -78,7 +78,7 @@ Snapshot-based detections may be stale while an endpoint is offline. Read the ob
 
 ## Risk scoring
 
-Open **Risk** in the dashboard for the organization summary and ranked enrolled endpoints, then select an endpoint for its score and contributing factors. Device and alert details link to that endpoint's risk view. Scores are local prioritization indicators. A zero rounded score can reflect small positive contributions, an explicit confidence discount, resolved findings, or missing observations; it does not prove that an endpoint or organization is secure. Missing inventory and unknown observations are explicitly shown.
+Open **Risk** in Desktop or the dashboard for the organization summary and ranked enrolled endpoints, then select an endpoint for its score and contributing factors. Desktop preserves Core's ranked server pages and exposes every factor with literal text and full decimal precision; dashboard device and alert details also link to endpoint risk. Scores are local prioritization indicators. A zero rounded score can reflect small positive contributions, an explicit confidence discount, resolved findings, or missing observations; it does not prove that an endpoint or organization is secure. Missing inventory and unknown observations are explicitly shown.
 
 The deterministic policy combines each tracked alert's severity, configured detection-confidence weight, asset criticality, declared exposure, observation age, and remediation status, plus a bounded bonus for distinct rule groups confirmed in the same fresh latest inventory. Core computes scores from one consistent SQLite snapshot on each request, so newer inventory and administrator status changes are reflected on the next read. No AI determines the score.
 
@@ -95,7 +95,7 @@ Configuration lives under `SentinelAI:RiskScoring`. For example, start Core with
 
 ## Local security reports
 
-Open **Reports** in the dashboard, choose an inclusive UTC date range, and generate a standalone HTML report. The default range is the previous complete calendar month. The report includes a management summary, current organization risk and endpoint health, retained incident activity by severity, high/critical incidents, resolutions, tracked posture findings, prioritized actions and technical evidence. It works locally without AI, issuer connectivity or a premium license. Open the downloaded HTML offline; use the browser's print dialog to print it or save it as PDF.
+Open **Reports** in Desktop or the dashboard, choose an inclusive UTC date range, and generate a standalone HTML report. In Desktop, **Generate report** retains Core's exact attachment in memory; **Save HTML** opens an explicit native destination picker, without embedding or automatically opening the document. The default range is the previous complete calendar month. The report includes a management summary, current organization risk and endpoint health, retained incident activity by severity, high/critical incidents, resolutions, tracked posture findings, prioritized actions and technical evidence. It works locally without AI, issuer connectivity or a premium license. Open the saved HTML offline; use the browser's print dialog to print it or save it as PDF.
 
 `GET /api/admin/reports/security?from=2026-09-01&to=2026-09-30` returns an authenticated, uncached HTML attachment. Dates must be exactly `yyyy-MM-dd`, ordered and at most 366 inclusive days. The current risk/health snapshot is explicitly separate from period activity: Core does not store historical scores or complete inventory/heartbeat history, so historical trend is unavailable. See [report semantics and limits](docs/REPORTING.md).
 

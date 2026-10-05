@@ -1,0 +1,209 @@
+<UserControl x:Class="SentinelAI.Desktop.Views.RiskView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:risk="clr-namespace:SentinelAI.Desktop.Foundation;assembly=SentinelAI.Desktop.Foundation"
+             AutomationProperties.AutomationId="RiskView" SizeChanged="OnViewSizeChanged">
+    <UserControl.Resources>
+        <DataTemplate x:Key="RiskFactTemplate">
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="155" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Margin="0,0,16,0" Foreground="{DynamicResource SecondaryTextBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="{Binding Label, StringFormat='RiskFact_{0}'}" />
+            </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="RiskCoverageTemplate">
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="155" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Margin="0,0,16,0" Foreground="{DynamicResource SecondaryTextBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="{Binding Label, StringFormat='RiskCoverage_{0}'}" />
+            </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="RiskPolicyTemplate">
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="155" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Margin="0,0,16,0" Foreground="{DynamicResource SecondaryTextBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="{Binding Label, StringFormat='RiskPolicy_{0}'}" />
+            </Grid>
+        </DataTemplate>
+        <DataTemplate x:Key="RiskFactorTemplate">
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="155" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Margin="0,0,16,0" Foreground="{DynamicResource SecondaryTextBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="{Binding Label, StringFormat='RiskFactor_{0}'}" />
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <ScrollViewer x:Name="DetailActionsScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="100" Margin="0,0,0,12">
+            <ScrollViewer.Style>
+                <Style TargetType="ScrollViewer"><Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers><DataTrigger Binding="{Binding IsShowingDetail}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                </Style>
+            </ScrollViewer.Style>
+            <WrapPanel>
+                <Button Content="Back to Risk" Click="OnBack" Margin="0,0,8,8" AutomationProperties.AutomationId="BackToRiskButton" />
+                <Button Content="Refresh endpoint" Click="OnRefreshDetail" IsEnabled="{Binding CanRefreshDetail}" Margin="0,0,8,8"
+                        AutomationProperties.AutomationId="RefreshRiskDetailButton" />
+            </WrapPanel>
+        </ScrollViewer>
+        <ScrollViewer x:Name="PageScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,4,0">
+            <StackPanel>
+                <StackPanel x:Name="PageHeader">
+                    <TextBlock Text="Risk" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="Risk" />
+                    <TextBlock Text="Core's deterministic score prioritizes recorded findings. Review coverage and freshness with the score."
+                               Margin="0,10,0,16" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" />
+                    <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               AutomationProperties.AutomationId="RiskErrorText" AutomationProperties.LiveSetting="Assertive" />
+                </StackPanel>
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel"><Style.Triggers>
+                            <DataTrigger Binding="{Binding IsShowingDetail}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                        </Style.Triggers></Style>
+                    </StackPanel.Style>
+                    <StackPanel x:Name="ListToolbar">
+                        <StackPanel Margin="0,0,0,12">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel"><Style.Triggers>
+                                    <DataTrigger Binding="{Binding Organization}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                </Style.Triggers></Style>
+                            </StackPanel.Style>
+                            <TextBlock Text="Organization risk" FontSize="17" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Organization.Score, StringFormat='Score {0} / 100'}" FontSize="26" FontWeight="SemiBold" Margin="0,4,0,0"
+                                       AutomationProperties.AutomationId="RiskOrganizationScore" />
+                        </StackPanel>
+                        <WrapPanel Margin="0,0,0,8">
+                            <Button Content="Refresh" Click="OnRefresh" IsEnabled="{Binding CanRefresh}" Margin="0,0,8,8"
+                                    AutomationProperties.AutomationId="RefreshRiskButton" />
+                            <Button Content="Open endpoint risk" Click="OnOpenEndpoint" Margin="0,0,8,8" AutomationProperties.AutomationId="OpenEndpointRiskButton">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedEndpoint}" Value="{x:Null}"><Setter Property="IsEnabled" Value="False" /></DataTrigger>
+                                        <DataTrigger Binding="{Binding IsLoading}" Value="True"><Setter Property="IsEnabled" Value="False" /></DataTrigger>
+                                    </Style.Triggers></Style>
+                                </Button.Style>
+                            </Button>
+                        </WrapPanel>
+                        <TextBlock Text="{Binding ListStatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   AutomationProperties.AutomationId="RiskListStatus" AutomationProperties.LiveSetting="Polite" />
+                    </StackPanel>
+                    <!-- A finite native viewport retains row recycling inside the scrollable page. -->
+                    <DataGrid x:Name="RiskGrid" Height="240" ItemsSource="{Binding VisibleEndpoints}" SelectedItem="{Binding SelectedEndpoint, Mode=TwoWay}"
+                              AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False"
+                              CanUserReorderColumns="False" CanUserSortColumns="False" SelectionMode="Single" SelectionUnit="FullRow"
+                              EnableRowVirtualization="True" EnableColumnVirtualization="True"
+                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                              ScrollViewer.CanContentScroll="True" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                              RowDetailsVisibilityMode="Collapsed" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              Background="{DynamicResource SurfaceBrush}" RowBackground="{DynamicResource SurfaceBrush}"
+                              AlternatingRowBackground="{DynamicResource WindowBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}"
+                              BorderBrush="{DynamicResource BorderBrush}" HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
+                              MouseDoubleClick="OnRowDoubleClick" AutomationProperties.AutomationId="RiskGrid" AutomationProperties.Name="Core-ranked endpoint risk">
+                        <DataGrid.RowStyle><Style TargetType="DataGridRow"><Setter Property="AutomationProperties.Name" Value="{Binding EndpointName}" /></Style></DataGrid.RowStyle>
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" /><Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                                <Setter Property="Padding" Value="8" /><Setter Property="FontWeight" Value="SemiBold" />
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+                        <DataGrid.CellStyle><Style TargetType="DataGridCell"><Setter Property="Padding" Value="8,6" /></Style></DataGrid.CellStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Rank" Binding="{Binding Rank}" Width="70" />
+                            <DataGridTextColumn Header="Endpoint" Binding="{Binding EndpointName}" Width="220" />
+                            <DataGridTextColumn Header="Score" Binding="{Binding Score}" Width="90" />
+                            <DataGridTextColumn Header="Raw points" Binding="{Binding RawScoreText}" Width="140" />
+                            <DataGridTextColumn Header="Inventory" Binding="{Binding InventoryState}" Width="140" />
+                            <DataGridTextColumn Header="Signal coverage" Binding="{Binding SignalCoverage}" Width="150" />
+                            <DataGridTextColumn Header="Last inventory (UTC)" Binding="{Binding InventoryCollectedText}" Width="190" />
+                            <DataGridTextColumn Header="Unresolved alerts" Binding="{Binding UnresolvedAlertCount}" Width="150" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <WrapPanel x:Name="ListPaging" Margin="0,12,0,0">
+                        <Button Content="Previous" Click="OnPreviousPage" IsEnabled="{Binding CanPreviousPage}" Margin="0,0,8,8" AutomationProperties.AutomationId="PreviousRiskPageButton" />
+                        <Button Content="Next" Click="OnNextPage" IsEnabled="{Binding CanNextPage}" Margin="0,0,12,8" AutomationProperties.AutomationId="NextRiskPageButton" />
+                        <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="RiskPageSummary">
+                            <TextBlock.Text><MultiBinding StringFormat="Page {0} of {1} · {2} ranked endpoints">
+                                <Binding Path="PageNumber" /><Binding Path="TotalPages" /><Binding Path="TotalEndpoints" />
+                            </MultiBinding></TextBlock.Text>
+                        </TextBlock>
+                    </WrapPanel>
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel"><Style.Triggers>
+                                <DataTrigger Binding="{Binding Organization}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            </Style.Triggers></Style>
+                        </StackPanel.Style>
+                        <Expander Header="Organization explanation and coverage" Margin="0,16,0,0" AutomationProperties.AutomationId="RiskOrganizationExplanation">
+                            <StackPanel Margin="8,12,8,0">
+                                <TextBlock Text="{Binding Organization.Explanation}" TextWrapping="Wrap" Margin="0,0,0,16" />
+                                <ItemsControl ItemsSource="{Binding Organization.Facts}" ItemTemplate="{StaticResource RiskFactTemplate}" />
+                            </StackPanel>
+                        </Expander>
+                        <Expander Header="Core scoring policy" Margin="0,16,0,0" AutomationProperties.AutomationId="RiskOrganizationPolicy">
+                            <ItemsControl ItemsSource="{Binding Organization.PolicyFacts}" ItemTemplate="{StaticResource RiskPolicyTemplate}" Margin="8,12,8,0" />
+                        </Expander>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers><DataTrigger Binding="{Binding IsShowingDetail}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <TextBlock Text="{Binding DetailStatusText}" TextWrapping="Wrap" Margin="0,0,0,16"
+                               AutomationProperties.AutomationId="RiskDetailStatus" AutomationProperties.LiveSetting="Polite" />
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers><DataTrigger Binding="{Binding DetailState}" Value="{x:Static risk:RiskDetailState.Ready}"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="{Binding Detail.Name}" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,16" AutomationProperties.AutomationId="RiskDetailName" />
+                        <TextBlock Text="{Binding Detail.Explanation}" TextWrapping="Wrap" Margin="0,0,0,16" AutomationProperties.AutomationId="RiskDetailExplanation" />
+                        <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+                            <ItemsControl ItemsSource="{Binding Detail.Facts}" ItemTemplate="{StaticResource RiskFactTemplate}" AutomationProperties.AutomationId="RiskDetailFacts" />
+                        </Border>
+                        <TextBlock Text="Coverage and freshness" FontSize="17" FontWeight="SemiBold" Margin="0,24,0,12" />
+                        <ItemsControl ItemsSource="{Binding Detail.CoverageFacts}" ItemTemplate="{StaticResource RiskCoverageTemplate}" AutomationProperties.AutomationId="RiskCoverageFacts" />
+                        <TextBlock Text="Recorded alert contributions" FontSize="17" FontWeight="SemiBold" Margin="0,24,0,12" />
+                        <TextBlock Text="Expand a finding to inspect every factor supplied by Core." TextWrapping="Wrap" Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}">
+                            <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Style.Triggers>
+                                <DataTrigger Binding="{Binding Detail.Contributions.Count}" Value="0"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            </Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock Text="No recorded alert contributions. Review coverage and freshness." TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="RiskNoContributions">
+                            <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers>
+                                <DataTrigger Binding="{Binding Detail.Contributions.Count}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger>
+                            </Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
+                        <ItemsControl ItemsSource="{Binding Detail.Contributions}" AutomationProperties.AutomationId="RiskContributions">
+                            <ItemsControl.ItemTemplate><DataTemplate>
+                                <Expander Margin="0,0,0,16" AutomationProperties.AutomationId="{Binding AlertId, StringFormat='RiskContribution_{0}'}">
+                                    <Expander.Header>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding ContributionText, StringFormat='Weighted contribution: {0} points'}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                    </Expander.Header>
+                                    <StackPanel Margin="8,12,8,0">
+                                        <TextBlock Text="{Binding Reason}" TextWrapping="Wrap" Margin="0,0,0,16" />
+                                        <ItemsControl ItemsSource="{Binding Factors}" ItemTemplate="{StaticResource RiskFactorTemplate}" />
+                                    </StackPanel>
+                                </Expander>
+                            </DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Expander Header="Core scoring policy" Margin="0,16,0,0" AutomationProperties.AutomationId="RiskDetailPolicy">
+                            <ItemsControl ItemsSource="{Binding Detail.PolicyFacts}" ItemTemplate="{StaticResource RiskPolicyTemplate}" Margin="8,12,8,0" />
+                        </Expander>
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

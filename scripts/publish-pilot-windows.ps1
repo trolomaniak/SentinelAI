@@ -57,6 +57,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-AUTH.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-AUTH.md')
     Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-DEVICES.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-DEVICES.md')
     Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-ALERTS.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-ALERTS.md')
+    Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-RISK-REPORTS.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-RISK-REPORTS.md')
     $complete = $true
     Write-Output ('Development pilot bundle created: ' + $OutputDirectory)
 } catch {

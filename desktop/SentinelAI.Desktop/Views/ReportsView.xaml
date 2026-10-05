@@ -1,0 +1,56 @@
+<UserControl x:Class="SentinelAI.Desktop.Views.ReportsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AutomationProperties.AutomationId="ReportsView" SizeChanged="OnViewSizeChanged">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <ScrollViewer x:Name="ReportActionsScroller" MaxHeight="100" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,12">
+            <WrapPanel>
+                <Button Content="Generate report" Click="OnGenerate" IsEnabled="{Binding CanGenerate}" Margin="0,0,8,8" AutomationProperties.AutomationId="GenerateReportButton" />
+                <Button Content="Save HTML" Click="OnSave" IsEnabled="{Binding CanSave}" Margin="0,0,8,8" AutomationProperties.AutomationId="SaveReportButton" />
+            </WrapPanel>
+        </ScrollViewer>
+    <ScrollViewer x:Name="PageScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,4,0">
+        <StackPanel>
+            <TextBlock Text="Reports" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="Reports" />
+            <TextBlock Text="Generate a local security report through Core, then save its standalone HTML attachment."
+                       Margin="0,10,0,20" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" />
+            <WrapPanel>
+                <StackPanel Width="190" Margin="0,0,12,12">
+                    <TextBlock Text="From (inclusive UTC date)" TextWrapping="Wrap" Margin="0,0,0,6" />
+                    <DatePicker x:Name="ReportFromDate" SelectedDate="{Binding FromDate, Mode=TwoWay}" SelectedDateFormat="Short"
+                                AutomationProperties.AutomationId="ReportFromDate" AutomationProperties.Name="Report start date, inclusive UTC" />
+                </StackPanel>
+                <StackPanel Width="190" Margin="0,0,12,12">
+                    <TextBlock Text="To (inclusive UTC date)" TextWrapping="Wrap" Margin="0,0,0,6" />
+                    <DatePicker x:Name="ReportToDate" SelectedDate="{Binding ToDate, Mode=TwoWay}" SelectedDateFormat="Short"
+                                AutomationProperties.AutomationId="ReportToDate" AutomationProperties.Name="Report end date, inclusive UTC" />
+                </StackPanel>
+            </WrapPanel>
+            <TextBlock Text="Dates include whole UTC calendar days, up to 366 days. The default is the previous complete UTC month."
+                       TextWrapping="Wrap" Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" />
+            <TextBlock Text="{Binding ValidationText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                       AutomationProperties.AutomationId="ReportValidationText" AutomationProperties.LiveSetting="Polite" />
+            <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="ReportStatus" AutomationProperties.LiveSetting="Polite" />
+            <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="ReportErrorText" AutomationProperties.LiveSetting="Assertive" />
+            <TextBlock Text="{Binding SaveStatusText}" TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="ReportSaveStatus" AutomationProperties.LiveSetting="Polite" />
+            <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,8,0,0">
+                <Border.Style>
+                    <Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers><DataTrigger Binding="{Binding HasReport}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel>
+                    <TextBlock Text="Ready to save" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,16" />
+                    <TextBlock Text="Period" Foreground="{DynamicResource SecondaryTextBrush}" />
+                    <TextBlock Text="{Binding PeriodText}" TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="ReportPeriod" />
+                    <TextBlock Text="Suggested file" Foreground="{DynamicResource SecondaryTextBrush}" />
+                    <TextBlock Text="{Binding SuggestedFileName}" TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="ReportFileName" />
+                    <TextBlock Text="Size" Foreground="{DynamicResource SecondaryTextBrush}" />
+                    <TextBlock Text="{Binding ReportSizeText}" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.AutomationId="ReportSize" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+    </Grid>
+</UserControl>

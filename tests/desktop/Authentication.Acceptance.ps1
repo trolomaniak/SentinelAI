@@ -14,7 +14,8 @@ param(
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
     [ValidateRange(30, 600)][int]$TimeoutSeconds = 180,
     [switch]$VerifyDevices,
-    [switch]$VerifyAlerts
+    [switch]$VerifyAlerts,
+    [switch]$VerifyRiskReports
 )
 
 Set-StrictMode -Version Latest
@@ -40,6 +41,7 @@ if ($PSVersionTable.PSEdition -ne 'Desktop') {
     $arguments += ' -TimeoutSeconds ' + $TimeoutSeconds
     if ($VerifyDevices) { $arguments += ' -VerifyDevices' }
     if ($VerifyAlerts) { $arguments += ' -VerifyAlerts' }
+    if ($VerifyRiskReports) { $arguments += ' -VerifyRiskReports' }
     $nativeStart = [Diagnostics.ProcessStartInfo]::new()
     $nativeStart.FileName = $nativeHost; $nativeStart.Arguments = $arguments
     $nativeStart.UseShellExecute = $false
@@ -197,6 +199,61 @@ namespace SentinelAIDesktopAuthenticationAcceptance {
             inputs[1] = inputs[0]; inputs[1].Data.Keyboard.Flags = 2;
             if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
                 throw new InvalidOperationException("Native authentication submit input was incomplete.");
+        }
+        private static void SendFileNameChord(ushort modifier, ushort key, IntPtr expectedWindow) {
+            if (GetForegroundWindow() != expectedWindow)
+                throw new InvalidOperationException("Native filename input lost foreground ownership.");
+            var inputs = new Input[4];
+            try {
+                inputs[0].Type = 1; inputs[0].Data.Keyboard.Key = modifier;
+                inputs[1].Type = 1; inputs[1].Data.Keyboard.Key = key;
+                inputs[2] = inputs[1]; inputs[2].Data.Keyboard.Flags = 2;
+                inputs[3] = inputs[0]; inputs[3].Data.Keyboard.Flags = 2;
+                if (SendInput(4, inputs, Marshal.SizeOf(typeof(Input))) != 4)
+                    throw new InvalidOperationException("Native filename shortcut input was incomplete.");
+            } finally { Array.Clear(inputs, 0, inputs.Length); }
+        }
+        public static void FocusFileName(IntPtr expectedWindow) {
+            // The standard English Windows common-dialog filename access key.
+            // The caller verifies actual filename focus before entering any text.
+            SendFileNameChord(18, 0x4E, expectedWindow);
+        }
+        public static void SaveFileName(IntPtr expectedWindow) {
+            // The standard Save access key still respects the dialog's actual
+            // enabled state, even if its UIA provider reports inherited state.
+            SendFileNameChord(18, 0x53, expectedWindow);
+        }
+        public static void EnterFileName(string destination, IntPtr expectedWindow) {
+            if (String.IsNullOrEmpty(destination) || destination.Length > 256 || expectedWindow == IntPtr.Zero ||
+                !System.IO.Path.IsPathRooted(destination) || destination.IndexOf('"') >= 0 ||
+                destination.IndexOf('\0') >= 0 || destination.IndexOf('\r') >= 0 || destination.IndexOf('\n') >= 0)
+                throw new InvalidOperationException("Synthetic filename input is invalid.");
+            foreach (char character in destination)
+                if (Char.IsControl(character))
+                    throw new InvalidOperationException("Synthetic filename input contains a control character.");
+            SendFileNameChord(17, 0x41, expectedWindow); // Ctrl+A in the verified filename input.
+            var inputs = new Input[2];
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            try {
+                foreach (char character in destination) {
+                    if (elapsed.Elapsed.TotalSeconds >= 10)
+                        throw new InvalidOperationException("Native filename input exceeded its deadline.");
+                    if (GetForegroundWindow() != expectedWindow)
+                        throw new InvalidOperationException("Native filename input lost foreground ownership.");
+                    inputs[0].Type = 1; inputs[0].Data.Keyboard.Scan = character; inputs[0].Data.Keyboard.Flags = 4;
+                    inputs[1] = inputs[0]; inputs[1].Data.Keyboard.Flags = 6;
+                    if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
+                        throw new InvalidOperationException("Native filename text input was incomplete.");
+                    System.Threading.Thread.Sleep(20);
+                }
+                if (elapsed.Elapsed.TotalSeconds >= 10 || GetForegroundWindow() != expectedWindow)
+                    throw new InvalidOperationException("Native filename input did not finish within its owned deadline.");
+                Array.Clear(inputs, 0, inputs.Length);
+                inputs[0].Type = 1; inputs[0].Data.Keyboard.Key = 9;
+                inputs[1] = inputs[0]; inputs[1].Data.Keyboard.Flags = 2;
+                if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
+                    throw new InvalidOperationException("Native filename focus transfer was incomplete.");
+            } finally { Array.Clear(inputs, 0, inputs.Length); }
         }
     }
 }
@@ -432,6 +489,10 @@ try {
     if ($VerifyAlerts) {
         . (Join-Path $PSScriptRoot 'Alerts.Acceptance.ps1')
         Invoke-NativeAlertsAcceptance
+    }
+    if ($VerifyRiskReports) {
+        . (Join-Path $PSScriptRoot 'RiskReports.Acceptance.ps1')
+        Invoke-NativeRiskReportsAcceptance
     }
     Assert-NoCredentialArguments $desktop
     Assert-NoCredentialArguments $coreProcess
