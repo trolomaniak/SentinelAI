@@ -262,21 +262,23 @@ function Invoke-NativeRiskReportsAcceptance {
         $fileName = Find-NativeReportFileName $dialog
         if ($null -ne $fileName) { $fileName.ValuePattern.SetValue($Destination) }
         else { Enter-NativeReportFileName $dialog $Destination }
-        Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportSaveButton $dialog $false) } 'The native report dialog save action was unavailable.'
         $saveButton = Find-NativeReportSaveButton $dialog $false
         $invoke = $null
-        if ($saveButton.Current.IsEnabled -and $saveButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
+        if ($null -ne $saveButton -and $saveButton.Current.IsEnabled -and $saveButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
             ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
         } else {
-            # Still exercise the actual native ID1 Save action. Its standard
-            # keyboard access key cannot enable a disabled action; the fixture
-            # must still prove the selected file, exact bytes and privacy.
+            # Some common-dialog providers omit the Save button entirely. Use
+            # its actual keyboard access key once in the held, owned dialog;
+            # it cannot enable a disabled action or bypass destination checks.
             $handle = [IntPtr]$dialog.Current.NativeWindowHandle
-            Assert-AuthenticationAcceptance ([SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $handle) 'Native report Save did not own the held dialog foreground.'
+            Assert-AuthenticationAcceptance ($handle -ne [IntPtr]::Zero -and $dialog.Current.ProcessId -eq $script:desktop.Id) 'Native report Save lost its held process/window ownership.'
+            Assert-AuthenticationAcceptance ([SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $handle -and
+                (Get-NativeReportFocusCategory $dialog) -cin @('filename', 'other_owned_dialog')) 'Native report Save did not own the held dialog foreground/focus.'
             [SentinelAIDesktopAuthenticationAcceptance.Native]::SaveFileName($handle)
         }
-        Wait-AuthenticationAcceptance { $null -eq (Find-NativeReportSaveDialog) -and (Test-Path -LiteralPath $Destination -PathType Leaf) -and
-            (Test-AuthenticationControl 'SaveReportButton') } 'The native report save did not finish writing its selected file.'
+        try { Wait-AuthenticationAcceptance { $null -eq (Find-NativeReportSaveDialog) -and (Test-Path -LiteralPath $Destination -PathType Leaf) -and
+            (Test-AuthenticationControl 'SaveReportButton') } 'The native report save did not finish writing its selected file.' }
+        catch { throw ('The native report save did not finish writing its selected file. Save result: ' + (Get-NativeReportSaveCategory) + '.') }
     }
     function Assert-NoNativeReport {
         $save = Find-AuthenticationControl 'SaveReportButton'
