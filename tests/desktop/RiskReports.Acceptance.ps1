@@ -151,20 +151,103 @@ function Invoke-NativeRiskReportsAcceptance {
     }
     function Get-NativeReportFileNameCategory([object]$Dialog) {
         try {
-            $known = 0
+            $known = 0; $enabled = 0; $focusable = 0; $supported = 0; $readOnly = 0
             foreach ($id in @('FileNameControlHost', '1001', '1148', '1152')) {
                 $identity = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
-                $count = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $identity).Count
-                $known += [Math]::Min($count, 16)
+                $hosts = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $identity)
+                $limit = [Math]::Min($hosts.Count, 16)
+                $known += $limit
+                for ($i = 0; $i -lt $limit; $i++) {
+                    $hostControl = $hosts[$i]
+                    if ($hostControl.Current.IsEnabled) { $enabled++ }
+                    if ($hostControl.Current.IsKeyboardFocusable) { $focusable++ }
+                    $pattern = $null
+                    if ($hostControl.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
+                        $supported++
+                        if (([System.Windows.Automation.ValuePattern]$pattern).Current.IsReadOnly) { $readOnly++ }
+                    }
+                }
             }
-            return 'known_filename_hosts_' + $known
+            return 'known_filename_hosts_' + $known + '_enabled_' + $enabled + '_focusable_' + $focusable + '_value_supported_' + $supported + '_readonly_' + $readOnly
         } catch { return 'filename_metadata_unavailable' }
     }
-    function Find-NativeReportSaveButton([object]$Dialog) {
+    function Find-NativeReportKeyboardFileName([object]$Dialog) {
+        if ($null -eq $Dialog) { return $null }
+        $fallback = $null
+        foreach ($id in @('FileNameControlHost', '1001', '1148', '1152')) {
+            $identity = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
+            $hosts = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $identity)
+            if ($hosts.Count -gt 16) { throw 'The native report filename host count exceeded its bound.' }
+            foreach ($hostControl in $hosts) {
+                if ($null -eq $fallback) { $fallback = $hostControl }
+                if (-not $hostControl.Current.IsEnabled) { continue }
+                foreach ($type in @([System.Windows.Automation.ControlType]::Edit, [System.Windows.Automation.ControlType]::ComboBox)) {
+                    if ($hostControl.Current.ControlType -eq $type -and $hostControl.Current.IsKeyboardFocusable) { return $hostControl }
+                    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $type)
+                    $children = $hostControl.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+                    if ($children.Count -gt 32) { throw 'The native report filename child count exceeded its bound.' }
+                    foreach ($child in $children) {
+                        if ($child.Current.IsEnabled -and $child.Current.IsKeyboardFocusable) { return $child }
+                    }
+                }
+            }
+        }
+        # A known host can still identify the filename subtree even when its
+        # provider exposes no focusable child; the standard Alt+N path is checked
+        # against actual focus under that known subtree before text is entered.
+        return $fallback
+    }
+    function Get-NativeReportFocusCategory([object]$Dialog) {
+        $focus = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($null -eq $focus -or $focus.Current.ProcessId -ne $script:desktop.Id) { return 'unavailable' }
+        $known = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($id in @('FileNameControlHost', '1001', '1148', '1152')) {
+            $identity = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
+            $hosts = $Dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $identity)
+            if ($hosts.Count -gt 16) { return 'unavailable' }
+            foreach ($hostControl in $hosts) { [void]$known.Add((@($hostControl.GetRuntimeId()) -join ',')) }
+        }
+        $dialogId = @($Dialog.GetRuntimeId()) -join ','
+        $filename = $false
+        $node = $focus
+        for ($depth = 0; $depth -lt 32 -and $null -ne $node; $depth++) {
+            $runtimeId = @($node.GetRuntimeId()) -join ','
+            if ($known.Contains($runtimeId)) { $filename = $true }
+            if ($runtimeId -ceq $dialogId) {
+                if ($filename) { return 'filename' }
+                return 'other_owned_dialog'
+            }
+            $node = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($node)
+        }
+        return 'unavailable'
+    }
+    function Test-NativeReportFileNameFocus([object]$Dialog) {
+        return (Get-NativeReportFocusCategory $Dialog) -ceq 'filename'
+    }
+    function Enter-NativeReportFileName([object]$Dialog, [string]$Destination) {
+        $handle = [IntPtr]$Dialog.Current.NativeWindowHandle
+        Assert-AuthenticationAcceptance ($handle -ne [IntPtr]::Zero -and $Dialog.Current.ProcessId -eq $script:desktop.Id) 'The held report dialog had no owned native window.'
+        [void][SentinelAIDesktopAuthenticationAcceptance.Native]::SetForegroundWindow($handle)
+        Wait-AuthenticationAcceptance { [SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $handle } 'The held report dialog did not own foreground input.'
+        $candidate = Find-NativeReportKeyboardFileName $Dialog
+        Assert-AuthenticationAcceptance ($null -ne $candidate) 'The held report dialog had no known filename host.'
+        if ($candidate.Current.IsKeyboardFocusable) {
+            try { $candidate.SetFocus() } catch [InvalidOperationException] { }
+        }
+        if (-not (Test-NativeReportFileNameFocus $Dialog)) { [SentinelAIDesktopAuthenticationAcceptance.Native]::FocusFileName($handle) }
+        Wait-AuthenticationAcceptance { [SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $handle -and
+            (Test-NativeReportFileNameFocus $Dialog) } 'Native report keyboard focus was outside the known filename input.'
+        [SentinelAIDesktopAuthenticationAcceptance.Native]::EnterFileName($Destination, $handle)
+        # The queued Tab must leave the known filename subtree before UIA may
+        # invoke Save, so native text input cannot be overtaken by the invocation.
+        Wait-AuthenticationAcceptance { [SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $handle -and
+            (Get-NativeReportFocusCategory $Dialog) -ceq 'other_owned_dialog' } 'Native report filename input did not finish its owned focus transfer.'
+    }
+    function Find-NativeReportSaveButton([object]$Dialog, [bool]$RequireEnabled = $true) {
         $identity = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')
         $button = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
         $control = $Dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.AndCondition]::new($identity, $button))
-        if ($null -ne $control -and $control.Current.IsEnabled) { return $control }
+        if ($null -ne $control -and (-not $RequireEnabled -or $control.Current.IsEnabled)) { return $control }
         return $null
     }
     function Save-NativeSecurityReport([string]$Destination) {
@@ -173,13 +256,25 @@ function Invoke-NativeRiskReportsAcceptance {
         try { Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportSaveDialog) } 'The actual native security-report save dialog did not open.' }
         catch { throw ('The actual native security-report save dialog did not open. Save result: ' + (Get-NativeReportSaveCategory) + '.') }
         $dialog = Find-NativeReportSaveDialog
-        try { Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportFileName $dialog) } 'The native report dialog filename control was unavailable.' }
+        try { Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportFileName $dialog) -or
+            $null -ne (Find-NativeReportKeyboardFileName $dialog) } 'The native report dialog filename control was unavailable.' }
         catch { throw ('The native report dialog filename control was unavailable. Filename result: ' + (Get-NativeReportFileNameCategory $dialog) + '.') }
         $fileName = Find-NativeReportFileName $dialog
-        $fileName.ValuePattern.SetValue($Destination)
-        Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportSaveButton $dialog) } 'The native report dialog save action was unavailable.'
-        $saveButton = Find-NativeReportSaveButton $dialog
-        ([System.Windows.Automation.InvokePattern]$saveButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+        if ($null -ne $fileName) { $fileName.ValuePattern.SetValue($Destination) }
+        else { Enter-NativeReportFileName $dialog $Destination }
+        Wait-AuthenticationAcceptance { $null -ne (Find-NativeReportSaveButton $dialog $false) } 'The native report dialog save action was unavailable.'
+        $saveButton = Find-NativeReportSaveButton $dialog $false
+        $invoke = $null
+        if ($saveButton.Current.IsEnabled -and $saveButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
+            ([System.Windows.Automation.InvokePattern]$invoke).Invoke()
+        } else {
+            # Still exercise the actual native ID1 Save action. Its standard
+            # keyboard access key cannot enable a disabled action; the fixture
+            # must still prove the selected file, exact bytes and privacy.
+            $handle = [IntPtr]$dialog.Current.NativeWindowHandle
+            Assert-AuthenticationAcceptance ([SentinelAIDesktopAuthenticationAcceptance.Native]::GetForegroundWindow() -eq $handle) 'Native report Save did not own the held dialog foreground.'
+            [SentinelAIDesktopAuthenticationAcceptance.Native]::SaveFileName($handle)
+        }
         Wait-AuthenticationAcceptance { $null -eq (Find-NativeReportSaveDialog) -and (Test-Path -LiteralPath $Destination -PathType Leaf) -and
             (Test-AuthenticationControl 'SaveReportButton') } 'The native report save did not finish writing its selected file.'
     }
