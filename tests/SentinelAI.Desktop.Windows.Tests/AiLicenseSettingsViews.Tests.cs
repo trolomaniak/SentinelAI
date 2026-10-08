@@ -158,6 +158,8 @@ internal static partial class Program
                 await FlushAsync();
                 Ensure(scroller.ViewportWidth > 0 && scroller.ViewportHeight > 0,
                     "Native Settings had no usable viewport at a supported window size.");
+                cloudPreference.BringIntoView();
+                await FlushAsync();
                 AssertInsideWindow(window, cloudPreference);
             }
             window.Width = defaultSize.Width; window.Height = defaultSize.Height;
