@@ -1,6 +1,6 @@
 # Native desktop
 
-`SentinelAI.Desktop` is a native WPF application for Windows x64 on .NET 10. It opens its own Windows window with standard window controls. Devices lists enrolled endpoints and opens native endpoint details. Alerts provides native tracked-incident detail, typed evidence/history and versioned operator status decisions. Risk displays Core-ranked endpoints and every deterministic contribution factor; Reports generates Core's standalone HTML and saves it through a native destination picker. Overview and Settings remain placeholders. See [incident operation](../docs/DESKTOP-ALERTS.md) and [Risk/Reports operation and verification](../docs/DESKTOP-RISK-REPORTS.md).
+`SentinelAI.Desktop` is a native WPF application for Windows x64 on .NET 10. It opens its own Windows window with standard window controls. Devices lists enrolled endpoints and opens native endpoint details. Alerts provides native tracked-incident detail, typed evidence/history and versioned operator status decisions. Risk displays Core-ranked endpoints and every deterministic contribution factor; Reports generates Core's standalone HTML and saves it through a native destination picker. Settings provides licensing and session AI consent; Overview remains a placeholder. See [incident operation](../docs/DESKTOP-ALERTS.md) and [Risk/Reports operation and verification](../docs/DESKTOP-RISK-REPORTS.md).
 
 ## Build and run
 
@@ -46,3 +46,5 @@ Physical scaling remains a practical manual check on a Windows desktop:
 4. Close the application during a connection check and verify that it exits promptly.
 
 Logical window-size tests and DPI-context checks do not simulate every physical monitor configuration. Record the actual Windows test results before marking native launch acceptance complete.
+
+See [native AI, licensing and local settings](../docs/DESKTOP-AI-LICENSING.md) for explicit renewal, assistive explanations and session consent.

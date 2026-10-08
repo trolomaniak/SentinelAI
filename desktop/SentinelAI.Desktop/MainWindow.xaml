@@ -21,6 +21,9 @@
         <DataTemplate x:Key="ReportsTemplate">
             <views:ReportsView DataContext="{Binding Reports, RelativeSource={RelativeSource AncestorType=Window}}" />
         </DataTemplate>
+        <DataTemplate x:Key="SettingsTemplate">
+            <views:SettingsView DataContext="{Binding License, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </DataTemplate>
     </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions>

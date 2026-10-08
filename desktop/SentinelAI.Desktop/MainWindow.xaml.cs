@@ -15,6 +15,8 @@ public partial class MainWindow : Window
     public AlertsViewModel? Alerts { get; }
     public RiskViewModel? Risk { get; }
     public ReportsViewModel? Reports { get; }
+    public LicenseViewModel? License { get; }
+    public AiExplanationViewModel? AiExplanation { get; }
     private bool _closed;
     private bool _workspaceAuthorized;
     private long _workspaceSessionGeneration;
@@ -30,6 +32,11 @@ public partial class MainWindow : Window
 
     public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication, DevicesViewModel? devices,
         AlertsViewModel? alerts, RiskViewModel? risk, ReportsViewModel? reports)
+        : this(viewModel, authentication, devices, alerts, risk, reports, null, null) { }
+
+    public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication, DevicesViewModel? devices,
+        AlertsViewModel? alerts, RiskViewModel? risk, ReportsViewModel? reports,
+        LicenseViewModel? license, AiExplanationViewModel? aiExplanation)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
@@ -39,11 +46,20 @@ public partial class MainWindow : Window
         Alerts = alerts;
         Risk = risk;
         Reports = reports;
+        License = license;
+        AiExplanation = aiExplanation;
         _viewModel.PropertyChanged += OnShellPageChanged;
         if (devices is not null) devices.SessionExpired += OnWorkspaceSessionExpired;
         if (alerts is not null) alerts.SessionExpired += OnWorkspaceSessionExpired;
         if (risk is not null) risk.SessionExpired += OnWorkspaceSessionExpired;
         if (reports is not null) reports.SessionExpired += OnWorkspaceSessionExpired;
+        if (license is not null)
+        {
+            license.SessionExpired += OnWorkspaceSessionExpired;
+            license.PropertyChanged += OnLicenseChanged;
+        }
+        if (aiExplanation is not null) aiExplanation.SessionExpired += OnWorkspaceSessionExpired;
+        if (alerts is not null) alerts.PropertyChanged += OnAlertsChanged;
         AuthenticationPanel.DataContext = authentication;
         DataContext = viewModel;
         if (authentication is not null)
@@ -92,8 +108,17 @@ public partial class MainWindow : Window
         PageContent.Visibility = authorized ? Visibility.Visible : Visibility.Collapsed;
         AuthenticationRow.Height = authorized ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
         PageRow.Height = authorized ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        if (!authorized) { Devices?.Clear(); Alerts?.Clear(); Risk?.Clear(); Reports?.Clear(); }
-        else if (authorizationChanged) RefreshCurrentPage();
+        if (!authorized)
+        {
+            AiExplanation?.Clear(); License?.Clear();
+            Devices?.Clear(); Alerts?.Clear(); Risk?.Clear(); Reports?.Clear();
+        }
+        else if (authorizationChanged)
+        {
+            RefreshCurrentPage();
+            if (License is not null && _viewModel.CurrentPage.Id is not (PageId.Settings or PageId.Alerts))
+                _ = License.RefreshAsync();
+        }
     }
 
     private void OnShellPageChanged(object? sender, PropertyChangedEventArgs e)
@@ -101,6 +126,7 @@ public partial class MainWindow : Window
         if (!_closed && e.PropertyName == nameof(ShellViewModel.CurrentPage))
         {
             if (_viewModel.CurrentPage.Id != PageId.Reports) Reports?.Clear();
+            if (_viewModel.CurrentPage.Id != PageId.Alerts) AiExplanation?.SetAlert(null);
             SetPagePresentation();
             RefreshCurrentPage();
         }
@@ -110,14 +136,46 @@ public partial class MainWindow : Window
         Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices ? "DevicesTemplate" :
         Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts ? "AlertsTemplate" :
         Risk is not null && _viewModel.CurrentPage.Id == PageId.Risk ? "RiskTemplate" :
-        Reports is not null && _viewModel.CurrentPage.Id == PageId.Reports ? "ReportsTemplate" : "PlaceholderTemplate");
+        Reports is not null && _viewModel.CurrentPage.Id == PageId.Reports ? "ReportsTemplate" :
+        License is not null && _viewModel.CurrentPage.Id == PageId.Settings ? "SettingsTemplate" : "PlaceholderTemplate");
 
     private async void RefreshCurrentPage()
     {
         if (_closed || !(_authentication?.IsSignedIn ?? true)) return;
+        // License availability never delays the local security pages.
+        if (License is not null && _viewModel.CurrentPage.Id is PageId.Settings or PageId.Alerts)
+            _ = License.RefreshAsync();
         if (Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
         else if (Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts) await Alerts.RefreshAsync();
         else if (Risk is not null && _viewModel.CurrentPage.Id == PageId.Risk) await Risk.RefreshAsync();
+    }
+
+    private void OnLicenseChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(LicenseViewModel.Status)) return;
+        DispatchWorkspaceUpdate(() =>
+        {
+            var status = License?.Status;
+            AiExplanation?.SetAvailability(status is null ? null :
+                status.Capabilities.PremiumFeatures && status.EnabledFeatures.Contains("cloud_ai", StringComparer.Ordinal));
+        });
+    }
+
+    private void OnAlertsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (nameof(AlertsViewModel.Detail) or nameof(AlertsViewModel.DetailState) or
+            nameof(AlertsViewModel.NeedsDetailRefresh))) return;
+        DispatchWorkspaceUpdate(() => AiExplanation?.SetAlert(
+            _viewModel.CurrentPage.Id == PageId.Alerts && Alerts is { DetailState: AlertDetailState.Ready, NeedsDetailRefresh: false }
+                ? Alerts.Detail?.Detail : null));
+    }
+
+    private void DispatchWorkspaceUpdate(Action update)
+    {
+        // Worker notifications must not acquire another view model's gate.
+        void Apply() { if (!_closed && _workspaceAuthorized) update(); }
+        if (Dispatcher.CheckAccess()) Apply();
+        else Dispatcher.InvokeAsync(Apply);
     }
 
     private void OnWorkspaceSessionExpired(object? sender, EventArgs e)
@@ -139,9 +197,19 @@ public partial class MainWindow : Window
         Loaded -= OnLoaded;
         _viewModel.PropertyChanged -= OnShellPageChanged;
         if (Devices is not null) { Devices.SessionExpired -= OnWorkspaceSessionExpired; Devices.Dispose(); }
-        if (Alerts is not null) { Alerts.SessionExpired -= OnWorkspaceSessionExpired; Alerts.Dispose(); }
+        if (Alerts is not null)
+        {
+            Alerts.PropertyChanged -= OnAlertsChanged;
+            Alerts.SessionExpired -= OnWorkspaceSessionExpired; Alerts.Dispose();
+        }
         if (Risk is not null) { Risk.SessionExpired -= OnWorkspaceSessionExpired; Risk.Dispose(); }
         if (Reports is not null) { Reports.SessionExpired -= OnWorkspaceSessionExpired; Reports.Dispose(); }
+        if (License is not null)
+        {
+            License.PropertyChanged -= OnLicenseChanged;
+            License.SessionExpired -= OnWorkspaceSessionExpired; License.Dispose();
+        }
+        if (AiExplanation is not null) { AiExplanation.SessionExpired -= OnWorkspaceSessionExpired; AiExplanation.Dispose(); }
         _sessionTimer?.Stop();
         if (_sessionTimer is not null) _sessionTimer.Tick -= OnSessionTick;
         if (_authentication is not null)

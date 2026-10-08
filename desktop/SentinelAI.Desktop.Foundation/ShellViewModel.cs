@@ -28,7 +28,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
             new NavigationPage(PageId.Alerts, "Alerts", "Security alerts and incident review."),
             new NavigationPage(PageId.Risk, "Risk", "Organization and endpoint risk."),
             new NavigationPage(PageId.Reports, "Reports", "Local security reports."),
-            new NavigationPage(PageId.Settings, "Settings", "Application preferences.")
+            new NavigationPage(PageId.Settings, "Settings", "Local application settings and licensing.")
         });
         _currentPage = Pages[0];
         _refreshCommand = new RefreshCommand(this);

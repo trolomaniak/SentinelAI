@@ -1,0 +1,116 @@
+<UserControl x:Class="SentinelAI.Desktop.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AutomationProperties.AutomationId="SettingsView" SizeChanged="OnViewSizeChanged">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <ScrollViewer x:Name="SettingsActionsScroller" MaxHeight="100" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,12">
+            <WrapPanel>
+                <Button Content="Refresh license" Click="OnRefreshLicense" IsEnabled="{Binding CanRefresh}"
+                        Margin="0,0,8,8" AutomationProperties.AutomationId="RefreshLicenseButton" />
+                <Button Content="Renew license" Click="OnRenewLicense" IsEnabled="{Binding CanRenew}"
+                        Margin="0,0,8,8" AutomationProperties.AutomationId="RenewLicenseButton" />
+                <Button Content="Check Core connection"
+                        Command="{Binding DataContext.RefreshCoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Margin="0,0,8,8" AutomationProperties.AutomationId="SettingsCheckCoreButton" />
+            </WrapPanel>
+        </ScrollViewer>
+        <ScrollViewer x:Name="SettingsPageScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled" Padding="0,0,4,0">
+            <StackPanel>
+                <TextBlock Text="Settings" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="Settings" />
+                <TextBlock Text="Review licensing and the local application's connection and session settings."
+                           Margin="0,10,0,20" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" />
+                <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                           AutomationProperties.AutomationId="LicenseStatus" AutomationProperties.LiveSetting="Polite" />
+                <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                           AutomationProperties.AutomationId="LicenseErrorText" AutomationProperties.LiveSetting="Assertive" />
+                <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16">
+                    <StackPanel>
+                        <TextBlock Text="License" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="Current Core state" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding ModeText}" FontSize="24" FontWeight="SemiBold" TextWrapping="Wrap"
+                                   Margin="0,4,0,12" AutomationProperties.AutomationId="LicenseMode" />
+                        <TextBlock Text="{Binding RenewalStatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   AutomationProperties.AutomationId="LicenseRenewalStatus" AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Text="{Binding LocalSecurityText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   AutomationProperties.AutomationId="LicenseLocalSecurityStatus" />
+                        <StackPanel>
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel"><Style.Triggers>
+                                    <DataTrigger Binding="{Binding Status}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                </Style.Triggers></Style>
+                            </StackPanel.Style>
+                            <TextBlock Text="Permitted optional features" Foreground="{DynamicResource SecondaryTextBrush}" />
+                            <TextBlock Text="{Binding FeaturesText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                       AutomationProperties.AutomationId="LicenseFeatures" />
+                            <Expander Header="Validation and renewal details" Margin="0,4,0,0"
+                                      AutomationProperties.AutomationId="LicenseValidationDetails">
+                                <StackPanel Margin="8,12,8,0">
+                                    <TextBlock Text="Last successful validation (UTC)" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <TextBlock Text="{Binding LastValidationText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                               AutomationProperties.AutomationId="LicenseLastValidation" />
+                                    <TextBlock Text="Full mode until (UTC)" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <TextBlock Text="{Binding FullModeUntilText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                               AutomationProperties.AutomationId="LicenseFullModeUntil" />
+                                    <TextBlock Text="Core effective time (UTC)" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <TextBlock Text="{Binding EffectiveTimeText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                               AutomationProperties.AutomationId="LicenseEffectiveTime" />
+                                    <TextBlock Text="Clock rollback" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <TextBlock Text="{Binding ClockRollbackText}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                               AutomationProperties.AutomationId="LicenseClockRollback" />
+                                </StackPanel>
+                            </Expander>
+                            <Expander Header="Core local capabilities" Margin="0,16,0,0"
+                                      AutomationProperties.AutomationId="LicenseLocalCapabilities">
+                                <StackPanel Margin="8,12,8,0">
+                                    <TextBlock Text="{Binding Status.Capabilities.CriticalTelemetryCollection, StringFormat='Critical telemetry collection: {0}'}"
+                                               TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="LicenseCriticalTelemetry" />
+                                    <TextBlock Text="{Binding Status.Capabilities.LocalDetectionRules, StringFormat='Local detection rules: {0}'}"
+                                               TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="LicenseLocalDetection" />
+                                    <TextBlock Text="{Binding Status.Capabilities.CriticalAlerts, StringFormat='Critical alerts: {0}'}"
+                                               TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="LicenseCriticalAlerts" />
+                                    <TextBlock Text="{Binding Status.Capabilities.RecentIncidents, StringFormat='Recent incidents: {0}'}"
+                                               TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="LicenseRecentIncidents" />
+                                    <TextBlock Text="{Binding Status.Capabilities.EmergencyExport, StringFormat='Emergency export: {0}'}"
+                                               TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="LicenseEmergencyExport" />
+                                    <TextBlock Text="{Binding Status.Capabilities.PremiumFeatures, StringFormat='Premium features: {0}'}"
+                                               TextWrapping="Wrap" AutomationProperties.AutomationId="LicensePremiumFeatures" />
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Local application" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,16" />
+                        <CheckBox Content="Allow cloud AI requests for this session" Margin="0,0,0,8"
+                                  IsChecked="{Binding AiExplanation.CloudRequestsEnabled, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                                  AutomationProperties.AutomationId="CloudAiRequestsEnabled" />
+                        <TextBlock Text="Off by default. Each explanation still requires an explicit request and Core permission. Signing out resets this setting."
+                                   TextWrapping="Wrap" Margin="0,0,0,16" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="Desktop version" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding DataContext.Version, RelativeSource={RelativeSource AncestorType=Window}}"
+                                   TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="SettingsDesktopVersion" />
+                        <TextBlock Text="Core connection" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="http://127.0.0.1:5000" TextWrapping="Wrap" Margin="0,4,0,8"
+                                   AutomationProperties.AutomationId="SettingsCoreAddress" />
+                        <TextBlock Text="{Binding DataContext.CoreStatusText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                   TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="SettingsCoreStatus"
+                                   AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Text="Session" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="Sign-in is kept in memory for this Desktop session. Core validates the session every five seconds."
+                                   TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="SettingsSessionPolicy" />
+                        <TextBlock Text="AI and licensing configuration" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="Core uses its administrator-protected configuration for AI and license services."
+                                   TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.AutomationId="SettingsServiceConfiguration" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>
