@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using SentinelAI.Contracts.Ai;
@@ -139,7 +141,9 @@ internal static partial class Program
             await WaitForAsync(() => license.State == LicenseState.Ready && !license.RequiresRefresh,
                 "Native explicit refresh did not reconcile uncertain renewal.");
             var healthCalls = health.Calls;
-            AiSettingsButton(settings, "SettingsCheckCoreButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var checkConnection = AiSettingsButton(settings, "SettingsCheckCoreButton");
+            var checkPeer = new ButtonAutomationPeer(checkConnection);
+            ((IInvokeProvider)checkPeer.GetPattern(PatternInterface.Invoke)!).Invoke();
             await WaitForAsync(() => health.Calls > healthCalls && !shell.IsCheckingCore,
                 "Settings' native Core connection action was not bound to the local shell.");
             foreach (var size in new[] { new Size(640, 480), defaultSize, new Size(1600, 1000) })
