@@ -18,6 +18,9 @@ assertions += await RiskViewModelTests.RunAsync();
 assertions += await HttpReportRequestsTests.RunAsync();
 assertions += await ReportsViewModelTests.RunAsync();
 assertions += await ReportFileWriterTests.RunAsync();
+assertions += await HttpLicenseRequestsTests.RunAsync();
+assertions += await HttpAiExplanationRequestsTests.RunAsync();
+assertions += await OptionalWorkflowsViewModelTests.RunAsync();
 Console.WriteLine($"Desktop foundation: {assertions} assertions passed.");
 
 void Ensure(bool condition, string message)

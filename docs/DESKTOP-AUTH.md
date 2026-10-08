@@ -1,6 +1,6 @@
 # Desktop administrator setup and sign-in
 
-The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. The browser dashboard remains available; Devices, Alerts/incidents, Risk and Reports provide native workspaces. Overview and Settings remain placeholders. See [native Risk and Reports](DESKTOP-RISK-REPORTS.md).
+The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. The browser dashboard remains available; Devices, Alerts/incidents, Risk and Reports provide native workspaces. Settings provides licensing and session AI consent; Overview remains a placeholder. See [native Risk and Reports](DESKTOP-RISK-REPORTS.md).
 
 ## Fresh installation
 
@@ -40,3 +40,5 @@ On a fresh elevated interactive Windows x64 test machine without the default Cor
 The acceptance fixture stages generated public inputs into fresh protected directories, installs signed Core files, creates the administrator through the actual published desktop, registers the existing managed service, and verifies real sign-in, generic invalid credentials, sign-out, foreign-listener rejection, restart/reconnect and independent Core lifetime. It retains protected test state and removes only its installer-owned service. Private signing keys and synthetic password values never become source/release assets. Record native CI results in [development status](../.agent/STATUS.md) before declaring verification complete.
 
 The native fixture runs under the elevated installing operator. The interactive UAC prompt and the setup window opened from an unelevated Desktop require a separate manual Windows check; CI does not automatically approve that prompt.
+
+See [native AI, licensing and local settings](DESKTOP-AI-LICENSING.md) for explicit renewal, assistive explanations and session consent.

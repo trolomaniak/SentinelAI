@@ -58,6 +58,7 @@ public sealed class AlertPresentation
     public AlertPresentation(AlertDetail detail)
     {
         ArgumentNullException.ThrowIfNull(detail);
+        Detail = detail;
         Row = new AlertRow(detail.Alert);
         Reason = detail.Reason;
         RecommendedAction = detail.RecommendedAction;
@@ -99,6 +100,7 @@ public sealed class AlertPresentation
             : $"Showing the last {History.Count.ToString(CultureInfo.InvariantCulture)} of {detail.StatusHistoryCount.ToString(CultureInfo.InvariantCulture)} status changes.";
     }
 
+    public AlertDetail Detail { get; }
     public AlertRow Row { get; }
     public string Name => Row.Title;
     public long Version => Row.Version;

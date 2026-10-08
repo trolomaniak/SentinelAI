@@ -15,7 +15,8 @@ param(
     [ValidateRange(30, 600)][int]$TimeoutSeconds = 180,
     [switch]$VerifyDevices,
     [switch]$VerifyAlerts,
-    [switch]$VerifyRiskReports
+    [switch]$VerifyRiskReports,
+    [switch]$VerifyAiLicenseSettings
 )
 
 Set-StrictMode -Version Latest
@@ -42,6 +43,7 @@ if ($PSVersionTable.PSEdition -ne 'Desktop') {
     if ($VerifyDevices) { $arguments += ' -VerifyDevices' }
     if ($VerifyAlerts) { $arguments += ' -VerifyAlerts' }
     if ($VerifyRiskReports) { $arguments += ' -VerifyRiskReports' }
+    if ($VerifyAiLicenseSettings) { $arguments += ' -VerifyAiLicenseSettings' }
     $nativeStart = [Diagnostics.ProcessStartInfo]::new()
     $nativeStart.FileName = $nativeHost; $nativeStart.Arguments = $arguments
     $nativeStart.UseShellExecute = $false
@@ -493,6 +495,10 @@ try {
     if ($VerifyRiskReports) {
         . (Join-Path $PSScriptRoot 'RiskReports.Acceptance.ps1')
         Invoke-NativeRiskReportsAcceptance
+    }
+    if ($VerifyAiLicenseSettings) {
+        . (Join-Path $PSScriptRoot 'AiLicenseSettings.Acceptance.ps1')
+        Invoke-NativeAiLicenseSettingsAcceptance
     }
     Assert-NoCredentialArguments $desktop
     Assert-NoCredentialArguments $coreProcess

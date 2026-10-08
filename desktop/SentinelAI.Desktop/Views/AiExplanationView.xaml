@@ -1,0 +1,68 @@
+<UserControl x:Class="SentinelAI.Desktop.Views.AiExplanationView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AutomationProperties.AutomationId="AiExplanationView" SizeChanged="OnViewSizeChanged">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <ScrollViewer x:Name="AiActionsScroller" MaxHeight="100" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,12">
+            <WrapPanel>
+                <Button Content="Explain with AI" Click="OnExplain" IsEnabled="{Binding CanExplain}"
+                        Margin="0,0,8,8" AutomationProperties.AutomationId="ExplainAlertWithAiButton" />
+            </WrapPanel>
+        </ScrollViewer>
+        <ScrollViewer x:Name="AiAnalysisScroller" Grid.Row="1" MaxHeight="460" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled" Padding="0,0,4,0">
+            <StackPanel>
+                <TextBlock Text="{Binding Label}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="AiAssistiveLabel" />
+                <TextBlock Text="AI suggestions require administrator review. Verify them before changing an endpoint."
+                           TextWrapping="Wrap" Margin="0,8,0,12" Foreground="{DynamicResource SecondaryTextBrush}"
+                           AutomationProperties.AutomationId="AiAdministratorReview" />
+                <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                           AutomationProperties.AutomationId="AiExplanationStatus" AutomationProperties.LiveSetting="Polite" />
+                <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                           AutomationProperties.AutomationId="AiExplanationError" AutomationProperties.LiveSetting="Assertive" />
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers><DataTrigger Binding="{Binding HasAnalysis}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <TextBlock Text="Explanation" FontWeight="SemiBold" Margin="0,0,0,6" />
+                    <TextBlock Text="{Binding Analysis.Explanation}" TextWrapping="Wrap" Margin="0,0,0,16"
+                               AutomationProperties.AutomationId="AiExplanationText" />
+                    <TextBlock Text="Why it matters" FontWeight="SemiBold" Margin="0,0,0,6" />
+                    <TextBlock Text="{Binding Analysis.WhyItMatters}" TextWrapping="Wrap" Margin="0,0,0,16"
+                               AutomationProperties.AutomationId="AiWhyItMatters" />
+                    <Expander Header="Recommended investigation" IsExpanded="True" Margin="0,0,0,16"
+                              AutomationProperties.AutomationId="AiInvestigation">
+                        <ItemsControl ItemsSource="{Binding Analysis.RecommendedInvestigation}" Margin="8,12,8,0"
+                                      AutomationProperties.AutomationId="AiInvestigationSteps">
+                            <ItemsControl.ItemTemplate><DataTemplate>
+                                <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                           AutomationProperties.AutomationId="AiInvestigationStep" />
+                            </DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Expander>
+                    <Expander Header="Suggested remediation for review" IsExpanded="True" Margin="0,0,0,16"
+                              AutomationProperties.AutomationId="AiRemediation">
+                        <ItemsControl ItemsSource="{Binding Analysis.SuggestedRemediation}" Margin="8,12,8,0"
+                                      AutomationProperties.AutomationId="AiRemediationSteps">
+                            <ItemsControl.ItemTemplate><DataTemplate>
+                                <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                           AutomationProperties.AutomationId="AiRemediationStep" />
+                            </DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Expander>
+                    <TextBlock Text="Confidence" FontWeight="SemiBold" Margin="0,0,0,6" />
+                    <TextBlock Text="{Binding Analysis.Confidence}" TextWrapping="Wrap" Margin="0,0,0,16"
+                               AutomationProperties.AutomationId="AiConfidence" />
+                    <TextBlock Text="Uncertainty" FontWeight="SemiBold" Margin="0,0,0,6" />
+                    <TextBlock Text="{Binding Analysis.Uncertainty}" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="AiUncertainty" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>
