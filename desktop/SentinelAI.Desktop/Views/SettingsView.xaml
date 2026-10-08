@@ -93,6 +93,33 @@
                                   AutomationProperties.AutomationId="CloudAiRequestsEnabled" />
                         <TextBlock Text="Off by default. Each explanation still requires an explicit request and Core permission. Signing out resets this setting."
                                    TextWrapping="Wrap" Margin="0,0,0,16" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <Expander Header="Desktop startup and notifications" Margin="0,0,0,16"
+                                  AutomationProperties.AutomationId="DesktopIntegrationSettings">
+                            <StackPanel Margin="0,12,0,0">
+                                <CheckBox Content="Show SentinelAI in the notification area" Margin="0,0,0,8"
+                                          IsChecked="{Binding DesktopIntegration.TrayEnabled, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                                          IsEnabled="{Binding DesktopIntegration.PreferencesAvailable, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          AutomationProperties.AutomationId="DesktopTrayEnabled" />
+                                <CheckBox Content="Notify when a local protection service stops" Margin="0,0,0,8"
+                                          IsChecked="{Binding DesktopIntegration.NotificationsEnabled, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                                          IsEnabled="{Binding DesktopIntegration.CanConfigureNotifications, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          AutomationProperties.AutomationId="DesktopNotificationsEnabled" />
+                                <CheckBox Content="Open SentinelAI when I sign in to Windows" Margin="0,0,0,8"
+                                          IsChecked="{Binding DesktopIntegration.AutoStartEnabled, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                                          IsEnabled="{Binding DesktopIntegration.PreferencesAvailable, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          AutomationProperties.AutomationId="DesktopAutoStartEnabled" />
+                                <TextBlock Text="These settings apply to your Windows user. Closing Desktop ends its session; Core and Agent continue independently."
+                                           TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                <TextBlock Text="{Binding DesktopIntegration.ErrorText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                           TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource PrimaryTextBrush}"
+                                           AutomationProperties.AutomationId="DesktopIntegrationError" AutomationProperties.LiveSetting="Polite" />
+                                <TextBlock Text="{Binding DesktopTray.StatusText, RelativeSource={RelativeSource AncestorType=Window}}"
+                                           TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}"
+                                           AutomationProperties.AutomationId="DesktopTrayStatus" />
+                                <Button Content="Refresh Desktop settings" Click="OnRefreshDesktopSettings" Margin="0,12,0,0"
+                                        HorizontalAlignment="Left" AutomationProperties.AutomationId="RefreshDesktopSettings" />
+                            </StackPanel>
+                        </Expander>
                         <TextBlock Text="Desktop version" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding DataContext.Version, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="SettingsDesktopVersion" />
@@ -102,6 +129,10 @@
                         <TextBlock Text="{Binding DataContext.CoreStatusText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="SettingsCoreStatus"
                                    AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Text="{Binding ServiceStatus.CoreStatusText, RelativeSource={RelativeSource AncestorType=Window}, StringFormat='Core service: {0}'}"
+                                   TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="SettingsCoreServiceStatus" />
+                        <TextBlock Text="{Binding ServiceStatus.AgentStatusText, RelativeSource={RelativeSource AncestorType=Window}, StringFormat='Agent service: {0}'}"
+                                   TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="SettingsAgentServiceStatus" />
                         <TextBlock Text="Session" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="Sign-in is kept in memory for this Desktop session. Desktop validates its Core session every five seconds."
                                    TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="SettingsSessionPolicy" />

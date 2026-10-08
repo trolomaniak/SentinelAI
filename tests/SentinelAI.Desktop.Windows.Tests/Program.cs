@@ -163,6 +163,9 @@ internal static partial class Program
         await AlertsViewsAsync();
         await RiskReportsViewsAsync();
         await AiLicenseSettingsViewsAsync();
+        await BrowserlessViewsAsync();
+        await LocalServiceStatusAsync();
+        await DesktopActivationAsync();
     }
 
     private static async Task AuthenticationViewsAsync()

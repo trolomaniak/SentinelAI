@@ -16,7 +16,8 @@ param(
     [switch]$VerifyDevices,
     [switch]$VerifyAlerts,
     [switch]$VerifyRiskReports,
-    [switch]$VerifyAiLicenseSettings
+    [switch]$VerifyAiLicenseSettings,
+    [switch]$VerifyBrowserless
 )
 
 Set-StrictMode -Version Latest
@@ -44,6 +45,7 @@ if ($PSVersionTable.PSEdition -ne 'Desktop') {
     if ($VerifyAlerts) { $arguments += ' -VerifyAlerts' }
     if ($VerifyRiskReports) { $arguments += ' -VerifyRiskReports' }
     if ($VerifyAiLicenseSettings) { $arguments += ' -VerifyAiLicenseSettings' }
+    if ($VerifyBrowserless) { $arguments += ' -VerifyBrowserless' }
     $nativeStart = [Diagnostics.ProcessStartInfo]::new()
     $nativeStart.FileName = $nativeHost; $nativeStart.Arguments = $arguments
     $nativeStart.UseShellExecute = $false
@@ -499,6 +501,10 @@ try {
     if ($VerifyAiLicenseSettings) {
         . (Join-Path $PSScriptRoot 'AiLicenseSettings.Acceptance.ps1')
         Invoke-NativeAiLicenseSettingsAcceptance
+    }
+    if ($VerifyBrowserless) {
+        . (Join-Path $PSScriptRoot 'Browserless.Acceptance.ps1')
+        Invoke-NativeBrowserlessAcceptance
     }
     Assert-NoCredentialArguments $desktop
     Assert-NoCredentialArguments $coreProcess
