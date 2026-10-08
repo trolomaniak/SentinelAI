@@ -5,7 +5,7 @@ function Invoke-NativeBrowserlessAcceptance {
     Add-Type -AssemblyName System.Net.Http
     if (Test-AuthenticationControl 'SignOutButton') {
         Invoke-AuthenticationControl 'SignOutButton'
-        Wait-AuthenticationAcceptance { Test-AuthenticationControl 'SignInButton' } 'Browserless acceptance could not sign out.'
+        Wait-AuthenticationAcceptance { Test-AuthenticationControl 'SignInButton' $false } 'Browserless acceptance could not sign out.'
     }
     Assert-SignedOut
     if ($null -eq ('SentinelAIDesktopBrowserlessAcceptance.Native' -as [type])) {
@@ -21,6 +21,7 @@ namespace SentinelAIDesktopBrowserlessAcceptance {
 '@
     }
     $primaryId = $script:desktop.Id
+    $primaryHandle = $script:desktop.MainWindowHandle
     $sessionId = $script:desktop.SessionId
     $agentBefore = Get-CimInstance -ClassName Win32_Service -Filter "Name='SentinelAIAgent'"
     $agentState = if ($null -ne $agentBefore) { [string]$agentBefore.State } else { $null }
@@ -78,7 +79,20 @@ namespace SentinelAIDesktopBrowserlessAcceptance {
             $status = Find-AuthenticationControl 'DesktopServiceStatus'
             return $null -ne $status -and -not $status.Current.IsOffscreen -and
                 $status.Current.Name -ceq ('Core service: Running ' + [char]0x00b7 + ' Agent service: ' + $agentLabel)
-        } 'The native connection strip did not show the observed Core and Agent service states.'
+        } 'The native service status display did not show the observed Core and Agent service states.'
+    }
+    function Assert-BrowserlessSignIn([string]$Message) {
+        Wait-AuthenticationAcceptance {
+            $status = Find-AuthenticationControl 'AuthenticationStatusText'
+            return (Test-AuthenticationControl 'SignInButton' $false) -and $null -ne $status -and
+                $status.Current.Name -ceq 'Sign in to local Core.'
+        } $Message
+        $usernameInput = Find-AuthenticationControl 'AuthenticationUsername'
+        Assert-AuthenticationAcceptance ($null -ne $usernameInput -and -not $usernameInput.Current.IsOffscreen) 'The signed-out native username control was unavailable.'
+        $usernameValue = [System.Windows.Automation.ValuePattern]$usernameInput.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        Assert-AuthenticationAcceptance ([string]::IsNullOrEmpty($usernameValue.Current.Value)) 'Browserless operation restored an old administrator username.'
+        Assert-AuthenticationAcceptance (-not (Test-AuthenticationControl 'SignInButton')) 'Sign-in was enabled without a valid administrator username.'
+        Assert-SignedOut
     }
     try {
         Assert-BrowserlessServices
@@ -95,8 +109,10 @@ namespace SentinelAIDesktopBrowserlessAcceptance {
         Wait-AuthenticationAcceptance { -not [SentinelAIDesktopBrowserlessAcceptance.Native]::IsIconic($script:desktop.MainWindowHandle) } 'Duplicate launch did not restore the existing minimized native window.'
         Assert-AuthenticationAcceptance ($script:desktop.Id -eq $primaryId -and -not $script:desktop.HasExited) 'Duplicate activation replaced the original Desktop.'
         Assert-OneBrowserlessDesktop
-        Wait-AuthenticationAcceptance { Test-AuthenticationControl 'SignInButton' } 'Activated Desktop did not preserve its signed-out native interface.'
-        Assert-SignedOut
+        $script:desktop.Refresh()
+        Assert-AuthenticationAcceptance ($script:desktop.MainWindowHandle -eq $primaryHandle) 'Duplicate activation replaced the original native window.'
+        $script:root = [System.Windows.Automation.AutomationElement]::FromHandle($primaryHandle)
+        Assert-BrowserlessSignIn 'Activated Desktop did not preserve its signed-out native interface.'
         Assert-BrowserlessServices
 
         [void][SentinelAIDesktopAuthenticationAcceptance.Native]::PostMessage($script:desktop.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
@@ -109,8 +125,7 @@ namespace SentinelAIDesktopBrowserlessAcceptance {
         $primaryId = $script:desktop.Id
         Wait-AuthenticationAcceptance { $script:desktop.Refresh(); $script:desktop.MainWindowHandle -ne [IntPtr]::Zero } 'Reopened Desktop did not create its native window.'
         $script:root = [System.Windows.Automation.AutomationElement]::FromHandle($script:desktop.MainWindowHandle)
-        Wait-AuthenticationAcceptance { Test-AuthenticationControl 'SignInButton' } 'Reopened Desktop did not reconnect to the initialized local Core.'
-        Assert-SignedOut
+        Assert-BrowserlessSignIn 'Reopened Desktop did not reconnect to the initialized local Core.'
         Assert-OneBrowserlessDesktop
         Assert-NoCredentialArguments $script:desktop
         Assert-BrowserlessServices

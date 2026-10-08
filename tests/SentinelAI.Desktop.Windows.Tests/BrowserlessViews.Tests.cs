@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using SentinelAI.Desktop;
 using SentinelAI.Desktop.Foundation;
@@ -128,9 +130,27 @@ internal static partial class Program
                 await FlushAsync();
                 AssertInsideWindow(window, settings);
                 AssertInsideWindow(window, BrowserlessControl<TextBlock>(window, "DesktopServiceStatus"));
+                var navigation = RequireControl<ListBox>(window, "NavigationList");
+                navigation.ScrollIntoView(shell.CurrentPage);
+                await FlushAsync();
+                var navigationScroller = Descendants<ScrollViewer>(navigation).Single();
+                Ensure(navigationScroller.ViewportWidth > 0 && navigationScroller.ViewportHeight > 0,
+                    "Browserless service status consumed the native navigation viewport at a supported window size.");
+                var settingsItem = navigation.ItemContainerGenerator.ContainerFromItem(shell.CurrentPage) as ListBoxItem;
+                Ensure(settingsItem is { IsSelected: true } &&
+                    UIElementAutomationPeer.CreatePeerForElement(settingsItem)?.GetName() == "Settings",
+                    "Native Settings selection lost its accessible navigation item at a supported window size.");
+                Ensure(Keyboard.Focus(navigation) is not null && navigation.IsKeyboardFocusWithin,
+                    "Native Settings navigation could not receive keyboard focus at a supported window size.");
+                AssertInsideWindow(window, settingsItem!);
                 var scroller = (ScrollViewer)settings.FindName("SettingsPageScroller");
+                var actions = (ScrollViewer)settings.FindName("SettingsActionsScroller");
                 Ensure(scroller.ViewportWidth > 0 && scroller.ViewportHeight > 0,
-                    "Browserless Settings lost its scroll viewport at a supported window size.");
+                    $"Browserless Settings lost its scroll viewport at {size.Width}x{size.Height}: " +
+                    $"Settings height={settings.ActualHeight}; action height={actions.ActualHeight}; " +
+                    $"page viewport={scroller.ViewportWidth}x{scroller.ViewportHeight}; " +
+                    $"authentication height={RequireControl<AuthenticationView>(window, "AuthenticationPanel").ActualHeight}; " +
+                    $"service status height={BrowserlessControl<TextBlock>(window, "DesktopServiceStatus").ActualHeight}.");
                 foreach (var control in new FrameworkElement[] { tray, notifications, autoStart,
                     BrowserlessControl<TextBlock>(settings, "SettingsCoreServiceStatus"),
                     BrowserlessControl<TextBlock>(settings, "SettingsAgentServiceStatus") })

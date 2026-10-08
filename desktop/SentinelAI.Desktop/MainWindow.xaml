@@ -59,9 +59,29 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
-                <TextBlock Grid.Row="2" Text="Local security workspace" Margin="20,12,20,20"
-                           FontSize="12" TextWrapping="Wrap"
-                           Foreground="{DynamicResource NavigationSecondaryBrush}" />
+                <StackPanel Grid.Row="2" Margin="20,12,20,20">
+                    <TextBlock Text="Local security workspace" FontSize="12" TextWrapping="Wrap"
+                               Foreground="{DynamicResource NavigationSecondaryBrush}" />
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0"
+                               Foreground="{DynamicResource NavigationSecondaryBrush}"
+                               AutomationProperties.AutomationId="DesktopServiceStatus" AutomationProperties.LiveSetting="Polite">
+                        <TextBlock.Text>
+                            <MultiBinding StringFormat="Core service: {0} · Agent service: {1}">
+                                <Binding Path="ServiceStatus.CoreStatusText" RelativeSource="{RelativeSource AncestorType=Window}" />
+                                <Binding Path="ServiceStatus.AgentStatusText" RelativeSource="{RelativeSource AncestorType=Window}" />
+                            </MultiBinding>
+                        </TextBlock.Text>
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ServiceStatus, RelativeSource={RelativeSource AncestorType=Window}}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
             </Grid>
         </Border>
         <Grid Grid.Column="1" Margin="24">
@@ -87,25 +107,6 @@
                         <TextBlock Text="{Binding CoreStatusText}" TextWrapping="Wrap" FontSize="12"
                                    Margin="0,4,0,0" Foreground="{DynamicResource SecondaryTextBrush}"
                                    AutomationProperties.LiveSetting="Polite" />
-                        <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0"
-                                   Foreground="{DynamicResource SecondaryTextBrush}"
-                                   AutomationProperties.AutomationId="DesktopServiceStatus" AutomationProperties.LiveSetting="Polite">
-                            <TextBlock.Text>
-                                <MultiBinding StringFormat="Core service: {0} · Agent service: {1}">
-                                    <Binding Path="ServiceStatus.CoreStatusText" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                    <Binding Path="ServiceStatus.AgentStatusText" RelativeSource="{RelativeSource AncestorType=Window}" />
-                                </MultiBinding>
-                            </TextBlock.Text>
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding ServiceStatus, RelativeSource={RelativeSource AncestorType=Window}}" Value="{x:Null}">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
                     </StackPanel>
                     <Button x:Name="RefreshCoreButton" Grid.Column="1" Content="Check connection"
                             Command="{Binding RefreshCoreCommand}" Margin="16,0,0,0"
