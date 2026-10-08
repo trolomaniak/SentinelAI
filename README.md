@@ -1,138 +1,98 @@
 # SentinelAI
 
-SentinelAI is a Windows-first, local-first cybersecurity platform. Native `SentinelAI.Desktop` is the supported production user interface. Core owns the local API, SQLite state and security evaluation; the Endpoint Agent collects bounded configuration telemetry. Core and Agent run independently when Desktop is closed. Normal operation requires no browser.
+SentinelAI is a Windows-first, local-first security platform in development. It collects endpoint inventory and selected Windows configuration observations, evaluates deterministic security rules, and provides native incident review, risk prioritization and local reports.
 
-## Native Windows desktop
+The operator interface is **SentinelAI.Desktop**, a native .NET 10 WPF application for Windows x64. Core and Agent run independently of the window. Normal operation requires no browser; the existing dashboard remains available for development and diagnostics.
 
-The .NET 10 WPF Desktop provides native Windows x64 administrator setup, sign-in/out, Devices, Alerts/incidents, deterministic Risk, report generation/saving, licensing and explicit assistive AI. Publish with:
+## Current project state
 
-```sh
-./scripts/publish-desktop-windows.sh
-```
+The current main branch includes the native Desktop workflows completed through **TASK-023**. Builds and native Windows CI have passed, including authentication, incident review, reports, duplicate-window activation and closing/reopening Desktop against the installed Core service.
 
-On Windows, open `artifacts/desktop/win-x64/SentinelAI.Desktop.exe` with its accompanying files. The application is self-contained and needs no separately installed runtime. Install and initialize the trusted local Core through the [pilot guide](docs/PILOT.md) and [desktop setup guide](docs/DESKTOP-AUTH.md), then use the existing [Core service workflow](docs/CORE-SERVICE.md). Open Desktop and sign in. Settings offers optional tray integration, local service status and per-user Desktop auto-start; these do not control service startup. Repeated launches activate the existing UI for the same Windows user/session. Closing Desktop fully exits its UI and leaves protection services running; reopening requires explicit sign-in.
+Distribution is at the **development/pilot stage**: a self-contained Desktop directory and development-signed Core/Agent packages can be built from source. There is no published release download or Desktop installer. The pilot release is still a draft with no uploaded assets. Full fresh-machine Agent deployment acceptance remains pending; see [validation and limitations](#validation-and-limitations) and the [development status](.agent/STATUS.md).
 
-See [browserless operation](docs/DESKTOP-OPERATION.md), [native Devices](docs/DESKTOP-DEVICES.md), [native Alerts](docs/DESKTOP-ALERTS.md), [native Risk and Reports](docs/DESKTOP-RISK-REPORTS.md), [AI/licensing](docs/DESKTOP-AI-LICENSING.md) and [desktop builds and Windows validation](desktop/README.md). Overview remains a native placeholder. Published output remains a development/pilot application directory; this task does not add a release installer.
+## Implemented functionality
 
-## Development builds and console diagnostics
+| Area | Current behavior |
+| --- | --- |
+| Devices and telemetry | Enrolled endpoint list/detail, heartbeat connectivity, inventory timestamps, OS/build, CPU, RAM, disks and selected Windows configuration. Unavailable observations remain Unknown. |
+| Security rules | 13 deterministic configuration rules covering firewall profiles, UAC, RDP, SMB, automatic logon, LSA protection and update policy. Findings describe the observed configuration. |
+| Alerts and incidents | Stored detections, typed evidence, observation/history details and versioned Open / Investigating / Resolved / Accepted decisions. Conflicting edits require review of the current version. |
+| Risk | Local deterministic organization/endpoint scores with decimal contributions, correlation, policy, coverage and freshness explanations. |
+| Reports | Local HTML generation for an inclusive UTC date range and explicit saving through a native Windows picker. Reports work offline and in Safe Mode; historical score trends are unavailable. |
+| Licensing | Signed seven-day leases, FULL / GRACE / SAFE_MODE / RECOVERING states, public capabilities and explicit manual renewal. Safe Mode preserves local monitoring, incident access and reporting. |
+| Assistive AI | Explicit explanations for supported selected alerts. Requests require session consent, Core permission and a signed `cloud_ai` entitlement. Suggestions perform no endpoint actions. |
+| Desktop operation | One normal instance per Windows user/session, restoration on repeated launch, read-only service status, optional tray notifications and independent per-user Desktop auto-start. |
+| Update foundation | Signed manifest/package verification, local staging and a transactional installation/rollback API. Automatic download, scheduling and integration into pilot upgrades remain unimplemented. |
 
-The backend uses .NET 10 and contains Agent, Core, shared contracts, deterministic rules, scoring, a separate cloud License API and AI Gateway. The retained development/diagnostic dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer. Node.js and a browser are unnecessary on the target Windows machine running the published native Desktop.
+**Overview remains a placeholder.** Current information is available in Devices, Alerts, Risk, Reports and Settings. Tray, notifications and Desktop auto-start default off. Cloud AI consent also defaults off and is cleared on sign-out or close.
 
-From the repository root, run:
+## Architecture
+
+- **Core** (`core/`) owns the local ASP.NET Core API, administrator authentication, SQLite state, rule evaluation, risk scoring, incidents and reporting. It supports console development hosting and the `SentinelAICore` Windows Service.
+- **Agent** (`agent/`) collects bounded Windows inventory/configuration and sends authenticated heartbeats and inventory. The pilot installs `SentinelAIAgent` under LocalService and protects its enrollment credential with Windows DPAPI.
+- **Desktop** (`desktop/`) is the native operator workspace. Closing it clears its in-memory authentication session and exits the GUI; Core and Agent continue. Reopening requires a fresh sign-in. Desktop does not start, stop or configure either service.
+- **Optional services** (`cloud/`) contain a separate development License API and AI Gateway. Core keeps their configured destinations and credentials; provider keys stay in the gateway. AI receives minimized evidence and does not determine detections or risk scores.
+
+The supported pilot co-locates Core, Agent and Desktop on Windows 11 x64. Desktop connects to the trusted local installation at `http://127.0.0.1:5000`. Remote Agent connections require separately provisioned trusted HTTPS, TLS 1.3 and certificate pinning. See [architecture](docs/ARCHITECTURE.md), [Core service operation](docs/CORE-SERVICE.md) and [AI privacy/configuration](docs/AI.md).
+
+## Run the Windows pilot
+
+Use a fresh development/test machine and follow the [pilot installation guide](docs/PILOT.md) for the exact commands and trust inputs:
+
+1. Build the Core/Agent development bundle and separately provide its trusted public verification key.
+2. Install Core into the protected default directories using the elevated pilot installer.
+3. Publish Desktop from the same checkout:
+
+   ```sh
+   ./scripts/publish-desktop-windows.sh
+   ```
+
+4. Copy the complete `artifacts/desktop/win-x64` directory to Windows and open `SentinelAI.Desktop.exe`. Create the first administrator through [native setup](docs/DESKTOP-AUTH.md), then register/start Core using the [service workflow](docs/CORE-SERVICE.md).
+5. Install and enroll Agent through the pilot installer, sign in to Desktop and verify the exact endpoint and observation times in Devices.
+
+Published applications include their .NET runtime. The target machine needs no SDK, Node.js or browser; installation scripts require Windows PowerShell 5.1 or PowerShell 7. Desktop is published separately and is not installed by the Core/Agent pilot bundle.
+
+AI and license renewal require operator-provided service configuration and credentials. Without a configured provider or entitlement, AI displays a safe unavailable/disabled state while local workflows remain available. Enable **Allow cloud AI requests for this session** in Settings before explicitly requesting an explanation. See [native AI/licensing](docs/DESKTOP-AI-LICENSING.md) and [licensing configuration](docs/LICENSING.md).
+
+## Build and test from source
+
+Build prerequisites are the **.NET 10 SDK**, **Bash** and **Node.js 20 or newer**. Install **PowerShell 7 (`pwsh`)** to run the portable pilot/service tests; `scripts/test.sh` skips those suites when it is absent.
 
 ```sh
 ./scripts/build.sh
 ./scripts/test.sh
 ```
 
-The build script restores/builds the .NET solution and diagnostic dashboard. The test script runs Agent/Core, rules/scoring, licensing, AI, Desktop, installation/update and dashboard compatibility regressions.
-
-For development console Core, set an initial administrator name and a password of at least 12 characters. Core stores only its password hash. Remove the bootstrap password from the environment after first successful initialization; existing administrators are never replaced.
+The build script restores/builds the solution and diagnostic dashboard. The test script runs Core/Agent, rules, scoring, licensing, AI, update, Desktop and dashboard regressions, plus the PowerShell suites when available. Building on Linux cross-compiles Windows projects; native WPF and Windows service acceptance execute on Windows.
 
 ```sh
-export SENTINELAI_BOOTSTRAP_USERNAME=admin
-read -r -s -p 'Initial administrator password: ' SENTINELAI_BOOTSTRAP_PASSWORD
-export SENTINELAI_BOOTSTRAP_PASSWORD
-dotnet run --project core/SentinelAI.Core.csproj --no-launch-profile
+./scripts/publish-desktop-windows.sh
+./scripts/publish-agent-windows.sh
 ```
 
-Core defaults to `http://127.0.0.1:5000`. Development hosts may set `ASPNETCORE_URLS` or a configured HTTPS certificate and `SentinelAI__DataDirectory`; Desktop retains its fixed trusted local destination. Preserve the private SQLite directory, which otherwise defaults to local application data under `SentinelAI/Core`.
+These commands produce the self-contained Desktop directory and Agent executable under `artifacts/`. Core/Agent bundle preparation is documented in the [pilot guide](docs/PILOT.md). Native WPF/GUI test commands and manual DPI checks are in [desktop/README.md](desktop/README.md).
 
-`GET /api/health` is public. `POST /api/auth/login` accepts JSON `username`/`password` and returns a short-lived bearer for `GET /api/admin/me`. Invalid credentials receive the same `401`; login is rate-limited. Tokens expire after 15 minutes and are invalidated by a Core restart. Existing HTTP contracts and dashboard assets are retained for development/diagnostic compatibility.
+Console Core and the same-origin browser dashboard remain development/diagnostic options. The [console workflow](docs/PILOT.md#development-and-diagnostic-console-alternative) explains administrator bootstrap. The installed Desktop uses its fixed trusted local Core destination; it has no destination or credential editor.
 
-## Core Windows Service
+## Validation and limitations
 
-Core supports Windows Service hosting as `SentinelAICore` while retaining the console commands above. The [Core service guide](docs/CORE-SERVICE.md) covers signed pilot installation, local administrator initialization, the limited virtual service account, protected persistent storage, delayed automatic startup, recovery and service-only removal. Core runs independently of the desktop window. Registration requires an explicitly elevated PowerShell terminal and an initialized pilot installation; service arguments contain only the nonsecret configuration path.
+The last completed implementation, TASK-023, passed the full build/regression scripts with **zero .NET warnings/errors**, **2,814 Desktop assertions**, **63 dashboard tests** and all eight push/PR CI checks. Windows CI exercised actual WPF controls, published Desktop and signed installed Core, including restart/reconnect, report saving and independent service lifetime. These are recorded implementation results; see [STATUS](.agent/STATUS.md) for exact commits, CI links and acceptance details, or [GitHub Actions](https://github.com/trolomaniak/SentinelAI/actions/workflows/ci.yml) for later runs.
 
-## Signed subscription leases
+Current limits:
 
-The separate [License API](cloud/license-api/README.md) issues a seven-day signed lease containing organization and Core installation IDs, plan, endpoint limit, enabled features, issue time, and full-mode expiration. Its activation credential selects an operator-configured entitlement; client requests cannot choose their own plan or limits. The development issuer uses ECDSA P-256/SHA-256 (ES256), an asymmetric equivalent allowed by TASK-010, without an external crypto dependency.
+- Detection covers the documented configuration rules. Malware scanning, live antivirus health, patch compliance and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
+- Inventory can be stale. Core does not retain complete inventory/heartbeat history or historical risk scores; reports distinguish current risk from retained incident activity.
+- The full fresh Windows Agent enrollment/DPAPI/heartbeat/inventory/uninstall-reinstall acceptance remains unexecuted. Existing Windows Agent tests and service smoke checks have passed; they do not establish that full deployment scenario.
+- Interactive UAC approval and physical multi-monitor DPI checks remain manual. Tray delivery and auto-start also depend on Windows shell/startup policy.
+- Pilot packages use development manifest signatures. Authenticode signing, production trust provisioning, a Desktop installer, automatic upgrades and state/account migrations remain outstanding.
+- Billing and enforcement of the signed endpoint limit are not implemented.
+- Gateway/provider integration tests use synthetic responses and development credentials. Live model-provider operation requires separate operator configuration.
 
-Core verifies signatures locally using only provisioned public P-256 SPKI PEM keys. Set `SentinelAI__Licensing__TrustedPublicKeys__<keyId>` to an absolute public-key file path. Key IDs support overlapping trust during rotation. Core rejects private keys and other curves; it never references the cloud signer. Lease identity must match the organization and Core installation IDs already stored by enrollment (also returned when issuing an enrollment token).
+## Documentation
 
-An authenticated Core administrator can call `POST /api/admin/license/verify` with `{"lease":"<signed-lease>"}`. The response reports `valid`, `expired`, `invalid`, `notYetValid`, or `identityMismatch`; claims are exposed only for a verified, identity-matching valid or expired lease. Invalid signatures, unknown keys, malformed tokens, modified claims, and unsupported algorithms fail verification. Expiration begins exactly at `full_mode_until`; there is no hidden extension. Like other administrator reads, verification requires HTTPS outside loopback and sends `Cache-Control: no-store`.
-
-With no public trust keys configured, the verification endpoint returns `503`; existing monitoring continues. TASK-011 adds opt-in renewal, persisted signed lease/time state, and the explicit FULL/GRACE/SAFE_MODE/RECOVERING lifecycle. A failed renewal retains GRACE only until the signed seven-day deadline; Safe Mode preserves telemetry, rules, alerts, incident access, and emergency export. See [licensing operation and configuration](docs/LICENSING.md). TASK-012 uses these capabilities for the optional signed `cloud_ai` feature; future premium features and endpoint-limit enforcement remain separate work. Use the automated development key-generation workflow documented with the License API; tests generate their own temporary keys and use synthetic entitlements. Never provision a private signing key to Core or commit signing keys or activation credentials.
-
-## Assistive alert explanations
-
-Select **Explain with AI** on an alert to request a structured explanation, investigation suggestions and remediation suggestions. Core sends only minimized configuration evidence through the separate AI Gateway; the provider key stays on that gateway. Analysis is labeled assistive, cannot override the deterministic alert, and performs no endpoint actions. Cloud failures leave local alerts and review controls available. The optional feature requires a signed `cloud_ai` entitlement. See [AI configuration and privacy](docs/AI.md).
-
-## Development and diagnostic dashboard
-
-The browser dashboard is a development/diagnostic compatibility surface. Production operation uses native Desktop. For an explicit diagnostic session, open the Core origin in a browser, for example `http://127.0.0.1:5000/`, and sign in with the Core administrator account. Core serves the dashboard on the same origin as its API, so no cross-origin permission is required. For access from another computer, configure Core with HTTPS; the dashboard sign-in form will not submit credentials over remote HTTP. The bearer token stays in browser memory and is cleared on sign-out, page refresh, or the next request after session expiry.
-
-The device list shows enrolled endpoints, their last heartbeat, Agent version, OS, and the last reported configured firewall settings. Select an endpoint to see its inventory and firewall profile details. Health is computed from Core's last-seen time: healthy through two minutes, warning through five minutes, offline after five minutes, and unknown before the first heartbeat. Missing inventory is displayed as unknown. Anonymous legacy loopback heartbeats do not appear as enrolled devices. The authenticated `GET /api/admin/devices` and `GET /api/admin/devices/{endpointId}` endpoints supply the list and details.
-
-## Security rules v1
-
-The authenticated `GET /api/admin/devices/{endpointId}/alerts` API evaluates the newest accepted inventory snapshot using 13 deterministic configuration rules. Each finding includes the rule ID, title, severity, reason, typed evidence, endpoint ID, observation timestamp, and recommended action. The response includes `observedUtc`; a snapshot may be old when an endpoint is offline. Missing inventory has a null observation time and no findings. Unknown settings do not trigger rules, so an empty result does not establish that every protection is enabled.
-
-Rules cover configured firewall profiles, UAC, RDP authentication/encryption, SMBv1 and guest access, automatic logon, LSA protection, and automatic update policy. The Agent reads bounded Windows registry settings without scanning files, running external programs, or reading stored credentials. Findings describe configuration risks rather than proving runtime protection, Internet exposure, or missing patches. BitLocker, live Defender/third-party AV health, administrator baselines, and update compliance require additional telemetry; they are not inferred from these settings. See [the rule catalog](rules/README.md) for conditions and severity.
-
-Core derives current findings locally from persisted inventory on request. Repeated reads of the same snapshot are deterministic; a newer normal snapshot removes the current finding, and an older upload cannot replace it. Durable alert tracking is separate from this current-state API and is described below. Detection does not use an LLM or perform remediation. This API requires administrator authentication and HTTPS outside loopback, and responses are not cached.
-
-## Alerts and status tracking
-
-Open **Alerts** in Desktop to view stored detections. The diagnostic dashboard retains the equivalent compatibility flow. Filter by severity or status, page through the list, and select an alert for its endpoint, reason, typed evidence, observation times, recommended action, and status history. Administrators can set **Open**, **Investigating**, **Resolved**, or **Accepted**. A status edit records the administrator and Core's time; it does not change endpoint configuration. Concurrent edits are rejected with a conflict so the administrator can review the latest state.
-
-Core stores one tracked alert per endpoint and rule, atomically with each accepted newer inventory. Repeated positive observations update the evidence and last-observed time without creating duplicate rows. Investigating and Accepted remain administrator decisions; a strictly newer positive observation reopens a Resolved alert. Normal or unknown observations do not automatically resolve stored alerts. Historical findings can therefore remain visible after they disappear from the current-state API. The first-observed time and status-change history are retained; evidence reflects the latest positive observation. Existing inventories are backfilled on startup without resetting statuses or duplicating history.
-
-Administrator APIs, all uncached and requiring HTTPS outside loopback:
-
-- `GET /api/admin/alerts?severity=high&status=open&offset=0&limit=50` returns `{ alerts, total, offset, limit }`. Filters are optional; valid limits are 1–200.
-- `GET /api/admin/alerts/{alertId}` returns the alert details, the latest 100 status changes, and `statusHistoryCount`. Full status history remains stored locally.
-- `PUT /api/admin/alerts/{alertId}/status` accepts `{ "status": "investigating", "expectedVersion": 1 }`, using the version from the latest detail response. A stale version returns `409`; an unknown alert returns `404`.
-
-Snapshot-based detections may be stale while an endpoint is offline. Read the observation timestamps before acting. Risk scoring, cross-rule correlation, AI analysis, and automated remediation are outside TASK-008.
-
-## Risk scoring
-
-Open **Risk** in Desktop for the organization summary and ranked enrolled endpoints, then select an endpoint for its score and contributing factors. Desktop preserves Core's ranked server pages and exposes every factor with literal text and full decimal precision. The diagnostic dashboard retains its existing endpoint-risk links. Scores are local prioritization indicators. A zero rounded score can reflect small positive contributions, an explicit confidence discount, resolved findings, or missing observations; it does not prove that an endpoint or organization is secure. Missing inventory and unknown observations are explicitly shown.
-
-The deterministic policy combines each tracked alert's severity, configured detection-confidence weight, asset criticality, declared exposure, observation age, and remediation status, plus a bounded bonus for distinct rule groups confirmed in the same fresh latest inventory. Core computes scores from one consistent SQLite snapshot on each request, so newer inventory and administrator status changes are reflected on the next read. No AI determines the score.
-
-Investigating and Accepted do not reduce the status multiplier because acknowledgment does not remediate a finding. Resolved sets that multiplier to zero until a newer positive observation reopens the alert. Older observations retain a reduced raw contribution; they do not silently become safe. Individual factors, defaults, raw contributions, correlation, and any score cap are exposed through the API and native Desktop; the diagnostic dashboard retains its equivalent display. Organization risk is the highest endpoint score, with counts showing the size and observation coverage of the enrolled estate. See [the scoring policy](scoring/README.md) for the formula, centralized weights, boundary rules, and configuration.
-
-Administrator APIs require the existing bearer token and HTTPS outside loopback, and return uncached responses:
-
-- `GET /api/admin/risk?offset=0&limit=50` returns the organization summary and a ranked endpoint page.
-- `GET /api/admin/devices/{endpointId}/risk` returns the endpoint score and its factor breakdown.
-
-Asset criticality defaults to standard priority; exposure defaults to unknown with a neutral multiplier. They are policy assumptions, not observations inferred from RDP or firewall settings. Operators may declare per-endpoint context through Core configuration. Risk configuration is validated at startup and changes require a Core restart; endpoint and alert data remain persisted.
-
-Configuration lives under `SentinelAI:RiskScoring`. For example, start Core with `--SentinelAI:RiskScoring:EndpointContexts:<endpointId>:AssetCriticality high --SentinelAI:RiskScoring:EndpointContexts:<endpointId>:Exposure internet`, replacing `<endpointId>` with an enrolled endpoint GUID. Policy overrides go under `SentinelAI:RiskScoring:Policy`; use `MaximumCorrelationBaseBonus` for the limit applied before asset/exposure multipliers. The API returns the effective policy. Coverage uses the 13 supported rule inputs, not every possible Windows protection. Inventory freshness defaults to 12 hours (two collection cycles), while age/correlation uses its separately exposed policy window.
-
-## Local security reports
-
-Open **Reports** in Desktop, choose an inclusive UTC date range, and generate a standalone HTML report. In Desktop, **Generate report** retains Core's exact attachment in memory; **Save HTML** opens an explicit native destination picker, without embedding or automatically opening the document. The default range is the previous complete calendar month. The report includes a management summary, current organization risk and endpoint health, retained incident activity by severity, high/critical incidents, resolutions, tracked posture findings, prioritized actions and technical evidence. It works locally without AI, issuer connectivity or a premium license. Viewing the exported HTML with an offline document viewer is optional. Browser printing/PDF remains optional document handling outside normal SentinelAI operation.
-
-`GET /api/admin/reports/security?from=2026-09-01&to=2026-09-30` returns an authenticated, uncached HTML attachment. Dates must be exactly `yyyy-MM-dd`, ordered and at most 366 inclusive days. The current risk/health snapshot is explicitly separate from period activity: Core does not store historical scores or complete inventory/heartbeat history, so historical trend is unavailable. See [report semantics and limits](docs/REPORTING.md).
-
-## Signed update foundation
-
-TASK-014 adds bounded signed update manifests, public P-256 signature verification, SHA-256/size verification of a private staged ZIP and explicit Stable/Pilot/Beta channels. The local `updater` tool verifies or stages a package under an operator-selected environment/artifact/channel/version policy. A separate development-only tool generates keys outside the checkout and creates signed test manifests; production signing material is never provisioned to Core, Agent or the verification client.
-
-The transactional library verifies/extracts before stopping a service, retains the previous code, requires an explicit service lifecycle/health adapter and restores the previous installation on failure. Pending transactions can be recovered after interruption; a failed rollback preserves its journal and backup. This foundation does not add automatic updates or service installation. See [manifest trust, development commands and rollback operation](docs/UPDATES.md).
-
-## Windows Agent and enrollment
-
-For the first local Windows 11 x64 pilot, follow the [pilot installation guide](docs/PILOT.md). It provides signed development packaging, a private local Core configuration and initial administrator setup, Agent installation under LocalService, one-use enrollment, exact endpoint/heartbeat/inventory verification with retained diagnostic dashboard checks and service uninstall with state preservation. Installation requires an explicitly elevated PowerShell terminal. Core's console pilot can be registered as a service using the [Core service guide](docs/CORE-SERVICE.md). See the guides for separate Windows acceptance and known limitations.
-
-Run `./scripts/publish-agent-windows.sh` to produce `artifacts/agent/win-x64/SentinelAI.Agent.exe`. This is a self-contained, single-file Windows x64 build: the target does not need a separate .NET installation. The bundled native runtime is extracted when the EXE starts. CI verifies the EXE on Windows and uploads it as the `SentinelAI.Agent-win-x64` build artifact.
-
-The Agent runs in user mode as a Windows Service or a console process for development. It creates a stable `installation-id` under `<LocalApplicationData>/SentinelAI/Agent`, then sends heartbeats every 30 seconds with bounded retries during Core outages. Configure `Agent__CoreUrl`, `Agent__DataDirectory`, `Agent__HeartbeatInterval`, `Agent__RetryDelay`, and `Agent__MaxRetryDelay` as needed. The default Core URL is `http://127.0.0.1:5000`.
-
-To enroll an Agent, log in as the Core administrator and call `POST /api/admin/enrollment-tokens` with the administrator bearer token. The response contains a one-use enrollment token valid for ten minutes, plus the Core installation and organization IDs. Supply that token as `Agent__EnrollmentToken` before starting or restarting the Agent. The Agent calls `POST /api/agent/enroll`, receives a Core-assigned endpoint ID and credential, and stores them in `enrollment-state`. Remove the enrollment token from the Agent's environment after enrollment. Invalid, expired, or consumed tokens receive `401`; an installation that is already enrolled receives `409` and retains its endpoint ID.
-
-Core binds to loopback by default. For an Agent on another machine, configure a Core HTTPS listener and a certificate trusted by the Agent operating system, set `Agent__CoreUrl` to its HTTPS origin, and set `Agent__CoreCertificateSha256` to the SHA-256 fingerprint of the Core leaf certificate in DER form. The Agent requires TLS 1.3, normal certificate validation, and the configured fingerprint for LAN connections. Core rejects remote HTTP enrollment and Agent heartbeat traffic. Local loopback HTTP remains available for development and same-machine installations.
-
-The Agent protects its enrollment credential with Windows DPAPI under its service account; Unix test installations restrict the state file to mode `0600`. The state is bound to the configured Core origin and certificate fingerprint. An enrolled Agent authenticates every heartbeat with that credential. Legacy anonymous loopback heartbeats remain `unverified` and cannot update an enrolled endpoint. Core stores only hashes of enrollment tokens and Agent credentials in SQLite; `reporting` is the last observed health state, so consumers should use `last_seen` to assess freshness.
-
-After an enrolled heartbeat succeeds, the Agent reports hostname, OS name and version, architecture, CPU model and logical processor count, installed RAM, local fixed-disk capacities, and available Windows firewall profile settings. Unavailable fields are reported as unknown. Collection uses bounded system metadata calls and does not scan files or launch external commands. The Agent refreshes inventory every six hours and retries a failed inventory upload after five minutes. Core accepts inventory only from an enrolled Agent over the same trusted transport as heartbeats, validates and limits the report, and stores the most recently collected report in SQLite. Inventory upload failures do not interrupt heartbeats.
-
-Windows inventory includes the observed release label (`DisplayVersion`, with a legacy Windows 10 `ReleaseId` fallback), installation type and full native version/build with a valid registry `UBR` revision. Client branding distinguishes Windows 10/11 even when the registry's product name is stale; server products remain distinct. The device list displays, for example, `Windows 11 26H2 10.0.26200.0`, while detail separates `OS: Windows 11` and `OS Version: 26H2 10.0.26200.0`. The redundant `Client` installation type is omitted from the list; server installation types remain visible. Missing metadata is not invented, and older Agent reports remain accepted. After updating Core and Agent, restart the Agent to send fresh inventory and refresh native Devices. The diagnostic dashboard also retains its refresh action.
-
-Use `installer/pilot/Install-SentinelAIPilot.ps1` for the pilot service rather than manually registering an unconfigured EXE. It quotes the executable/configuration paths, validates explicit package trust and paths, sets restricted ACLs and preserves the LocalService account across reinstall so it can decrypt its DPAPI state. Existing manual/development installations are not migrated or overwritten.
-
-See [native AI, licensing and local settings](docs/DESKTOP-AI-LICENSING.md) for explicit renewal, assistive explanations and session consent.
+- [Development status and verification](.agent/STATUS.md) · [Architectural decisions](.agent/DECISIONS.md)
+- [Pilot installation](docs/PILOT.md) · [Core Windows Service](docs/CORE-SERVICE.md) · [Desktop setup/sign-in](docs/DESKTOP-AUTH.md)
+- [Desktop operation, tray and auto-start](docs/DESKTOP-OPERATION.md) · [Devices](docs/DESKTOP-DEVICES.md) · [Alerts](docs/DESKTOP-ALERTS.md)
+- [Native Risk/Reports](docs/DESKTOP-RISK-REPORTS.md) · [Scoring policy](scoring/README.md) · [Rule catalog](rules/README.md) · [Report semantics](docs/REPORTING.md)
+- [Native AI/licensing](docs/DESKTOP-AI-LICENSING.md) · [AI Gateway/configuration](docs/AI.md) · [Licensing](docs/LICENSING.md) · [Development issuer](cloud/license-api/README.md)
+- [Signed update verification and rollback](docs/UPDATES.md) · [Desktop structure and Windows validation](desktop/README.md)
