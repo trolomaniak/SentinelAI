@@ -80,7 +80,9 @@
 - Added native Settings licensing state, public capabilities/features/timestamps and one explicit manual renewal through existing Core APIs. Reads accept at most 16 KiB, with a 10-second whole-operation deadline; renewal allows 65 seconds for Core's existing 60-second issuer limit. Unknown renewal results require an explicit status refresh before another request; no automatic replay, issuer override or lease/activation credential is exposed.
 - Added selected-alert native assistive AI using the existing first-party strict 32 KiB response contract and a 65-second whole-operation deadline. Core receives only the stored alert ID and remains authoritative for minimized evidence, signed permissions and fixed gateway configuration. Native text is literal and offers no execution, persistence or automatic request/retry. All local security pages remain independent of optional service failures.
 - Settings adds a session-only cloud AI consent toggle, off by default and reset on sign-out/close. Consent never grants entitlement; the current Core public capabilities and exact `cloud_ai` permission gate the explicit explanation action. Changing selection/version, disabling consent, leaving Alerts or losing the session cancels/clears analysis. Stale responses cannot publish content or expire a replacement session. Fixed local Core connection/version/session facts and the existing explicit health check are visible; no destination or secret editor is added.
-- Full `scripts/build.sh` passed with zero .NET warnings/errors; portable Desktop tests passed 2,743 assertions, including 713 new license transport, 157 AI transport and 70 optional workflow assertions. Actual Windows tests cross-build with zero warnings/errors. PowerShell parsing, four XAML sources, 36 local documentation links and whitespace checks pass. Full `scripts/test.sh` passed all backend/AI/licensing/update regressions, 2,743 Desktop assertions, 135 pilot, 150 service, 29 health transport assertions and 63 dashboard tests with zero failures/skips. Actual native Windows CI remains pending; TASK-022 completion/merge is not claimed and TASK-023 has not started.
+- Full `scripts/build.sh` passed with zero .NET warnings/errors; portable Desktop tests passed 2,743 assertions, including 713 new license transport, 157 AI transport and 70 optional workflow assertions. Actual Windows tests cross-build with zero warnings/errors. PowerShell parsing, four XAML sources, 36 local documentation links and whitespace checks pass. Full `scripts/test.sh` passed all backend/AI/licensing/update regressions, 2,743 Desktop assertions, 135 pilot, 150 service, 29 health transport assertions and 63 dashboard tests with zero failures/skips. Independent scoped security/session review found no blockers. TASK-011 remains fully satisfied.
+
+- **Definition of Done satisfied:** exact implementation `416895575caa50e450cbe5b89e1b7e4fb52db26c` passed all eight push/PR checks in [PR CI `37722426645`](https://github.com/trolomaniak/SentinelAI/actions/runs/37722426645) and [push CI `37722423671`](https://github.com/trolomaniak/SentinelAI/actions/runs/37722423671). Actual Windows WPF tests cover all four modes, manual renewal/uncertainty, consent and literal selected-alert AI, stale session/selection cancellation, worker expiry ordering, disabled/unavailable/Safe Mode behavior and local workflow independence. Published Desktop acceptance against the signed installed Core confirms real public Safe Mode status/capabilities, safe unconfigured renewal and explicit refresh, the native health action, consent navigation/reset, disabled AI and available local Alerts/Risk/Reports. Existing real Core/Agent/bootstrap/authentication/restart/reconnect/report saving checks also pass. Native test fixes execute the actual bound command, scroll each inspected control into view and await page creation; production controls remain intact. TASK-023 has not started and remains gated on confirmed TASK-022 merge.
 
 ## Current architecture
 
@@ -133,7 +135,7 @@ See `.agent/DECISIONS.md`, `docs/PILOT.md`, `docs/UPDATES.md`, `docs/REPORTING.m
 
 ## Known issues
 
-- TASK-022 actual Windows acceptance remains pending; the first native WPF run exposed a fixture that raised Click without executing its bound command. The fixture now uses the actual WPF automation invoke provider; production command behavior is unchanged. Current license state is a Core snapshot refreshed on sign-in, Settings/Alerts entry and explicit refresh; Core authoritatively enforces current permissions again on AI requests. Manual renewal has no destination override and uncertain results require refresh. Local AI consent is session-only, with no preference/result persistence.
+- Current license state is a Core snapshot refreshed on sign-in, Settings/Alerts entry and explicit refresh; Core authoritatively enforces current permissions again on AI requests. Manual renewal has no destination override and uncertain results require refresh. Local AI consent is session-only, with no preference/result persistence.
 
 - Native Risk accepts bounded current public projections (2 MiB page, 1 MiB detail, 64 contributions/alerts, 1,024 policy dictionary entries) and renders 50-row server pages; oversized or incompatible responses fail explicitly. Reports retain at most 8 MiB for 30-second bounded Core generation, with existing Core dataset/capacity limits. The native chooser saves explicit operator exports, which remain on disk after session clearing. Bounds and workflow limits are documented in `docs/DESKTOP-RISK-REPORTS.md`. TASK-021 has no remaining Definition-of-Done blocker; actual native acceptance passed.
 
@@ -274,20 +276,20 @@ TASK-021 Definition of Done is fully satisfied on verified implementation `77604
 
 ## TASK-022 Definition of Done
 
-- [ ] Current public license state is visible from native Desktop.
-- [ ] Manual renewal is safe, explicit and never replayed automatically.
-- [ ] A supported selected alert permits explicit assistive AI when consent and Core entitlement allow it.
-- [ ] AI outages and Safe Mode preserve local security workflows.
-- [ ] Native output/logging contains no activation, lease, gateway or provider secret material.
-- [ ] Relevant portable and actual Windows disabled/unavailable/Safe Mode tests pass.
+- [x] Current public license state is visible from native Desktop.
+- [x] Manual renewal is safe, explicit and never replayed automatically.
+- [x] A supported selected alert permits explicit assistive AI when consent and Core entitlement allow it.
+- [x] AI outages and Safe Mode preserve local security workflows.
+- [x] Native output/logging contains no activation, lease, gateway or provider secret material.
+- [x] Relevant portable and actual Windows disabled/unavailable/Safe Mode tests pass.
 - [x] Status records implementation, architecture, decisions, known issues, next task and verified baseline.
 
 ## Next task
 
-TASK-022 is in progress on `codex/task-022-native-ai-license-settings` from confirmed TASK-021 merge `75eb82a8f4acf24990fee0d327636160ec467416` (PR #24). TASK-023 must wait for TASK-022 completion and confirmed merge. The operator authorized exactly one further task, TASK-023; do not continue to TASK-024. Earlier TASK-015 native Agent acceptance and pilot release transfer remain separate outstanding work.
+TASK-022 is complete on `codex/task-022-native-ai-license-settings`; PR #25 awaits final status-head CI and merge. TASK-023 may start only after that merge is independently confirmed. The operator authorized exactly one further task, TASK-023; do not continue to TASK-024. Earlier TASK-015 native Agent acceptance and pilot release transfer remain separate outstanding work.
 
 ## Last verified commit
 
-`77604f05984036eb65f2ea567105c98d082572f1` — TASK-021 implementation passed all eight push/PR checks, including [native PR CI `37290480012`](https://github.com/trolomaniak/SentinelAI/actions/runs/37290480012) and [push CI `37290473100`](https://github.com/trolomaniak/SentinelAI/actions/runs/37290473100). Full local builds/regressions/publishing and independent scoped review also pass. Last confirmed merged main is TASK-021 `75eb82a8f4acf24990fee0d327636160ec467416` (PR #24); its final status head `385eff7642d001c3859a885087ebf0fcd70b3b11` passed all eight final checks. TASK-022 is not yet fully verified.
+`416895575caa50e450cbe5b89e1b7e4fb52db26c` — TASK-022 implementation passed all eight push/PR checks, including [PR CI `37722426645`](https://github.com/trolomaniak/SentinelAI/actions/runs/37722426645) and [push CI `37722423671`](https://github.com/trolomaniak/SentinelAI/actions/runs/37722423671). Full local builds/regressions, actual native Windows WPF/published Desktop/signed-Core acceptance and independent scoped security/session review pass. Last confirmed merged main remains TASK-021 `75eb82a8f4acf24990fee0d327636160ec467416` (PR #24). Final TASK-022 status-head checks and merge remain pending.
 
 Release provenance: merged main `6e36d015bc8db24c67c17f34e222caff78349f40` has the identical verified source tree. Fresh Windows publishing, exact embedded commit/version, both signed manifests, package extraction/layout, full bundle and all release asset checksums passed on 2026-10-02. The release follow-up changes only this status on `codex/release-v1.0.0-pilot.1`; it does not claim native Windows acceptance or a published release.
