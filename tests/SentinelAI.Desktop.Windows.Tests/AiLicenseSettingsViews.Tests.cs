@@ -45,7 +45,7 @@ internal static partial class Program
         {
             window.Show();
             await WaitForAsync(() => auth.State == AuthenticationState.SignedOut, "AI/Settings fixture did not reach sign-in.");
-            Navigate(PageId.Settings);
+            await NavigateAsync(PageId.Settings);
             await FlushAsync();
             Ensure(licenseClient.ReadCalls == 0 && licenseClient.RenewCalls == 0 && aiClient.RequestedIds.Count == 0,
                 "Native AI/Settings queried protected data before authentication.");
@@ -166,7 +166,7 @@ internal static partial class Program
             SetCloudPreference(cloudPreference, true);
             Ensure(ai.CloudRequestsEnabled && aiClient.RequestedIds.Count == 0,
                 "Opting into cloud AI started a request without an Explain action.");
-            Navigate(PageId.Alerts);
+            await NavigateAsync(PageId.Alerts);
             await WaitForAsync(() => alerts.ListState == AlertListState.Ready, "Native AI fixture did not load local Alerts.");
             await OpenAlertAsync(alertsClient.PrimaryId);
             var alertView = Descendants<AlertsView>(window).Single();
@@ -224,19 +224,19 @@ internal static partial class Program
             AiSettingsText(aiView, "AiExplanationError", ai.ErrorText);
             Ensure(auth.IsSignedIn && alerts.DetailState == AlertDetailState.Ready && alerts.CanRefresh,
                 "AI outage disabled local security review.");
-            Navigate(PageId.Risk);
+            await NavigateAsync(PageId.Risk);
             await WaitForAsync(() => risk.ListState == RiskListState.Ready, "AI outage blocked native local Risk.");
             Ensure(ai.SelectedAlertId is null && !ai.HasAnalysis && ai.CloudRequestsEnabled,
                 "Leaving Alerts retained selected analysis or erased the operator's session preference.");
-            Navigate(PageId.Reports);
+            await NavigateAsync(PageId.Reports);
             await reports.GenerateAsync();
             Ensure(reports.HasReport, "AI outage blocked local report generation.");
-            Navigate(PageId.Settings);
+            await NavigateAsync(PageId.Settings);
             await WaitForAsync(() => license.State == LicenseState.Ready, "Settings did not reload after an AI outage.");
             settings = Descendants<SettingsView>(window).Single();
             cloudPreference = AiSettingsControl<CheckBox>(settings, "CloudAiRequestsEnabled");
             SetCloudPreference(cloudPreference, false);
-            Navigate(PageId.Alerts);
+            await NavigateAsync(PageId.Alerts);
             await WaitForAsync(() => alerts.ListState == AlertListState.Ready, "Native alerts did not reload with AI opted out.");
             await OpenAlertAsync(alertsClient.PrimaryId);
             aiView = Descendants<AiExplanationView>(window).Single();
@@ -296,7 +296,11 @@ internal static partial class Program
             bindingSource.Switch.Level = originalLevel;
         }
 
-        void Navigate(PageId id) => shell.CurrentPage = shell.Pages.Single(page => page.Id == id);
+        async Task NavigateAsync(PageId id)
+        {
+            shell.CurrentPage = shell.Pages.Single(page => page.Id == id);
+            await FlushAsync();
+        }
         async Task OpenAlertAsync(Guid id)
         {
             if (alerts.IsShowingDetail) alerts.CloseDetail();
