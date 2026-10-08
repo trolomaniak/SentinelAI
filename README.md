@@ -1,8 +1,22 @@
 # SentinelAI
 
-SentinelAI is a Windows-first, local-first cybersecurity platform. Core provides a local API with SQLite-backed administrator login, endpoint heartbeats, and endpoint inventory. The Agent sends heartbeats and inventory to Core; Core serves a local device dashboard.
+SentinelAI is a Windows-first, local-first cybersecurity platform. Native `SentinelAI.Desktop` is the supported production user interface. Core owns the local API, SQLite state and security evaluation; the Endpoint Agent collects bounded configuration telemetry. Core and Agent run independently when Desktop is closed. Normal operation requires no browser.
 
-The backend uses .NET 10 and contains the Agent, Core web host, shared contracts, reusable deterministic rules, risk scoring, a separate cloud License API and AI Gateway. The dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer.
+## Native Windows desktop
+
+The .NET 10 WPF Desktop provides native Windows x64 administrator setup, sign-in/out, Devices, Alerts/incidents, deterministic Risk, report generation/saving, licensing and explicit assistive AI. Publish with:
+
+```sh
+./scripts/publish-desktop-windows.sh
+```
+
+On Windows, open `artifacts/desktop/win-x64/SentinelAI.Desktop.exe` with its accompanying files. The application is self-contained and needs no separately installed runtime. Install and initialize the trusted local Core through the [pilot guide](docs/PILOT.md) and [desktop setup guide](docs/DESKTOP-AUTH.md), then use the existing [Core service workflow](docs/CORE-SERVICE.md). Open Desktop and sign in. Settings offers optional tray integration, local service status and per-user Desktop auto-start; these do not control service startup. Repeated launches activate the existing UI for the same Windows user/session. Closing Desktop fully exits its UI and leaves protection services running; reopening requires explicit sign-in.
+
+See [browserless operation](docs/DESKTOP-OPERATION.md), [native Devices](docs/DESKTOP-DEVICES.md), [native Alerts](docs/DESKTOP-ALERTS.md), [native Risk and Reports](docs/DESKTOP-RISK-REPORTS.md), [AI/licensing](docs/DESKTOP-AI-LICENSING.md) and [desktop builds and Windows validation](desktop/README.md). Overview remains a native placeholder. Published output remains a development/pilot application directory; this task does not add a release installer.
+
+## Development builds and console diagnostics
+
+The backend uses .NET 10 and contains Agent, Core, shared contracts, deterministic rules, scoring, a separate cloud License API and AI Gateway. The retained development/diagnostic dashboard uses dependency-free browser JavaScript and builds with Node.js 20 or newer. Node.js and a browser are unnecessary on the target Windows machine running the published native Desktop.
 
 From the repository root, run:
 
@@ -11,9 +25,9 @@ From the repository root, run:
 ./scripts/test.sh
 ```
 
-The build script restores and builds the .NET solution, then builds the dashboard. The test script runs Agent/Core and licensing integration checks, individual rule/scoring/lease verification tests, and dashboard JavaScript tests.
+The build script restores/builds the .NET solution and diagnostic dashboard. The test script runs Agent/Core, rules/scoring, licensing, AI, Desktop, installation/update and dashboard compatibility regressions.
 
-To start Core for the first time, set a bootstrap administrator name and a password of at least 12 characters. The password is used only to create the initial administrator and is stored as a password hash in SQLite. Remove the password from the environment after the first successful start; later starts use the existing database.
+For development console Core, set an initial administrator name and a password of at least 12 characters. Core stores only its password hash. Remove the bootstrap password from the environment after first successful initialization; existing administrators are never replaced.
 
 ```sh
 export SENTINELAI_BOOTSTRAP_USERNAME=admin
@@ -22,13 +36,9 @@ export SENTINELAI_BOOTSTRAP_PASSWORD
 dotnet run --project core/SentinelAI.Core.csproj --no-launch-profile
 ```
 
-Core listens at `http://127.0.0.1:5000` by default. Set `ASPNETCORE_URLS` to change the address or enable HTTPS with a configured Kestrel certificate. Set `SentinelAI__DataDirectory` to change the SQLite directory; otherwise Core uses the operating system's local application data directory under `SentinelAI/Core`. Keep that directory private and backed up. An existing administrator is never replaced by bootstrap environment variables.
+Core defaults to `http://127.0.0.1:5000`. Development hosts may set `ASPNETCORE_URLS` or a configured HTTPS certificate and `SentinelAI__DataDirectory`; Desktop retains its fixed trusted local destination. Preserve the private SQLite directory, which otherwise defaults to local application data under `SentinelAI/Core`.
 
-`GET /api/health` is public. `POST /api/auth/login` accepts JSON with `username` and `password` and returns a short-lived bearer access token when credentials are valid. Send it as `Authorization: Bearer <accessToken>` to `GET /api/admin/me`. Invalid credentials receive the same `401` response. Login attempts are rate-limited. Tokens expire after 15 minutes and are invalidated when Core restarts.
-
-## Native Windows desktop
-
-The separate .NET 10 WPF `SentinelAI.Desktop` provides native Windows x64 administrator setup, sign-in, sign-out and session handling, with native Devices, Alerts/incidents, Risk and Reports workspaces available after sign-in. Run `./scripts/publish-desktop-windows.sh` to produce the self-contained application directory at `artifacts/desktop/win-x64`, then open `SentinelAI.Desktop.exe` on Windows. See [native Devices](docs/DESKTOP-DEVICES.md), [native Alerts](docs/DESKTOP-ALERTS.md), [native Risk and Reports](docs/DESKTOP-RISK-REPORTS.md), [desktop authentication](docs/DESKTOP-AUTH.md) and [desktop structure and Windows validation](desktop/README.md). Existing dashboard workflows remain available through Core; Settings provides native licensing and session AI consent; Overview remains a native placeholder.
+`GET /api/health` is public. `POST /api/auth/login` accepts JSON `username`/`password` and returns a short-lived bearer for `GET /api/admin/me`. Invalid credentials receive the same `401`; login is rate-limited. Tokens expire after 15 minutes and are invalidated by a Core restart. Existing HTTP contracts and dashboard assets are retained for development/diagnostic compatibility.
 
 ## Core Windows Service
 
@@ -48,9 +58,9 @@ With no public trust keys configured, the verification endpoint returns `503`; e
 
 Select **Explain with AI** on an alert to request a structured explanation, investigation suggestions and remediation suggestions. Core sends only minimized configuration evidence through the separate AI Gateway; the provider key stays on that gateway. Analysis is labeled assistive, cannot override the deterministic alert, and performs no endpoint actions. Cloud failures leave local alerts and review controls available. The optional feature requires a signed `cloud_ai` entitlement. See [AI configuration and privacy](docs/AI.md).
 
-## Device dashboard
+## Development and diagnostic dashboard
 
-Open the Core origin in a browser, for example `http://127.0.0.1:5000/`, and sign in with the Core administrator account. Core serves the dashboard on the same origin as its API, so no cross-origin permission is required. For access from another computer, configure Core with HTTPS; the dashboard sign-in form will not submit credentials over remote HTTP. The bearer token stays in browser memory and is cleared on sign-out, page refresh, or the next request after session expiry.
+The browser dashboard is a development/diagnostic compatibility surface. Production operation uses native Desktop. For an explicit diagnostic session, open the Core origin in a browser, for example `http://127.0.0.1:5000/`, and sign in with the Core administrator account. Core serves the dashboard on the same origin as its API, so no cross-origin permission is required. For access from another computer, configure Core with HTTPS; the dashboard sign-in form will not submit credentials over remote HTTP. The bearer token stays in browser memory and is cleared on sign-out, page refresh, or the next request after session expiry.
 
 The device list shows enrolled endpoints, their last heartbeat, Agent version, OS, and the last reported configured firewall settings. Select an endpoint to see its inventory and firewall profile details. Health is computed from Core's last-seen time: healthy through two minutes, warning through five minutes, offline after five minutes, and unknown before the first heartbeat. Missing inventory is displayed as unknown. Anonymous legacy loopback heartbeats do not appear as enrolled devices. The authenticated `GET /api/admin/devices` and `GET /api/admin/devices/{endpointId}` endpoints supply the list and details.
 
@@ -64,7 +74,7 @@ Core derives current findings locally from persisted inventory on request. Repea
 
 ## Alerts and status tracking
 
-Open **Alerts** in the dashboard to view stored detections. Filter by severity or status, page through the list, and select an alert for its endpoint, reason, typed evidence, observation times, recommended action, and status history. Administrators can set **Open**, **Investigating**, **Resolved**, or **Accepted**. A status edit records the administrator and Core's time; it does not change endpoint configuration. Concurrent edits are rejected with a conflict so the administrator can review the latest state.
+Open **Alerts** in Desktop to view stored detections. The diagnostic dashboard retains the equivalent compatibility flow. Filter by severity or status, page through the list, and select an alert for its endpoint, reason, typed evidence, observation times, recommended action, and status history. Administrators can set **Open**, **Investigating**, **Resolved**, or **Accepted**. A status edit records the administrator and Core's time; it does not change endpoint configuration. Concurrent edits are rejected with a conflict so the administrator can review the latest state.
 
 Core stores one tracked alert per endpoint and rule, atomically with each accepted newer inventory. Repeated positive observations update the evidence and last-observed time without creating duplicate rows. Investigating and Accepted remain administrator decisions; a strictly newer positive observation reopens a Resolved alert. Normal or unknown observations do not automatically resolve stored alerts. Historical findings can therefore remain visible after they disappear from the current-state API. The first-observed time and status-change history are retained; evidence reflects the latest positive observation. Existing inventories are backfilled on startup without resetting statuses or duplicating history.
 
@@ -78,11 +88,11 @@ Snapshot-based detections may be stale while an endpoint is offline. Read the ob
 
 ## Risk scoring
 
-Open **Risk** in Desktop or the dashboard for the organization summary and ranked enrolled endpoints, then select an endpoint for its score and contributing factors. Desktop preserves Core's ranked server pages and exposes every factor with literal text and full decimal precision; dashboard device and alert details also link to endpoint risk. Scores are local prioritization indicators. A zero rounded score can reflect small positive contributions, an explicit confidence discount, resolved findings, or missing observations; it does not prove that an endpoint or organization is secure. Missing inventory and unknown observations are explicitly shown.
+Open **Risk** in Desktop for the organization summary and ranked enrolled endpoints, then select an endpoint for its score and contributing factors. Desktop preserves Core's ranked server pages and exposes every factor with literal text and full decimal precision. The diagnostic dashboard retains its existing endpoint-risk links. Scores are local prioritization indicators. A zero rounded score can reflect small positive contributions, an explicit confidence discount, resolved findings, or missing observations; it does not prove that an endpoint or organization is secure. Missing inventory and unknown observations are explicitly shown.
 
 The deterministic policy combines each tracked alert's severity, configured detection-confidence weight, asset criticality, declared exposure, observation age, and remediation status, plus a bounded bonus for distinct rule groups confirmed in the same fresh latest inventory. Core computes scores from one consistent SQLite snapshot on each request, so newer inventory and administrator status changes are reflected on the next read. No AI determines the score.
 
-Investigating and Accepted do not reduce the status multiplier because acknowledgment does not remediate a finding. Resolved sets that multiplier to zero until a newer positive observation reopens the alert. Older observations retain a reduced raw contribution; they do not silently become safe. Individual factors, defaults, raw contributions, correlation, and any score cap are exposed through the API and dashboard. Organization risk is the highest endpoint score, with counts showing the size and observation coverage of the enrolled estate. See [the scoring policy](scoring/README.md) for the formula, centralized weights, boundary rules, and configuration.
+Investigating and Accepted do not reduce the status multiplier because acknowledgment does not remediate a finding. Resolved sets that multiplier to zero until a newer positive observation reopens the alert. Older observations retain a reduced raw contribution; they do not silently become safe. Individual factors, defaults, raw contributions, correlation, and any score cap are exposed through the API and native Desktop; the diagnostic dashboard retains its equivalent display. Organization risk is the highest endpoint score, with counts showing the size and observation coverage of the enrolled estate. See [the scoring policy](scoring/README.md) for the formula, centralized weights, boundary rules, and configuration.
 
 Administrator APIs require the existing bearer token and HTTPS outside loopback, and return uncached responses:
 
@@ -95,7 +105,7 @@ Configuration lives under `SentinelAI:RiskScoring`. For example, start Core with
 
 ## Local security reports
 
-Open **Reports** in Desktop or the dashboard, choose an inclusive UTC date range, and generate a standalone HTML report. In Desktop, **Generate report** retains Core's exact attachment in memory; **Save HTML** opens an explicit native destination picker, without embedding or automatically opening the document. The default range is the previous complete calendar month. The report includes a management summary, current organization risk and endpoint health, retained incident activity by severity, high/critical incidents, resolutions, tracked posture findings, prioritized actions and technical evidence. It works locally without AI, issuer connectivity or a premium license. Open the saved HTML offline; use the browser's print dialog to print it or save it as PDF.
+Open **Reports** in Desktop, choose an inclusive UTC date range, and generate a standalone HTML report. In Desktop, **Generate report** retains Core's exact attachment in memory; **Save HTML** opens an explicit native destination picker, without embedding or automatically opening the document. The default range is the previous complete calendar month. The report includes a management summary, current organization risk and endpoint health, retained incident activity by severity, high/critical incidents, resolutions, tracked posture findings, prioritized actions and technical evidence. It works locally without AI, issuer connectivity or a premium license. Viewing the exported HTML with an offline document viewer is optional. Browser printing/PDF remains optional document handling outside normal SentinelAI operation.
 
 `GET /api/admin/reports/security?from=2026-09-01&to=2026-09-30` returns an authenticated, uncached HTML attachment. Dates must be exactly `yyyy-MM-dd`, ordered and at most 366 inclusive days. The current risk/health snapshot is explicitly separate from period activity: Core does not store historical scores or complete inventory/heartbeat history, so historical trend is unavailable. See [report semantics and limits](docs/REPORTING.md).
 
@@ -107,7 +117,7 @@ The transactional library verifies/extracts before stopping a service, retains t
 
 ## Windows Agent and enrollment
 
-For the first local Windows 11 x64 pilot, follow the [pilot installation guide](docs/PILOT.md). It provides signed development packaging, a private local Core configuration and initial administrator setup, Agent installation under LocalService, one-use enrollment, exact endpoint/heartbeat/inventory/dashboard verification and service uninstall with state preservation. Installation requires an explicitly elevated PowerShell terminal. Core's console pilot can be registered as a service using the [Core service guide](docs/CORE-SERVICE.md). See the guides for separate Windows acceptance and known limitations.
+For the first local Windows 11 x64 pilot, follow the [pilot installation guide](docs/PILOT.md). It provides signed development packaging, a private local Core configuration and initial administrator setup, Agent installation under LocalService, one-use enrollment, exact endpoint/heartbeat/inventory verification with retained diagnostic dashboard checks and service uninstall with state preservation. Installation requires an explicitly elevated PowerShell terminal. Core's console pilot can be registered as a service using the [Core service guide](docs/CORE-SERVICE.md). See the guides for separate Windows acceptance and known limitations.
 
 Run `./scripts/publish-agent-windows.sh` to produce `artifacts/agent/win-x64/SentinelAI.Agent.exe`. This is a self-contained, single-file Windows x64 build: the target does not need a separate .NET installation. The bundled native runtime is extracted when the EXE starts. CI verifies the EXE on Windows and uploads it as the `SentinelAI.Agent-win-x64` build artifact.
 
@@ -121,7 +131,7 @@ The Agent protects its enrollment credential with Windows DPAPI under its servic
 
 After an enrolled heartbeat succeeds, the Agent reports hostname, OS name and version, architecture, CPU model and logical processor count, installed RAM, local fixed-disk capacities, and available Windows firewall profile settings. Unavailable fields are reported as unknown. Collection uses bounded system metadata calls and does not scan files or launch external commands. The Agent refreshes inventory every six hours and retries a failed inventory upload after five minutes. Core accepts inventory only from an enrolled Agent over the same trusted transport as heartbeats, validates and limits the report, and stores the most recently collected report in SQLite. Inventory upload failures do not interrupt heartbeats.
 
-Windows inventory includes the observed release label (`DisplayVersion`, with a legacy Windows 10 `ReleaseId` fallback), installation type and full native version/build with a valid registry `UBR` revision. Client branding distinguishes Windows 10/11 even when the registry's product name is stale; server products remain distinct. The device list displays, for example, `Windows 11 26H2 10.0.26200.0`, while detail separates `OS: Windows 11` and `OS Version: 26H2 10.0.26200.0`. The redundant `Client` installation type is omitted from the list; server installation types remain visible. Missing metadata is not invented, and older Agent reports remain accepted. After updating Core and Agent, restart the Agent to send fresh inventory and refresh the dashboard.
+Windows inventory includes the observed release label (`DisplayVersion`, with a legacy Windows 10 `ReleaseId` fallback), installation type and full native version/build with a valid registry `UBR` revision. Client branding distinguishes Windows 10/11 even when the registry's product name is stale; server products remain distinct. The device list displays, for example, `Windows 11 26H2 10.0.26200.0`, while detail separates `OS: Windows 11` and `OS Version: 26H2 10.0.26200.0`. The redundant `Client` installation type is omitted from the list; server installation types remain visible. Missing metadata is not invented, and older Agent reports remain accepted. After updating Core and Agent, restart the Agent to send fresh inventory and refresh native Devices. The diagnostic dashboard also retains its refresh action.
 
 Use `installer/pilot/Install-SentinelAIPilot.ps1` for the pilot service rather than manually registering an unconfigured EXE. It quotes the executable/configuration paths, validates explicit package trust and paths, sets restricted ACLs and preserves the LocalService account across reinstall so it can decrypt its DPAPI state. Existing manual/development installations are not migrated or overwritten.
 

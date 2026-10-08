@@ -1,6 +1,6 @@
 # Native Desktop Risk and Reports
 
-Sign in through [Desktop authentication](DESKTOP-AUTH.md), then open **Risk** or **Reports**. Both use Core's existing administrator APIs through the same private session and verified local connection. The browser dashboard remains available.
+Sign in through [Desktop authentication](DESKTOP-AUTH.md), then open **Risk** or **Reports**. Both use Core's existing administrator APIs through the same private session and verified local connection. Desktop is the supported production interface; the dashboard remains only for development/diagnostic compatibility.
 
 ## Review Risk
 
@@ -18,7 +18,7 @@ Scores prioritize reported configuration findings. A zero rounded score may reta
 
 Select **Save HTML** to open the native destination picker. The suggested name derives from the selected dates, not a server-supplied path. Confirm a `.html` destination and any replacement. Saving preserves Core's exact bytes, stages a temporary file in the selected directory, then moves it into the destination. A new file that appears during a non-overwrite save is preserved; final link/directory destinations are rejected. Cancelling the picker retains the generated report for another explicit save.
 
-Editing either date, leaving Reports, signing out, losing the session or closing Desktop cancels pending work and disposes/erases retained report bytes. Stale downloads cannot become a new session's report; temporary save buffers are erased and unfinished temporary files are removed where possible. Files already explicitly saved remain the operator's exported documents. Open a saved HTML file yourself for offline viewing or browser printing/PDF.
+Editing either date, leaving Reports, signing out, losing the session or closing Desktop cancels pending work and disposes/erases retained report bytes. Stale downloads cannot become a new session's report; temporary save buffers are erased and unfinished temporary files are removed where possible. Files already explicitly saved remain the operator's exported documents. Offline viewing or browser printing/PDF of a saved export is optional document handling outside the normal browserless SentinelAI workflow; Desktop never opens a browser.
 
 Core's privacy projection, capacity checks and Safe Mode behavior are unchanged. Generation calls neither AI nor the License API and needs no premium entitlement. Selected-period incident activity is distinct from current risk/health/coverage. No historical score trend, historical fleet snapshot or intermediate positive-observation history is invented. The report excludes raw inventory, credentials, license material and status-history administrator identities; its evidence is allowlisted and dynamic HTML is encoded. See [report semantics and privacy](REPORTING.md).
 

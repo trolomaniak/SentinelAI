@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Threading;
 using System.Windows.Threading;
 using SentinelAI.Desktop.Foundation;
+using SentinelAI.Desktop.Services;
 
 namespace SentinelAI.Desktop;
 
@@ -17,6 +18,9 @@ public partial class MainWindow : Window
     public ReportsViewModel? Reports { get; }
     public LicenseViewModel? License { get; }
     public AiExplanationViewModel? AiExplanation { get; }
+    public DesktopIntegrationViewModel? DesktopIntegration { get; }
+    public WindowsServiceStatusModel? ServiceStatus { get; }
+    public WindowsDesktopTray? DesktopTray { get; set; }
     private bool _closed;
     private bool _workspaceAuthorized;
     private long _workspaceSessionGeneration;
@@ -37,6 +41,12 @@ public partial class MainWindow : Window
     public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication, DevicesViewModel? devices,
         AlertsViewModel? alerts, RiskViewModel? risk, ReportsViewModel? reports,
         LicenseViewModel? license, AiExplanationViewModel? aiExplanation)
+        : this(viewModel, authentication, devices, alerts, risk, reports, license, aiExplanation, null, null) { }
+
+    public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication, DevicesViewModel? devices,
+        AlertsViewModel? alerts, RiskViewModel? risk, ReportsViewModel? reports,
+        LicenseViewModel? license, AiExplanationViewModel? aiExplanation,
+        DesktopIntegrationViewModel? desktopIntegration, WindowsServiceStatusModel? serviceStatus)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
@@ -48,6 +58,8 @@ public partial class MainWindow : Window
         Reports = reports;
         License = license;
         AiExplanation = aiExplanation;
+        DesktopIntegration = desktopIntegration;
+        ServiceStatus = serviceStatus;
         _viewModel.PropertyChanged += OnShellPageChanged;
         if (devices is not null) devices.SessionExpired += OnWorkspaceSessionExpired;
         if (alerts is not null) alerts.SessionExpired += OnWorkspaceSessionExpired;
@@ -193,6 +205,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        DesktopTray?.Dispose();
+        ServiceStatus?.Dispose();
         _closed = true;
         Loaded -= OnLoaded;
         _viewModel.PropertyChanged -= OnShellPageChanged;
