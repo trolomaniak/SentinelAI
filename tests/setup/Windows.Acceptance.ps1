@@ -279,6 +279,33 @@ function Assert-SetupChildArguments {
     }
 }
 function Get-SetupService([string]$Name) { return Get-CimInstance -ClassName Win32_Service -Filter ("Name='" + $Name + "'") }
+function Get-SetupFailureSummary {
+    # Only exact known public UI literals and fixed presence flags may enter CI
+    # diagnostics. Never include native error text, exceptions, stdin or secrets.
+    $stage = 'Unknown'
+    try {
+        $progress = Find-SetupControl 'SetupProgressText'
+        if ($null -ne $progress) {
+            foreach ($known in @('Validating installation files...', 'Preparing Core...',
+                'Creating the local administrator...', 'Starting Core...', 'Enrolling Agent...',
+                'Installing Windows services and Desktop...', 'Starting Windows services...',
+                'Installing and enrolling Agent...', 'Installing Desktop and Updater...',
+                'Creating Start Menu shortcuts...', 'Installation finished.', 'Stopping setup...')) {
+                if ([string]$progress.Current.Name -ceq $known) { $stage = $known; break }
+            }
+        }
+    } catch { }
+    $serviceProbeSucceeded = $true; $corePresent = $false; $agentPresent = $false
+    try {
+        $corePresent = $null -ne (Get-SetupService 'SentinelAICore')
+        $agentPresent = $null -ne (Get-SetupService 'SentinelAIAgent')
+    } catch { $serviceProbeSucceeded = $false }
+    return ('The actual Setup executable reported a safe installation failure. Stage="{0}"; ServiceProbeSucceeded={1}; CoreServicePresent={2}; AgentServicePresent={3}; CoreCodePresent={4}; CoreDataPresent={5}; AgentCodePresent={6}; AgentDataPresent={7}; DesktopCodePresent={8}; UpdaterCodePresent={9}.' -f
+        $stage, $serviceProbeSucceeded, $corePresent, $agentPresent,
+        (Test-Path -LiteralPath $script:coreCode -PathType Container), (Test-Path -LiteralPath $script:coreData -PathType Container),
+        (Test-Path -LiteralPath $script:agentCode -PathType Container), (Test-Path -LiteralPath $script:agentData -PathType Container),
+        (Test-Path -LiteralPath $script:desktopCode -PathType Container), (Test-Path -LiteralPath $script:updaterCode -PathType Container))
+}
 function Get-HeldInstalledProcess([string]$Name, [string]$Executable, [string]$Account) {
     $service = Get-SetupService $Name
     $expectedImage = '"' + $Executable + '" --config "' + (Join-Path $(if ($Name -eq 'SentinelAICore') { $script:coreData } else { $script:agentData }) 'pilot-config.json') + '"'
@@ -437,7 +464,7 @@ try {
         Assert-SetupChildArguments
         if (Test-SetupControl 'SetupErrorText' $false) {
             $errorText = Find-SetupControl 'SetupErrorText'
-            if (-not [string]::IsNullOrWhiteSpace($errorText.Current.Name)) { throw 'The actual Setup executable reported a safe installation failure.' }
+            if (-not [string]::IsNullOrWhiteSpace($errorText.Current.Name)) { throw (Get-SetupFailureSummary) }
         }
         return Test-SetupControl 'SetupFinishedText' $false
     } 'The actual Setup executable did not complete installation.' $TimeoutSeconds

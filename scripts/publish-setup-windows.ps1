@@ -16,6 +16,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Pa
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $work = $null
 $complete = $false
+$script:SetupPublishingPhase = 'inputs'
 $script:SetupNativeCompilerDiagnostic = $null
 
 function Invoke-SetupDotnet {
@@ -279,12 +280,14 @@ try {
     $payloadSource = Join-Path $work 'payload'
     New-Item -ItemType Directory -Path $payloadSource | Out-Null
     $bundle = Join-Path $payloadSource 'bundle'
+    $script:SetupPublishingPhase = 'signed-bundle'
     & (Join-Path $PSScriptRoot 'publish-pilot-windows.ps1') -Version $Version -DevelopmentPrivateKey $DevelopmentPrivateKey -KeyId $KeyId -Channel $Channel -OutputDirectory $bundle -DirectoryHosts
 
     # Pin an immutable copy of the explicitly supplied public root, outside the
     # bundle. Existing public verification checks that it matches both signatures.
     $trust = Join-Path $work 'trust.pem'
     [IO.File]::WriteAllBytes($trust, $trustBytes)
+    $script:SetupPublishingPhase = 'signature-verification'
     foreach ($component in @('core', 'agent')) {
         Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'updater/SentinelAI.Updater.csproj'), '--configuration', 'Release', '--', 'verify',
             '--manifest', (Join-Path $bundle ($component + '.manifest.json')), '--package', (Join-Path $bundle ($component + '.zip')),
@@ -292,6 +295,7 @@ try {
             '--artifact-id', ('sentinelai-' + $component + '-win-x64'), '--installed-version', '0.0.0')
     }
 
+    $script:SetupPublishingPhase = 'desktop-publishing'
     $desktop = Join-Path $payloadSource 'desktop'
     Invoke-SetupDotnet -Arguments @('publish', (Join-Path $repo 'desktop/SentinelAI.Desktop/SentinelAI.Desktop.csproj'), '--configuration', 'Release',
         '--runtime', 'win-x64', '--self-contained', 'true', '-p:PublishSingleFile=false', '-p:PublishTrimmed=false',
@@ -299,6 +303,7 @@ try {
     foreach ($required in @('SentinelAI.Desktop.exe', 'SentinelAI.Desktop.dll', 'SentinelAI.Desktop.deps.json', 'SentinelAI.Desktop.runtimeconfig.json', 'PresentationFramework.dll', 'coreclr.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $desktop $required) -PathType Leaf)) { throw 'A Desktop runtime file is missing.' }
     }
+    $script:SetupPublishingPhase = 'payload-packaging'
     $setupSource = Join-Path $payloadSource 'setup'
     New-Item -ItemType Directory -Path $setupSource | Out-Null
     Copy-Item -LiteralPath $worker -Destination (Join-Path $setupSource 'SetupWorker.ps1')
@@ -316,6 +321,7 @@ try {
     # Do not use .NET's single-file extraction cache for an elevated bootstrap.
     # The native wrapper authenticates and privately extracts every runtime file
     # before loading CLR/WPF; no shared or user-writable runtime cache is trusted.
+    $script:SetupPublishingPhase = 'host-publishing'
     $host = Join-Path $work 'host'
     Invoke-SetupDotnet -Arguments @('publish', (Join-Path $repo 'installer/SentinelAI.Setup/SentinelAI.Setup.csproj'), '--configuration', 'Release',
         '--runtime', 'win-x64', '--self-contained', 'true', '-p:PublishSingleFile=false', '-p:PublishTrimmed=false',
@@ -330,13 +336,18 @@ try {
     $nativeHeader = Join-Path $work 'NativePayload.h'
     $nativeResource = Join-Path $work 'NativePayload.rc'
     $compiledResource = Join-Path $work 'NativePayload.res'
+    $script:SetupPublishingPhase = 'native-resources'
     New-SetupNativeResources -Source $host -HeaderPath $nativeHeader -ResourcePath $nativeResource -ManifestPath $nativeManifest
+    $script:SetupPublishingPhase = 'native-environment'
     $nativeEnvironment = Get-SetupNativeEnvironment
+    $script:SetupPublishingPhase = 'resource-compilation'
     Invoke-SetupNativeTool -Tool 'rc' -Arguments @('/nologo', '/fo', $compiledResource, $nativeResource) -NativeEnvironment $nativeEnvironment -WorkingDirectory $work
+    $script:SetupPublishingPhase = 'native-compilation'
     Invoke-SetupNativeTool -Tool 'cl' -Arguments @('/nologo', '/std:c++17', '/utf-8', '/W4', '/WX', '/O2', '/MT', '/DUNICODE', '/D_UNICODE', '/EHsc', '/guard:cf',
         ('/I' + $work), ('/Fo' + (Join-Path $work 'Bootstrap.obj')), ('/Fe' + (Join-Path $OutputDirectory 'SentinelAI-Setup.exe')), $nativeSource, $compiledResource,
         '/link', '/SUBSYSTEM:WINDOWS', '/MACHINE:X64', '/DYNAMICBASE', '/NXCOMPAT', '/HIGHENTROPYVA', '/MANIFEST:NO', '/INCREMENTAL:NO',
         'bcrypt.lib', 'advapi32.lib', 'shell32.lib', 'ole32.lib', 'user32.lib') -NativeEnvironment $nativeEnvironment -WorkingDirectory $work
+    $script:SetupPublishingPhase = 'final-artifact'
     $outputItems = @(Get-ChildItem -LiteralPath $OutputDirectory -Force)
     if ($outputItems.Count -ne 1 -or $outputItems[0].PSIsContainer -or $outputItems[0].Name -cne 'SentinelAI-Setup.exe' -or $outputItems[0].Length -le 0) {
         throw 'The setup publish must produce exactly SentinelAI-Setup.exe.'
@@ -344,7 +355,8 @@ try {
     $complete = $true
     Write-Output ('Development single-EXE setup created: ' + (Join-Path $OutputDirectory 'SentinelAI-Setup.exe'))
 } catch {
-    $failure = 'Setup packaging failed. Check the version, separate development keys outside source, SDK/package access and fresh output path. Partial artifacts are not a release.'
+    $safeFailure = ' Phase=' + $script:SetupPublishingPhase + '; type=' + $_.Exception.GetType().Name + '; source-line=' + $_.InvocationInfo.ScriptLineNumber + '.'
+    $failure = 'Setup packaging failed. Check the version, separate development keys outside source, SDK/package access and fresh output path. Partial artifacts are not a release.' + $safeFailure
     if ($script:SetupNativeCompilerDiagnostic) { $failure += ' ' + $script:SetupNativeCompilerDiagnostic }
     throw $failure
 } finally {
