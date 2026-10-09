@@ -322,14 +322,14 @@ try {
     # The native wrapper authenticates and privately extracts every runtime file
     # before loading CLR/WPF; no shared or user-writable runtime cache is trusted.
     $script:SetupPublishingPhase = 'host-publishing'
-    $host = Join-Path $work 'host'
+    $setupHostDirectory = Join-Path $work 'host'
     Invoke-SetupDotnet -Arguments @('publish', (Join-Path $repo 'installer/SentinelAI.Setup/SentinelAI.Setup.csproj'), '--configuration', 'Release',
         '--runtime', 'win-x64', '--self-contained', 'true', '-p:PublishSingleFile=false', '-p:PublishTrimmed=false',
         '-p:DebugType=none', '-p:DebugSymbols=false',
         ('-p:Version=' + $Version), ('-p:AssemblyVersion=' + $Version + '.0'), ('-p:SetupPayloadPath=' + $payload),
-        ('-p:SetupTrustPath=' + $trust), ('-p:SetupMetadataPath=' + $metadata), '--output', $host)
+        ('-p:SetupTrustPath=' + $trust), ('-p:SetupMetadataPath=' + $metadata), '--output', $setupHostDirectory)
     foreach ($required in @('SentinelAI.Setup.Host.exe', 'SentinelAI.Setup.Host.dll', 'SentinelAI.Setup.Host.deps.json', 'SentinelAI.Setup.Host.runtimeconfig.json', 'PresentationFramework.dll', 'coreclr.dll')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $host $required) -PathType Leaf)) { throw 'A private Setup runtime file is missing.' }
+        if (-not (Test-Path -LiteralPath (Join-Path $setupHostDirectory $required) -PathType Leaf)) { throw 'A private Setup runtime file is missing.' }
     }
     $nativeSource = Join-Path $repo 'installer/setup-native/Bootstrap.cpp'
     $nativeManifest = Join-Path $repo 'installer/setup-native/setup-native.manifest'
@@ -337,7 +337,7 @@ try {
     $nativeResource = Join-Path $work 'NativePayload.rc'
     $compiledResource = Join-Path $work 'NativePayload.res'
     $script:SetupPublishingPhase = 'native-resources'
-    New-SetupNativeResources -Source $host -HeaderPath $nativeHeader -ResourcePath $nativeResource -ManifestPath $nativeManifest
+    New-SetupNativeResources -Source $setupHostDirectory -HeaderPath $nativeHeader -ResourcePath $nativeResource -ManifestPath $nativeManifest
     $script:SetupPublishingPhase = 'native-environment'
     $nativeEnvironment = Get-SetupNativeEnvironment
     $script:SetupPublishingPhase = 'resource-compilation'
