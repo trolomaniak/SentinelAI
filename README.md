@@ -6,7 +6,7 @@ The operator interface is **SentinelAI.Desktop**, a native .NET 10 WPF applicati
 
 ## Current project state
 
-The native Desktop workflows are implemented through **TASK-023**. **TASK-024** adds a single `SentinelAI-Setup.exe` for a fresh local deployment; its native Windows acceptance is being verified on the scoped task branch. See [development status](.agent/STATUS.md) for exact results.
+The current implementation includes native Desktop workflows and **TASK-024's single `SentinelAI-Setup.exe`** for a fresh local deployment. Native Windows acceptance passed: services and protected directories, Agent enrollment/DPAPI/restart, Desktop sign-in and repeated-install refusal. See [development status](.agent/STATUS.md) for exact results.
 
 Distribution is at the **development/pilot stage**: Setup, a self-contained Desktop directory and development-signed Core/Agent packages can be built from source. There is no published release download; the earlier pilot release remains a draft with no uploaded assets. Setup is first-install only. See [validation and limitations](#validation-and-limitations).
 
@@ -71,13 +71,13 @@ Console Core and the same-origin browser dashboard remain development/diagnostic
 
 ## Validation and limitations
 
-The last completed implementation, TASK-023, passed the full build/regression scripts with **zero .NET warnings/errors**, **2,814 Desktop assertions**, **63 dashboard tests** and all eight push/PR CI checks. Windows CI exercised actual WPF controls, published Desktop and signed installed Core, including restart/reconnect, report saving and independent service lifetime. These are recorded implementation results; see [STATUS](.agent/STATUS.md) for exact commits, CI links and acceptance details, or [GitHub Actions](https://github.com/trolomaniak/SentinelAI/actions/workflows/ci.yml) for later runs.
+TASK-024 passed the full build/regression scripts with **zero .NET warnings/errors**, **322 Setup assertions**, **2,814 Desktop assertions** and **63 dashboard tests**. Windows CI built and executed the actual Setup EXE on a fresh runner, verified services/ACLs/Agent state and telemetry, authenticated the installed native Desktop and refused a repeated installation. Existing native WPF, service and Desktop regressions remain in CI. See [STATUS](.agent/STATUS.md) for exact commits and results, or [GitHub Actions](https://github.com/trolomaniak/SentinelAI/actions/workflows/ci.yml) for later runs.
 
 Current limits:
 
 - Detection covers the documented configuration rules. Malware scanning, live antivirus health, patch compliance and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
 - Inventory can be stale. Core does not retain complete inventory/heartbeat history or historical risk scores; reports distinguish current risk from retained incident activity.
-- The full fresh Windows Agent enrollment/DPAPI/heartbeat/inventory/uninstall-reinstall acceptance remains unexecuted. Existing Windows Agent tests and service smoke checks have passed; they do not establish that full deployment scenario.
+- Setup's fresh Agent enrollment/DPAPI/heartbeat/inventory/restart acceptance passed. The original TASK-015 console pilot's full uninstall/reinstall scenario remains unexecuted; Setup does not add an uninstall workflow.
 - Interactive UAC approval and physical multi-monitor DPI checks remain manual. Tray delivery and auto-start also depend on Windows shell/startup policy.
 - Pilot packages use development manifest signatures. Authenticode signing, production trust provisioning, repair/uninstall workflows, automatic upgrades and state/account migrations remain outstanding. Setup refuses existing installations and retains state on failure.
 - Billing and enforcement of the signed endpoint limit are not implemented.
