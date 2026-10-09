@@ -99,7 +99,17 @@
 - Updated the root README against merged main `26241660bb83b5ca8295dcaca153789c14794f6e`: current native workflows through TASK-023, component responsibilities, pilot installation, build/test prerequisites and implemented AI/licensing/update boundaries. Removed stale task-stage wording and moved detailed operation/API guidance to existing linked documentation. Development/pilot maturity, the unpublished asset-free draft release and outstanding full Windows Agent deployment acceptance are explicit.
 - Documentation only; architecture, security boundaries, public contracts, dependencies and runtime behavior are unchanged. All 32 local README links/anchors and four documented executable command paths pass checks; independent source-based review and final whitespace/scope checks pass. Full runtime builds/tests were not repeated locally for this documentation change; README labels the previously verified TASK-023 results as historical evidence. No architectural decision or future task implementation was added.
 
+## TASK-024 implementation and validation
+
+- Implemented a single native `SentinelAI-Setup.exe` for fresh co-located Windows 11 x64 installation of Desktop, signed Core/Agent packages, public-only Updater, protected configuration, both services and the common Start Menu shortcut. Native elevation, administrator creation and bounded installation progress replace manual ZIP extraction. Existing installations/state are refused without destructive recovery or future-task features.
+- The native bootstrap authenticates every embedded ordinary self-contained host/runtime file before CLR loads, uses atomic Admin/System staging, removes inherited runtime code-loading overrides and supplies private temporary storage. Setup-specific Core/Agent packages also use ordinary protected runtime directories; manual pilot publishing retains its existing single-file default. Public trust is embedded independently of the bundle; existing signed package verification, ownership, NTFS ACLs and limited service identities remain authoritative.
+- Administrator initialization uses the existing private Core input. Enrollment login reuses Desktop's exact connected-peer verification before credentials are sent; PowerShell receives only the one-use token. The stock protected Windows PowerShell loads authenticated embedded modules without changing execution policy or application-control settings. Desktop opens through the ordinary shell where available and requires explicit sign-in.
+- Full local `scripts/build.sh` passed with zero .NET warnings/errors. All .NET suites passed, including 322 Setup and 2,814 Desktop assertions and existing licensing/AI/update/Core/Agent regressions. The complete test script exposed a PowerShell token-cleanup regression; its correction and remaining PowerShell/dashboard checks are in progress. Independent architecture/security reviews found no remaining trust-boundary blocker. Actual native MSVC publishing and Windows installation acceptance are pending CI; the task is not yet declared complete.
+- Added `docs/SETUP.md`, portable archive/metadata/protocol/workflow tests, PowerShell workflow tests and a dedicated fresh `setup-windows` CI job. The fixture executes the actual native wrapper/private WPF child, service installation, ACLs, one-use enrollment, LocalService DPAPI isolation/restart, telemetry, native Desktop authentication, independent service lifetime and repeated-install refusal. Cross-compilation alone is not acceptance evidence.
+
 ## Current architecture
+
+- TASK-024 adds the native single-EXE first-install entry point, portable Setup foundation and private WPF host. It composes existing signed package installers and existing Desktop Core trust checks; Core remains the authority for administrators and enrollment. Ordinary protected runtime directories avoid elevated/service reuse of a user-controlled single-file extraction cache. The default local layout and existing API contracts remain unchanged.
 
 - Core supports console and managed Windows Service hosting from the same ASP.NET Core composition root. The signed pilot service installer uses fixed virtual identity, existing protected code/configuration/SQLite locations, explicit automatic/recovery policy and separate protected ownership. Service persistence/admin bootstrap is never profile-dependent or supplied through service arguments. The WPF desktop remains a separate process that does not control Core lifetime. See `docs/ARCHITECTURE.md` and `docs/CORE-SERVICE.md`.
 
@@ -138,6 +148,8 @@
 
 ## Important decisions
 
+TASK-024 uses a native bootstrap before CLR initialization because the .NET single-file extraction cache can reuse caller-controlled existing files. Its private public trust root is independent of the signed bundle. Only the one-use enrollment token reaches PowerShell; administrator login uses the existing native connected-peer checks. Setup is first-install only, with no automatic repair/rollback, policy relaxation, new dependency, production credential or future task. Details and upstream evidence are recorded in `.agent/DECISIONS.md` and `docs/SETUP.md`.
+
 TASK-023 keeps the GUI lifetime separate from both protection services, scopes activation to the existing Windows user/session, and stores only explicit nonsecret current-user UI opt-ins. Tray notifications and service status are bounded observations without service control or automatic authentication. The dashboard remains development/diagnostic compatibility only.
 
 TASK-022 reuses Core's existing public license/AI APIs and first-party AI contract. Local consent is session-only, optional requests are explicit and never automatically retried, and Core owns all destinations, credentials, signed licensing decisions and context minimization. Settings exposes public runtime facts without modifying protected configuration. Details are recorded in `.agent/DECISIONS.md` and `docs/DESKTOP-AI-LICENSING.md`.
@@ -152,6 +164,8 @@ See `.agent/DECISIONS.md`, `docs/PILOT.md`, `docs/UPDATES.md`, `docs/REPORTING.m
 
 ## Known issues
 
+- TASK-024 native compilation and complete Windows acceptance remain pending CI. Setup is first-install only; partial installation retains protected code/state for inspection and is not automatically adopted or deleted. Native bootstrap workspaces are retained and consume disk until separately inspected by an administrator. Interactive UAC/standard-user consent and physical display scaling remain manual; enforced application control/constrained language may refuse setup. Development signatures do not establish production Authenticode or release trust.
+
 - TASK-023 has no remaining Definition-of-Done blocker. Service status is a periodic SCM observation separate from API/endpoint health; unknown states remain explicit. Tray/notifications depend on the Windows shell and quiet-time policy. Auto-start is per user, subject to Windows startup policy and the 260-character Run limit; moving/removing the application requires resolving its old owned entry. No background GUI authentication, service control or monitoring dependency is introduced.
 
 - Current license state is a Core snapshot refreshed on sign-in, Settings/Alerts entry and explicit refresh; Core authoritatively enforces current permissions again on AI requests. Manual renewal has no destination override and uncertain results require refresh. Local AI consent is session-only, with no preference/result persistence.
@@ -163,7 +177,7 @@ See `.agent/DECISIONS.md`, `docs/PILOT.md`, `docs/UPDATES.md`, `docs/REPORTING.m
 - TASK-018 has no remaining Definition-of-Done blocker. Native CI uses the elevated installing operator; interactive UAC consent/setup from an unelevated Desktop remains a separate manual Windows check. Desktop currently supports only the existing default local Core paths and port; remote hosts/custom installations and persistent sessions are outside TASK-018; TASK-019 adds the first native data page.
 - TASK-017 has no remaining acceptance blocker; actual Windows service/account/ACL/lifecycle/recovery/desktop-close checks passed in CI. Core service installation supports the existing loopback pilot configuration; remote TLS provisioning, transactional upgrades, state/account migrations and persistent service-log collection remain outside this task. Virtual accounts can authenticate to domain resources as the machine account; no new domain/ambient-auth access is enabled.
 
-- TASK-016 actual Windows WPF/published GUI launch/navigation/layout/DPI/shutdown checks passed in CI; physical multi-monitor scaling remains a documented manual check. TASK-018 adds authentication to that foundation; native security screens, theme selection and a Desktop installer remain later work.
+- TASK-016 actual Windows WPF/published GUI launch/navigation/layout/DPI/shutdown checks passed in CI; physical multi-monitor scaling remains a documented manual check. TASK-018 adds authentication to that foundation, TASK-019 through TASK-023 add the current native workflows, and TASK-024 adds first-install delivery; theme selection remains later work.
 
 - TASK-015's full native Windows Agent enrollment/DPAPI/heartbeat/inventory/uninstall-reinstall acceptance remains unexecuted; TASK-017 separately verifies fresh native Core package installation and service operation. The first supported pilot is co-located Windows 11 x64 over loopback; the original console pilot requires manually running Core, while TASK-017 adds opt-in managed Core service hosting. LocalService is shared with other services and does not provide per-service account isolation. LAN TLS/certificate pinning, firewall/network provisioning, Authenticode/production signing, release hosting, automatic upgrades and account/state migrations are not provided. Initial filesystem/ACL failure before the ownership receipt may leave a directory requiring manual inspection; retained data is never automatically deleted or adopted. The guide records these limitations and the real Windows acceptance command.
 - TASK-014 remains the transactional update foundation with synthetic archive/service lifecycle coverage; the TASK-015 fresh installer does not wire automatic/transactional upgrades. Unix writable installation parents are rejected. Recovery covers process interruption, not all physical power-loss/storage failures; a privileged local owner can replace storage. Production keys/signing infrastructure, release hosting, automatic download/scheduling and code/state migration remain outside this workflow.
@@ -312,11 +326,23 @@ TASK-021 Definition of Done is fully satisfied on verified implementation `77604
 - [x] Production documentation requires no browser; retained dashboard use is explicitly development/diagnostic.
 - [x] Status records implementation, architecture, decisions, known issues, next task and verified baseline.
 
+## TASK-024 Definition of Done
+
+- [ ] Actual fresh supported Windows installation from the single Setup EXE succeeds.
+- [ ] Core and Agent services start and remain running independently of Desktop.
+- [ ] Installed native Desktop opens and authenticates the initial administrator.
+- [ ] Native acceptance verifies the protected code/configuration/state ACLs.
+- [x] The executable embeds and automatically validates/extracts its payload; no operator ZIP extraction is required.
+- [ ] Native Windows acceptance covers the complete path, including enrollment/DPAPI/restart/telemetry and repeated-install refusal.
+- [x] Status records implementation, architecture, decisions, known issues, next task and the verified baseline; native verification is explicitly pending.
+
 ## Next task
 
-TASK-023 is complete and merged through PR #26 into `26241660bb83b5ca8295dcaca153789c14794f6e`; its authorized task cycle is finished. The subsequent README request is a documentation follow-up only. TASK-024 remains the next sequenced task and has not been read or started. Earlier TASK-015 native Agent acceptance and pilot release transfer remain separate outstanding work.
+Finish TASK-024 native publishing/acceptance, verify the scoped review head and merge only after all required checks pass. TASK-025 is next in the sequence and has not been read or started. The original TASK-015 console Agent uninstall/reinstall scenario and earlier draft release transfer remain separate outstanding work.
 
 ## Last verified commit
+
+Current task base: `12dcf29dfcc31af1c822e6b986843666e5eeee2a`, merged README PR #27. Its documentation head `f48512c1bd414b538285106d715c8a6c88ab7a69` passed all eight checks in [PR CI `37837553198`](https://github.com/trolomaniak/SentinelAI/actions/runs/37837553198) and [push CI `37837524480`](https://github.com/trolomaniak/SentinelAI/actions/runs/37837524480). TASK-024 has no committed native-verified head yet.
 
 `26241660bb83b5ca8295dcaca153789c14794f6e` — confirmed TASK-023 merge (PR #26) of final head `e197329682e5d635f9c8cf840ebb231997532eba`, which passed all eight checks in [PR CI `37726585084`](https://github.com/trolomaniak/SentinelAI/actions/runs/37726585084) and [push CI `37726580955`](https://github.com/trolomaniak/SentinelAI/actions/runs/37726580955). Implementation `9454bc5e6af6162d7e5e62317b7de95bb124f312` also passed all eight checks in [PR CI `37725847095`](https://github.com/trolomaniak/SentinelAI/actions/runs/37725847095) and [push CI `37725844018`](https://github.com/trolomaniak/SentinelAI/actions/runs/37725844018), including actual Windows WPF/activation/tray/service observations and published Desktop close/reopen against signed installed Core. Full local builds/regressions/publishing and independent scoped review pass. The README follow-up changes documentation only and uses these recorded runtime results without claiming a new runtime test execution.
 

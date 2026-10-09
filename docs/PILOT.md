@@ -1,5 +1,7 @@
 # Windows pilot installation
 
+For complete fresh installation from one executable, use [SentinelAI Setup](SETUP.md). This guide retains the separate signed-bundle workflow for development and diagnostics.
+
 This pilot runs Core and one Endpoint Agent on a Windows 11 x64 computer. Native Desktop is the supported production interface and normal operation needs no browser. Initialize Core through Desktop, then register Core under its limited virtual service account with delayed automatic startup and recovery using the [Core service workflow](CORE-SERVICE.md). Agent runs automatically as `SentinelAIAgent` under Windows `LocalService`; both services continue when Desktop is closed. Console Core remains a development/diagnostic alternative. Published executables are self-contained and include .NET 10; deployment needs Windows PowerShell 5.1 or PowerShell 7, not an SDK. Use a fresh test environment first.
 
 ## Prepare a development bundle

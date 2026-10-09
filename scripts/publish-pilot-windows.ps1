@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory = $true)][string]$DevelopmentPrivateKey,
     [Parameter(Mandatory = $true)][ValidatePattern('^dev-[A-Za-z0-9_-]{1,48}$')][string]$KeyId,
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [switch]$DirectoryHosts
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,8 +36,11 @@ try {
     foreach ($component in @('core', 'agent', 'updater')) {
         $project = switch ($component) { 'core' { 'core/SentinelAI.Core.csproj' }; 'agent' { 'agent/SentinelAI.Agent.csproj' }; 'updater' { 'updater/SentinelAI.Updater.csproj' } }
         $publish = Join-Path $OutputDirectory ($component + '-publish')
+        # Setup keeps all runtime code inside the signed/protected installation.
+        # The original manually delivered pilot retains its single-file default.
+        $singleFile = if ($DirectoryHosts) { 'false' } else { 'true' }
         Invoke-PilotDotnet -Arguments @('publish', (Join-Path $repo $project), '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'true',
-            '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:DebugType=none', '-p:DebugSymbols=false',
+            ('-p:PublishSingleFile=' + $singleFile), '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:DebugType=none', '-p:DebugSymbols=false',
             ('-p:Version=' + $Version), ('-p:AssemblyVersion=' + $Version + '.0'), '--output', $publish)
         $executable = 'SentinelAI.' + $(if ($component -eq 'core') { 'Core' } elseif ($component -eq 'agent') { 'Agent' } else { 'Updater' }) + '.exe'
         if (-not (Test-Path -LiteralPath (Join-Path $publish $executable) -PathType Leaf)) { throw 'The Windows executable was not published.' }

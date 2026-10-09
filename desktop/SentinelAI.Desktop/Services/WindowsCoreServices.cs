@@ -13,16 +13,16 @@ namespace SentinelAI.Desktop.Services;
 /// <summary>Fixed local installation, private setup pipes and authenticated socket ownership.</summary>
 public sealed class WindowsCoreServices : ICoreEndpointTrust, IDisposable
 {
-    public IAuthenticationClient CreateAuthenticationClient()
+    public IAuthenticationClient CreateAuthenticationClient() => new HttpAuthenticationClient(this, CreatePeerTrustedHandler());
+
+    // Setup links this same authoritative implementation. Its one-use enrollment
+    // requests must verify the established Core peer before writing credentials.
+    internal static SocketsHttpHandler CreatePeerTrustedHandler() => new()
     {
-        var handler = new SocketsHttpHandler
-        {
-            AllowAutoRedirect = false, UseProxy = false, UseCookies = false, Credentials = null,
-            ConnectCallback = ConnectToCoreAsync, ConnectTimeout = TimeSpan.FromSeconds(3),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
-        };
-        return new HttpAuthenticationClient(this, handler);
-    }
+        AllowAutoRedirect = false, UseProxy = false, UseCookies = false, Credentials = null,
+        ConnectCallback = ConnectToCoreAsync, ConnectTimeout = TimeSpan.FromSeconds(3),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+    };
     public IAdministratorSetupClient CreateAdministratorSetupClient() => new LocalAdministratorSetupClient();
     public Task<bool> IsTrustedAsync(Uri origin, CancellationToken token)
     {

@@ -210,3 +210,52 @@ jobs:
           name: SentinelAI.Desktop-win-x64
           path: artifacts/desktop/win-x64/
           if-no-files-found: error
+
+  setup-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish one native Setup EXE with a private self-contained runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $keys = Join-Path $env:RUNNER_TEMP ('sentinelai-setup-keys-' + [Guid]::NewGuid().ToString('N'))
+          try {
+            dotnet run --project tools/update-dev --configuration Release -- keygen --directory $keys --key-id dev-ci-setup
+            if ($LASTEXITCODE -ne 0) { throw 'Development Setup key generation failed.' }
+            ./scripts/publish-setup-windows.ps1 -Version 1.0.0 -KeyId dev-ci-setup `
+              -DevelopmentPrivateKey (Join-Path $keys 'dev-ci-setup.private.pem') `
+              -PublicKeyPath (Join-Path $keys 'dev-ci-setup.public.pem') `
+              -OutputDirectory (Join-Path $env:RUNNER_TEMP 'sentinelai-setup-artifact')
+          } catch {
+            $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
+            if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Single EXE Setup publishing::$message"
+            throw
+          } finally {
+            if (Test-Path -LiteralPath $keys) { Remove-Item -LiteralPath $keys -Recurse -Force }
+          }
+      - name: Verify native Setup wrapper, protected WPF child and complete deployment
+        shell: powershell
+        run: |
+          try {
+            ./tests/setup/Windows.Acceptance.ps1 `
+              -ExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-setup-artifact/SentinelAI-Setup.exe') `
+              -TimeoutSeconds 300
+          } catch {
+            $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
+            if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Native single EXE Setup acceptance::$message"
+            throw
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SentinelAI-Setup-win-x64
+          path: ${{ runner.temp }}/sentinelai-setup-artifact/SentinelAI-Setup.exe
+          if-no-files-found: error

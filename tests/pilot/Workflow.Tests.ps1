@@ -231,6 +231,45 @@ try {
         Assert-Test ([Convert]::ToBase64String([IO.File]::ReadAllBytes($path)) -eq $retainedBytes[$path]) 'Reinstallation changed existing identity, credentials or configuration.'
     }
 
+    # Setup supplies a borrowed one-use token through its private worker pipe.
+    # The actual Pilot workflow must accept it without logging in again, and
+    # releasing it must not trigger parameter validation during null cleanup.
+    $fixture = New-Fixture
+    $options = Get-InstallOptions $fixture
+    [void]$options.Remove('AdminCredential')
+    $options.EnrollmentToken = $fixture.State.Token
+    $output = @(Invoke-PilotInstall @options *>&1)
+    Assert-Test ($fixture.State.Service.State -eq 'Running') 'Explicit-token enrollment did not start the Agent service.'
+    Assert-Test (-not $fixture.State.Events.Contains('request-token')) 'Explicit-token enrollment requested administrator credentials.'
+    Assert-Test (-not (Test-Path -LiteralPath (Join-Path $fixture.State.DataDirectory 'pilot-enrollment-token'))) 'Explicit-token enrollment retained its consumed handoff.'
+    Assert-NoSecrets $fixture $output | Out-Null
+
+    foreach ($invalidToken in @('', $null, 'invalid', ('g' * 64), ('a' * 63), ('a' * 65))) {
+        $fixture = New-Fixture
+        $options = Get-InstallOptions $fixture
+        [void]$options.Remove('AdminCredential')
+        $options.EnrollmentToken = $invalidToken
+        Assert-Rejected { Invoke-PilotInstall @options } 'An invalid explicit enrollment token was accepted.'
+        Assert-Test ($fixture.State.Events.Count -eq 0) 'Invalid-token validation occurred after installation mutation.'
+    }
+    $fixture = New-Fixture
+    $options = Get-InstallOptions $fixture 'Core'
+    [void]$options.Remove('AdminCredential')
+    $options.EnrollmentToken = $fixture.State.Token
+    Assert-Rejected { Invoke-PilotInstall @options } 'An explicit Agent token was accepted for Core installation.'
+    Assert-Test ($fixture.State.Events.Count -eq 0) 'Core token rejection occurred after installation mutation.'
+    $options.Component = 'Agent'; $options.AdminCredential = $credential
+    Assert-Rejected { Invoke-PilotInstall @options } 'An explicit token was accepted together with administrator credentials.'
+    Assert-Test ($fixture.State.Events.Count -eq 0) 'Conflicting credential rejection occurred after installation mutation.'
+    $fixture = New-Fixture
+    $options = Get-InstallOptions $fixture
+    [void]$options.Remove('AdminCredential')
+    $options.EnrollmentToken = $fixture.State.Token
+    $fixture.State.FailWait = $true
+    Assert-Rejected { Invoke-PilotInstall @options } 'An explicit-token enrollment failure was ignored.'
+    Assert-Test (-not (Test-Path -LiteralPath (Join-Path $fixture.State.DataDirectory 'pilot-enrollment-token'))) 'Failed explicit-token enrollment retained its one-use handoff.'
+    Assert-Test (-not $fixture.State.Events.Contains('request-token')) 'Failed explicit-token enrollment retried administrator login.'
+
     $fixture = New-Fixture
     $fixture.State.FailPrepare = $true
     $options = Get-InstallOptions $fixture
