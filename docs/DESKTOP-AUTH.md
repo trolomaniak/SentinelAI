@@ -4,6 +4,8 @@ The native desktop creates the first local administrator and signs in through Co
 
 ## Fresh installation
 
+[SentinelAI Setup](SETUP.md) installs all components, creates the administrator and starts/enrolls the services from one executable. The steps below remain the manual signed-bundle alternative.
+
 Install the signed Core files and protected configuration using the [pilot workflow](PILOT.md), then open the published `SentinelAI.Desktop.exe`. The desktop uses the existing default installation: `%ProgramFiles%\SentinelAI\Core`, `%ProgramData%\SentinelAI\Core` and `http://127.0.0.1:5000`.
 
 Initial setup needs the installing operator's existing filesystem authority. When required, **Open initial setup as administrator** opens a separate UAC-approved native setup window. Enter a username and a password of at least 12 characters there. No password crosses the UAC process boundary or appears in process arguments.

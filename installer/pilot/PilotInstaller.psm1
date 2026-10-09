@@ -673,8 +673,15 @@ function Invoke-PilotInstall {
           [ValidateSet('development','production')][string]$Environment,
           [ValidateSet('stable','pilot','beta')][string]$Channel,
           [string]$CodeDirectory, [string]$DataDirectory, [string]$CoreUrl = 'http://127.0.0.1:5000',
-          [string]$CoreCertificateSha256, [ValidateRange(10,600)][int]$TimeoutSeconds = 180, [PSCredential]$AdminCredential)
+          [string]$CoreCertificateSha256, [ValidateRange(10,600)][int]$TimeoutSeconds = 180, [PSCredential]$AdminCredential,
+          [string]$EnrollmentToken)
     Assert-PilotSupportedHost
+    # Validate supplied input explicitly so releasing the borrowed token below
+    # cannot trigger parameter-variable validation during null cleanup.
+    if ($PSBoundParameters.ContainsKey('EnrollmentToken') -and
+        ($EnrollmentToken -cnotmatch '\A[0-9a-fA-F]{64}\z' -or $Component -cne 'Agent' -or $null -ne $AdminCredential)) {
+        throw 'An explicit one-use token applies only to Agent enrollment and cannot be combined with administrator credentials.'
+    }
     $kind = if ($Component -eq 'Core') { 'Core' } else { 'Agent' }
     if ($Environment) { $Environment = $Environment.ToLowerInvariant() }
     if ($Channel) { $Channel = $Channel.ToLowerInvariant() }
@@ -766,11 +773,13 @@ function Invoke-PilotInstall {
         } else {
             if (-not (Test-Path -LiteralPath (Join-Path $DataDirectory 'enrollment-state'))) {
                 if (Test-Path -LiteralPath $tokenPath) { throw 'A pending one-use enrollment file exists; inspect the previous attempt before retrying.' }
-                $token = Request-PilotEnrollmentToken -CoreUrl $origin -CoreCertificateSha256 $CoreCertificateSha256 -AdminCredential $AdminCredential
+                $token = if ($EnrollmentToken) { $EnrollmentToken } else {
+                    Request-PilotEnrollmentToken -CoreUrl $origin -CoreCertificateSha256 $CoreCertificateSha256 -AdminCredential $AdminCredential
+                }
                 try {
                     Write-PilotProtectedFile -Path $tokenPath -Content $token -Kind AgentToken
                     $createdToken = $true
-                } finally { $token = $null }
+                } finally { $token = $null; $EnrollmentToken = $null }
             }
             if ($null -eq $service) { Register-PilotService -ExecutablePath $executable -ConfigurationPath $configurationPath; $createdService = $true }
             Start-PilotService -TimeoutSeconds $TimeoutSeconds

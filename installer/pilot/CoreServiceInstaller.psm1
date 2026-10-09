@@ -1,6 +1,12 @@
+param([System.Management.Automation.PSModuleInfo]$PilotInstallerModule)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'PilotInstaller.psm1') -DisableNameChecking
+if ($null -ne $PilotInstallerModule) {
+    Import-Module $PilotInstallerModule -DisableNameChecking
+} else {
+    Import-Module (Join-Path $PSScriptRoot 'PilotInstaller.psm1') -DisableNameChecking
+}
 $script:CoreServiceName = 'SentinelAICore'
 $script:CoreServiceAccount = 'NT SERVICE\SentinelAICore'
 # Windows derives a service SID from SHA-1 of the uppercase UTF-16 service name.
