@@ -15,12 +15,33 @@ function Reject-SetupTest([scriptblock]$Operation, [string]$Label) {
 $syntheticToken = '0123456789abcdef' * 4
 function New-SetupTestRequest([string]$Action = 'prepare-core') {
     [pscustomobject]@{ action = $Action; workDirectory = Join-Path ([IO.Path]::GetTempPath()) 'synthetic-setup-worker';
-        keyId = 'dev-setup-test'; channel = 'pilot'; enrollmentToken = $(if ($Action -eq 'complete') { $syntheticToken } else { $null }) }
+        keyId = 'dev-setup-test'; channel = 'pilot'; enrollmentToken = $(if ($Action -eq 'complete') { $syntheticToken } else { '' }) }
 }
 Assert-SetupRequest (New-SetupTestRequest)
 Assert-SetupRequest (New-SetupTestRequest 'complete')
 Assert-SetupRequest (New-SetupTestRequest 'start-core')
 $script:checks += 3
+# Exercise the actual serialization boundary rather than only passing an object
+# directly to the worker. Prepare/start must survive the existing strict grammar.
+foreach ($action in @('prepare-core','start-core','complete')) {
+    $json = New-SetupTestRequest $action | ConvertTo-Json -Compress
+    $decoded = Read-PilotStrictJson -Json $json
+    Assert-SetupRequest $decoded
+    Assert-SetupTest ($decoded.action -ceq $action) 'serialized action survives strict parser'
+    if ($action -eq 'complete') {
+        Assert-SetupTest ($decoded.enrollmentToken -ceq $syntheticToken) 'serialized completion carries exact one-use token'
+    } else {
+        Assert-SetupTest ($decoded.enrollmentToken -is [string] -and $decoded.enrollmentToken.Length -eq 0) 'serialized preparation has exact empty token'
+    }
+}
+foreach ($action in @('prepare-core','start-core')) {
+    foreach ($invalidToken in @($null, 0, ' ', $syntheticToken)) {
+        $request = New-SetupTestRequest $action; $request.enrollmentToken = $invalidToken
+        Reject-SetupTest { Assert-SetupRequest $request } 'preparation rejects nonempty or non-string token'
+    }
+}
+$nullWire = New-SetupTestRequest; $nullWire.enrollmentToken = $null
+Reject-SetupTest { Read-PilotStrictJson -Json ($nullWire | ConvertTo-Json -Compress) } 'strict pilot JSON still rejects null primitives'
 foreach ($action in @('Complete','repair','uninstall','')) {
     $request = New-SetupTestRequest; $request.action = $action
     Reject-SetupTest { Assert-SetupRequest $request } 'unsupported action'

@@ -77,8 +77,9 @@ public static class SetupWorkflow
         {
             writer.WriteStartObject(); writer.WriteString("action", action); writer.WriteString("workDirectory", workDirectory);
             writer.WriteString("keyId", metadata.KeyId); writer.WriteString("channel", metadata.Channel);
-            if (action == "complete") writer.WriteString("enrollmentToken", enrollmentToken);
-            else writer.WriteNull("enrollmentToken");
+            // The existing strict installer JSON grammar accepts strings/objects.
+            // A credential-free phase carries an exact empty string, never null.
+            writer.WriteString("enrollmentToken", enrollmentToken);
             writer.WriteEndObject(); writer.Flush();
         }
         if (stream.Length >= 8192) throw new InvalidDataException("Setup request is too large.");

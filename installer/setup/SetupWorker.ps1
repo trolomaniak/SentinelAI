@@ -2,6 +2,9 @@
 # It does not change PowerShell execution, application-control or language policy.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# The installer reports its own fixed progress markers. Suppress PowerShell's
+# module-initialization progress, which WinPS can otherwise serialize to stderr.
+$ProgressPreference = 'SilentlyContinue'
 $script:SetupPhase = 'validate'
 
 function Write-SetupProgress {
@@ -201,7 +204,9 @@ function Assert-SetupRequest {
     if ($Request.action -cnotin @('prepare-core','start-core','complete') -or $Request.keyId -isnot [string] -or
         $Request.keyId -cnotmatch '\Adev-[A-Za-z0-9_-]{1,48}\z' -or $Request.channel -cnotin @('stable','pilot','beta')) { throw 'Invalid policy.' }
     if ($Request.action -ne 'complete') {
-        if ($null -ne $Request.enrollmentToken) { throw 'Unexpected enrollment token.' }
+        # The private wire uses an empty string, keeping the existing strict
+        # Pilot JSON grammar limited to strings/objects without accepting null.
+        if ($Request.enrollmentToken -isnot [string] -or $Request.enrollmentToken.Length -ne 0) { throw 'Unexpected enrollment token.' }
     } elseif ($Request.enrollmentToken -isnot [string] -or $Request.enrollmentToken -cnotmatch '\A[0-9a-fA-F]{64}\z') { throw 'Invalid enrollment token.' }
 }
 

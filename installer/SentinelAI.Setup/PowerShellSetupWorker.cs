@@ -20,13 +20,13 @@ internal sealed class PowerShellSetupWorker(string workDirectory, SetupMetadata 
         if (!File.Exists(powershell) || !File.Exists(scriptPath) || (File.GetAttributes(scriptPath) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Setup worker unavailable.");
         // This fixed loader contains only an administrator-protected staging path.
         // Private stdin carries only a one-use enrollment token, never administrator credentials.
-        var command = "[Console]::InputEncoding = New-Object Text.UTF8Encoding($false); [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false); & ([ScriptBlock]::Create([IO.File]::ReadAllText('" + scriptPath.Replace("'", "''", StringComparison.Ordinal) + "')))";
+        var command = "$ProgressPreference = 'SilentlyContinue'; [Console]::InputEncoding = New-Object Text.UTF8Encoding($false); [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false); & ([ScriptBlock]::Create([IO.File]::ReadAllText('" + scriptPath.Replace("'", "''", StringComparison.Ordinal) + "')))";
         var start = new ProcessStartInfo(powershell)
         {
             UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = workDirectory,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
         };
-        foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) }) start.ArgumentList.Add(argument);
+        foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-InputFormat", "Text", "-OutputFormat", "Text", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) }) start.ArgumentList.Add(argument);
         ChildProcessEnvironment.ConfigurePowerShell(start);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromMinutes(10));

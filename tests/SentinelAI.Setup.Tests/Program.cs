@@ -126,7 +126,7 @@ try
     {
         count = SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\ProgramData\\SentinelAI-Setup\\0123456789abcdef0123456789abcdef", metadata, ReadOnlySpan<char>.Empty);
         using var request = JsonDocument.Parse(buffer.AsMemory(0, count - 1));
-        Ensure(request.RootElement.GetProperty("action").GetString() == action && request.RootElement.GetProperty("enrollmentToken").ValueKind == JsonValueKind.Null, "Preparing and starting Core are credential-free");
+        Ensure(request.RootElement.GetProperty("action").GetString() == action && request.RootElement.GetProperty("enrollmentToken").ValueKind == JsonValueKind.String && request.RootElement.GetProperty("enrollmentToken").GetString() == "", "Preparing and starting Core use the strict parser's empty credential-free string");
         Ensure(request.RootElement.EnumerateObject().Count() == 5, "All worker actions use the same exact fields");
         await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, oneUseToken.AsSpan()); return Task.CompletedTask; }, "No premature enrollment token");
     }
