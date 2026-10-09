@@ -222,6 +222,7 @@ function Invoke-SetupNativeTool {
         $outputTask = $process.StandardOutput.ReadLineAsync()
         $errorTask = $process.StandardError.ReadLineAsync()
         $diagnostics = New-Object 'System.Collections.Generic.Queue[string]'
+        $lastError = $null
         while ($null -ne $outputTask -or $null -ne $errorTask) {
             $pending = New-Object 'System.Collections.Generic.List[System.Threading.Tasks.Task]'
             if ($null -ne $outputTask) { $pending.Add($outputTask) }
@@ -231,6 +232,7 @@ function Invoke-SetupNativeTool {
             $line = if ($isOutput) { $outputTask.GetAwaiter().GetResult() } else { $errorTask.GetAwaiter().GetResult() }
             if ($null -ne $line -and $line -match '\b(?:fatal\s+error|error|warning)\s+[A-Za-z]{1,4}\d{3,5}\b') {
                 $bounded = $line.Substring(0, [Math]::Min($line.Length, 800)) -replace '[\x00-\x1f\x7f]', ' '
+                if ($line -match '\b(?:fatal\s+error|error)\s+[A-Za-z]{1,4}\d{3,5}\b') { $lastError = $bounded }
                 if ($diagnostics.Count -eq 6) { $null = $diagnostics.Dequeue() }
                 $diagnostics.Enqueue($bounded)
             }
@@ -239,6 +241,12 @@ function Invoke-SetupNativeTool {
         }
         $process.WaitForExit()
         if ($process.ExitCode -ne 0) {
+            # A late-drained warning stream must not push the fatal diagnostic
+            # out of the small tail gathered from the other stream.
+            if ($null -ne $lastError -and -not $diagnostics.Contains($lastError)) {
+                if ($diagnostics.Count -eq 6) { $null = $diagnostics.Dequeue() }
+                $diagnostics.Enqueue($lastError)
+            }
             $script:SetupNativeCompilerDiagnostic = 'Native ' + $Tool + ' failed with exit code ' + $process.ExitCode + '.'
             if ($diagnostics.Count -gt 0) { $script:SetupNativeCompilerDiagnostic += ' ' + ($diagnostics.ToArray() -join ' | ') }
             throw 'A native setup compiler failed.'
