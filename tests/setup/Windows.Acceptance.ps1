@@ -615,6 +615,10 @@ try {
     Assert-SetupAcceptance ($desktopClr.Count -eq 1 -and [IO.Path]::GetFullPath($desktopClr[0].FileName) -ieq
         (Join-Path $desktopCode 'coreclr.dll')) 'Installed Desktop loaded CLR outside its self-contained protected installation.'
     Wait-SetupAcceptance { Test-SetupControl 'SignInButton' $false } 'Installed Desktop did not offer native administrator sign-in.'
+    # The sign-in button is visible before the initial Core trust check finishes,
+    # and stays disabled until a valid username is entered. Wait for the actual
+    # input controls to become enabled rather than racing their busy state.
+    Wait-SetupAcceptance { (Test-SetupControl 'AuthenticationUsername') -and (Test-SetupControl 'AuthenticationPassword') } 'Installed Desktop did not enable administrator inputs after its initial Core check.'
     $user = Find-SetupControl 'AuthenticationUsername'
     $userValue = [Windows.Automation.ValuePattern]$user.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
     Assert-SetupAcceptance ([string]::IsNullOrEmpty($userValue.Current.Value)) 'Installed Desktop restored Setup credentials instead of requiring fresh sign-in.'
