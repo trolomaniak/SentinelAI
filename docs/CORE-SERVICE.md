@@ -58,6 +58,8 @@ Core retains its JSON console logging policy. SCM service hosting does not provi
 
 Removal stops and deletes only the matching installer-owned service, then restores protected operator/admin ACLs for console use. Code, configuration, receipts and SQLite bytes are retained. Re-register with `Install` and the same signed package to preserve administrator and Core identities. This workflow does not replace an older package, migrate accounts/state, delete data, change Agent enrollment or wire transactional automatic upgrades.
 
+For a deployment installed through `SentinelAI-Setup.exe`, use its [repair, upgrade and uninstall workflow](SETUP.md#repair-upgrade-and-uninstall). Setup maintains Core, Agent, Desktop and Updater together with signed code replacement and protected state preservation.
+
 ## Validation
 
 `./scripts/build.sh` builds Core with the official WindowsServices integration. `./scripts/test.sh` runs actual console-host persistence/restart tests and portable PowerShell installer-policy tests, plus existing backend/desktop/dashboard regressions.

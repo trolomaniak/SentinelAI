@@ -35,7 +35,7 @@ internal static class UpdateFileSystem
         }
     }
 
-    internal static void ValidateTree(string directory)
+    internal static void ValidateTree(string directory, int maximumEntries = 4096)
     {
         RejectReparseAncestors(directory);
         var pending = new Stack<string>();
@@ -45,7 +45,7 @@ internal static class UpdateFileSystem
         {
             foreach (var entry in Directory.EnumerateFileSystemEntries(current))
             {
-                if (++count > 4096) throw new IOException("The installation code directory contains too many entries.");
+                if (++count > maximumEntries) throw new IOException("The installation code directory contains too many entries.");
                 RejectPersistentStateFile(Path.GetFileName(entry));
                 var attributes = File.GetAttributes(entry);
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
@@ -75,10 +75,10 @@ internal static class UpdateFileSystem
         return new FileStream(path, options);
     }
 
-    internal static void DeleteOwnedDirectory(string directory)
+    internal static void DeleteOwnedDirectory(string directory, int maximumEntries = 4096)
     {
         if (!Directory.Exists(directory)) return;
-        ValidateTree(directory);
+        ValidateTree(directory, maximumEntries);
         Directory.Delete(directory, recursive: true);
     }
 

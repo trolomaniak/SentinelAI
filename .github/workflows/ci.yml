@@ -219,6 +219,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Run portable Setup installation and lifecycle policy tests
+        shell: pwsh
+        run: |
+          ./tests/setup/Workflow.Tests.ps1
+          ./tests/setup/Lifecycle.Tests.ps1
       - name: Publish one native Setup EXE with a private self-contained runtime
         shell: pwsh
         run: |
@@ -258,4 +263,66 @@ jobs:
         with:
           name: SentinelAI-Setup-win-x64
           path: ${{ runner.temp }}/sentinelai-setup-artifact/SentinelAI-Setup.exe
+          if-no-files-found: error
+
+  setup-lifecycle-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish older, newer and signed unhealthy development Setup executables
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $keys = Join-Path $env:RUNNER_TEMP ('sentinelai-lifecycle-keys-' + [Guid]::NewGuid().ToString('N'))
+          $outputs = Join-Path $env:RUNNER_TEMP 'sentinelai-lifecycle-artifacts'
+          $fault = Join-Path $env:RUNNER_TEMP 'sentinelai-lifecycle-unhealthy-core'
+          try {
+            dotnet run --project tools/update-dev --configuration Release -- keygen --directory $keys --key-id dev-ci-lifecycle
+            if ($LASTEXITCODE -ne 0) { throw 'Development lifecycle key generation failed.' }
+            dotnet build ./tests/setup/unhealthy-core/SentinelAI.Core.csproj --configuration Release --output $fault
+            if ($LASTEXITCODE -ne 0) { throw 'Unhealthy test-only SCM assembly build failed.' }
+            foreach ($version in @('1.0.0', '1.1.0', '1.2.0')) {
+              $options = @{
+                Version = $version; KeyId = 'dev-ci-lifecycle'
+                DevelopmentPrivateKey = Join-Path $keys 'dev-ci-lifecycle.private.pem'
+                PublicKeyPath = Join-Path $keys 'dev-ci-lifecycle.public.pem'
+                OutputDirectory = Join-Path $outputs $version
+              }
+              if ($version -eq '1.2.0') { $options.DevelopmentCoreAssemblyOverride = Join-Path $fault 'SentinelAI.Core.dll' }
+              ./scripts/publish-setup-windows.ps1 @options
+            }
+          } catch {
+            $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
+            if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Lifecycle Setup publishing::$message"
+            throw
+          } finally {
+            if (Test-Path -LiteralPath $keys) { Remove-Item -LiteralPath $keys -Recurse -Force }
+          }
+      - name: Verify actual Windows upgrade, health rollback, repair and uninstall
+        shell: powershell
+        run: |
+          try {
+            $outputs = Join-Path $env:RUNNER_TEMP 'sentinelai-lifecycle-artifacts'
+            ./tests/setup/Lifecycle.Acceptance.ps1 `
+              -InitialExecutablePath (Join-Path $outputs '1.0.0/SentinelAI-Setup.exe') `
+              -UpgradeExecutablePath (Join-Path $outputs '1.1.0/SentinelAI-Setup.exe') `
+              -UnhealthyExecutablePath (Join-Path $outputs '1.2.0/SentinelAI-Setup.exe') `
+              -TimeoutSeconds 900
+          } catch {
+            $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
+            if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Native Setup lifecycle acceptance::$message"
+            throw
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SentinelAI-Setup-lifecycle-win-x64
+          path: ${{ runner.temp }}/sentinelai-lifecycle-artifacts/1.1.0/SentinelAI-Setup.exe
           if-no-files-found: error
