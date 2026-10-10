@@ -32,6 +32,7 @@ $baseline = $null
 if ($null -eq ('SentinelAI.Setup.Lifecycle.Sqlite' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -67,6 +68,9 @@ namespace SentinelAI.Setup.Lifecycle {
     return result.ToString();
    } finally {if(statement!=IntPtr.Zero)finalize(statement);}
   }
+  static string Digest(string value) {
+   using(var sha=SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value))).Replace("-","");
+  }
   public static string[] Snapshot(string libraryPath,string databasePath) {
    IntPtr module=LoadLibraryEx(libraryPath,IntPtr.Zero,0x00000100|0x00001000);
    if(module==IntPtr.Zero) throw new InvalidOperationException("The system SQLite library is unavailable.");
@@ -80,19 +84,24 @@ namespace SentinelAI.Setup.Lifecycle {
     var prepare=Function<Prepare>(module,"sqlite3_prepare_v2");var step=Function<Step>(module,"sqlite3_step");
     var text=Function<Text>(module,"sqlite3_column_text");var finalize=Function<Finalize>(module,"sqlite3_finalize");
     Query(database,prepare,step,text,finalize,"BEGIN;",false);
-    var material=new StringBuilder();
+    var fingerprints=new List<string>();
     foreach(string sql in new[]{
      "SELECT Username || '|' || PasswordHash FROM Administrators ORDER BY Username;",
      "SELECT CoreInstallationId || '|' || OrganizationId FROM CoreIdentity WHERE Singleton=1;",
      "SELECT InstallationId || '|' || EndpointId || '|' || CoreInstallationId || '|' || OrganizationId || '|' || hex(CredentialHash) FROM EndpointEnrollments ORDER BY InstallationId;",
      "SELECT COALESCE(Lease,'NULL') || '|' || COALESCE(LastSuccessfulValidationUtcTicks,'NULL') || '|' || LastAttemptSucceeded || '|' || ClockRollbackDetected FROM LicenseState WHERE Singleton=1;"})
-     material.Append(Query(database,prepare,step,text,finalize,sql,true)).Append("--\n");
+     fingerprints.Add(Digest(Query(database,prepare,step,text,finalize,sql,true)));
     // Inventory refresh legitimately updates alert observation/version fields.
     // First observations, identities and retained status history must survive.
-    material.Append(Query(database,prepare,step,text,finalize,"SELECT AlertId || '|' || EndpointId || '|' || RuleId || '|' || FirstObservedUtcTicks || '|' || CreatedUtcTicks FROM TrackedAlerts ORDER BY AlertId;",false));
-    material.Append(Query(database,prepare,step,text,finalize,"SELECT SequenceId || '|' || AlertId || '|' || COALESCE(PreviousStatus,'NULL') || '|' || Status || '|' || ChangedUtcTicks || '|' || ChangedBy FROM AlertStatusHistory ORDER BY SequenceId;",false));
     string highWater=Query(database,prepare,step,text,finalize,"SELECT HighWaterUtcTicks FROM LicenseState WHERE Singleton=1;",true).Trim();
-    using(var sha=SHA256.Create()) return new[]{BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(material.ToString()))).Replace("-",""),highWater};
+    fingerprints.Add(highWater);
+    foreach(string sql in new[]{
+     "SELECT AlertId || '|' || EndpointId || '|' || RuleId || '|' || FirstObservedUtcTicks || '|' || CreatedUtcTicks FROM TrackedAlerts ORDER BY AlertId;",
+     "SELECT SequenceId || '|' || AlertId || '|' || COALESCE(PreviousStatus,'NULL') || '|' || Status || '|' || ChangedUtcTicks || '|' || ChangedBy FROM AlertStatusHistory ORDER BY SequenceId;"}) {
+     foreach(string row in Query(database,prepare,step,text,finalize,sql,false).Split('\n'))
+      if(row.Length!=0) fingerprints.Add(Digest(row));
+    }
+    return fingerprints.ToArray();
    } finally {if(database!=IntPtr.Zero && close!=null)close(database);if(name!=IntPtr.Zero)Marshal.FreeHGlobal(name);FreeLibrary(module);}
   }
  }
@@ -125,11 +134,21 @@ function Read-LifecyclePreservedState {
         (Join-Path $script:agentData 'enrollment-state'), (Join-Path $script:agentData 'installation-id'), (Join-Path $script:agentData 'endpoint-id'))) {
         $hashes[$path] = Read-SetupStateDigest $path
     }
-    return [pscustomobject]@{ Fingerprint = $sqlite[0]; HighWater = [long]$sqlite[1]; Files = $hashes }
+    return [pscustomobject]@{ Fingerprints = @($sqlite[0..3]); HighWater = [long]$sqlite[4]; History = @($sqlite | Select-Object -Skip 5); Files = $hashes }
 }
 function Assert-LifecyclePreserved {
     $current = Read-LifecyclePreservedState
-    Assert-SetupAcceptance ($current.Fingerprint -ceq $script:baseline.Fingerprint) 'Lifecycle changed persisted administrator, Core/enrollment identity, license or retained security history.'
+    $categories = @('administrator','Core identity','endpoint enrollment','license metadata')
+    for ($index = 0; $index -lt $categories.Count; $index++) {
+        Assert-SetupAcceptance ($current.Fingerprints[$index] -ceq $script:baseline.Fingerprints[$index]) ('Lifecycle changed retained ' + $categories[$index] + '.')
+    }
+    # Fresh telemetry may add findings/history. Every baseline observation and
+    # status transition must survive unchanged; additional rows are permitted.
+    $history = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($fingerprint in $current.History) { [void]$history.Add($fingerprint) }
+    foreach ($fingerprint in $script:baseline.History) {
+        Assert-SetupAcceptance ($history.Contains($fingerprint)) 'Lifecycle deleted or reset a retained security-history row.'
+    }
     Assert-SetupAcceptance ($current.HighWater -ge $script:baseline.HighWater) 'Lifecycle reset the persisted license clock high-water.'
     foreach ($path in $script:baseline.Files.Keys) { Assert-SetupAcceptance ($current.Files[$path] -ceq $script:baseline.Files[$path]) 'Lifecycle reset protected configuration, Agent identity or DPAPI enrollment state.' }
 }
@@ -304,11 +323,21 @@ try {
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $shortcutRoot)) 'Uninstall retained owned code or Start Menu shortcuts.'
     Assert-SetupAcceptance (Test-Path -LiteralPath $databasePath -PathType Leaf) 'Default uninstall deleted security history.'
     Assert-LifecyclePreserved
+    # Explicit restore reuses the same protected administrator, enrollment and
+    # LocalService DPAPI identity; it cannot re-enroll or reset retained history.
+    $since = [DateTimeOffset]::UtcNow
+    Invoke-LifecycleSetup $UpgradeExecutablePath 'Repair'
+    Open-LifecycleCore; Wait-ExactEndpoint $endpointId $since
+    Assert-LifecycleVersion '1.1.0'; Assert-LifecyclePreserved
+    Assert-LifecycleAcls
+    Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall'
+    Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Restored services were not removed by a subsequent owned uninstall.'
+    Assert-LifecyclePreserved
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall' $false $true
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $dataRoot)) 'Explicit confirmed data removal retained owned application data.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $shortcutRoot) -and
         $null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Explicit removal recreated code, shortcuts or services.'
-    [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount; NativeLifecycle = 'Fresh 1.0.0, upgrade 1.1.0, actual signed unhealthy 1.2.0 rollback, damaged-file repair, default retained-data uninstall and explicit confirmed removal' }
+    [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount; NativeLifecycle = 'Fresh 1.0.0, upgrade 1.1.0, actual signed unhealthy 1.2.0 rollback, damaged-file repair, default retained-data uninstall, identity-preserving restore and explicit confirmed removal' }
 } finally {
     foreach ($launch in $lifecycleHosts) {
         foreach ($process in @($launch.Host, $launch.Outer)) {
