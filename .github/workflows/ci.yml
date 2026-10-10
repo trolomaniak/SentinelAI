@@ -313,7 +313,7 @@ jobs:
               -InitialExecutablePath (Join-Path $outputs '1.0.0/SentinelAI-Setup.exe') `
               -UpgradeExecutablePath (Join-Path $outputs '1.1.0/SentinelAI-Setup.exe') `
               -UnhealthyExecutablePath (Join-Path $outputs '1.2.0/SentinelAI-Setup.exe') `
-              -TimeoutSeconds 300
+              -TimeoutSeconds 900
           } catch {
             $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
             if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }

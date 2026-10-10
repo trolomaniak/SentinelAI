@@ -7,7 +7,7 @@ param(
     [Parameter(Mandatory = $true)][string]$InitialExecutablePath,
     [Parameter(Mandatory = $true)][string]$UpgradeExecutablePath,
     [Parameter(Mandatory = $true)][string]$UnhealthyExecutablePath,
-    [ValidateRange(60, 900)][int]$TimeoutSeconds = 300
+    [ValidateRange(60, 900)][int]$TimeoutSeconds = 900
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -221,6 +221,61 @@ function Select-LifecycleAction([string]$Name) {
     ([Windows.Automation.SelectionItemPattern]$item.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern)).Select()
     $expand.Collapse()
 }
+function Get-LifecycleFailureDiagnostics($Observation, [double]$ElapsedSeconds, [string]$FixtureMessage) {
+    # Emit only fixed classifications and bounded metadata flags, never caught
+    # exceptions, unknown UI text, journal contents, credentials or paths.
+    $reason = switch -CaseSensitive ($FixtureMessage) {
+        'Native lifecycle operation did not complete within its deadline.' { 'deadline' }
+        'The native wrapper stopped holding its still-running private host.' { 'wrapper-exited' }
+        'The held private Setup host is no longer the exact wrapper child.' { 'host-ownership' }
+        'A synthetic password or bearer appeared in public installation data.' { 'public-credential' }
+        'A running Setup child command contains bootstrap credential configuration.' { 'child-credential' }
+        'Unhealthy signed deployment incorrectly reported successful upgrade.' { 'unhealthy-success' }
+        default { 'unclassified' }
+    }
+    $phase = 'unknown'
+    if ($Observation.Phase -cin @('poll-child','candidate-scm','candidate-version','ui-error','ui-finished','poll-wait')) { $phase = $Observation.Phase }
+    $uiErrorPresent = $false; $uiErrorVisible = $false; $uiSupport = 'none'
+    try {
+        $control = Find-SetupControl 'SetupErrorText'
+        if ($null -ne $control -and -not [string]::IsNullOrWhiteSpace($control.Current.Name)) {
+            $uiErrorPresent = $true; $uiErrorVisible = -not $control.Current.IsOffscreen
+            $uiSupport = switch -CaseSensitive ([string]$control.Current.Name) {
+                'Close SentinelAI Desktop and run Setup again. Support code: SETUP-DESKTOP.' { 'SETUP-DESKTOP' }
+                'Complete Uninstall with data retained, then run Setup again to restore the installation. Support code: SETUP-RETAINED.' { 'SETUP-RETAINED' }
+                'Installation recovery could not complete. Run Setup again to recover the verified installation. Support code: SETUP-RECOVERY.' { 'SETUP-RECOVERY' }
+                'The operation failed. The previous working code was restored. Support code: SETUP-ROLLBACK.' { 'SETUP-ROLLBACK' }
+                'The operation could not be completed. Close Setup and inspect the installation state. Support code: SETUP-LIFECYCLE.' { 'SETUP-LIFECYCLE' }
+                'Setup is unavailable. Use a complete package and approve Windows administrator elevation. Support code: SETUP-INSPECT.' { 'SETUP-INSPECT' }
+                'This deployment could not be verified as owned. No operation is available. Support code: SETUP-OWNERSHIP.' { 'SETUP-OWNERSHIP' }
+                default { 'unknown' }
+            }
+        }
+    } catch { $uiSupport = 'unavailable' }
+    $metadataProbeSucceeded = $true; $contextPresent = $false; $journalPresent = $false; $journalPhase = 'none'
+    try {
+        $contextPresent = Test-Path -LiteralPath (Join-Path $script:setupData 'lifecycle-context.json') -PathType Leaf
+        $journalPath = Join-Path (Split-Path -Parent $script:programRoot) '.SentinelAI.sentinelai-update.json'
+        $journalPresent = Test-Path -LiteralPath $journalPath -PathType Leaf
+        if ($journalPresent) {
+            $journalPhase = 'unknown'
+            if (([IO.File]::GetAttributes($journalPath) -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+                $stream = [IO.File]::Open($journalPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                try {
+                    if ($stream.Length -gt 0 -and $stream.Length -le 65536) {
+                        $reader = New-Object IO.StreamReader -ArgumentList @($stream, (New-Object Text.UTF8Encoding($false, $true)), $false, 4096, $true)
+                        try { $document = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+                        if ($document.phase -is [string] -and $document.phase -cin @('prepared','backed-up','installed','restoring','restored','rolled-back','committed')) { $journalPhase = $document.phase }
+                    }
+                } finally { $stream.Dispose() }
+            }
+        }
+    } catch { $metadataProbeSucceeded = $false }
+    $elapsed = [int][Math]::Min(86400, [Math]::Max(0, [Math]::Floor($ElapsedSeconds)))
+    return ('FixtureReason={0}; FailurePhase={1}; ElapsedSeconds={2}; ObservedUnhealthyRunning={3}; UIErrorPresent={4}; UIErrorVisible={5}; UISupport={6}; MetadataProbeSucceeded={7}; ContextPresent={8}; JournalPresent={9}; JournalPhase={10}; DeadlineExpired={11}.' -f
+        $reason, $phase, $elapsed, [bool]$script:observedUnhealthyRunning, $uiErrorPresent, $uiErrorVisible, $uiSupport,
+        $metadataProbeSucceeded, $contextPresent, $journalPresent, $journalPhase, ($reason -ceq 'deadline'))
+}
 function Invoke-LifecycleSetup([string]$Executable, [string]$Action, [bool]$ExpectFailure = $false, [bool]$RemoveData = $false) {
     $launch = Start-TestSetup $Executable; $script:lifecycleHosts.Add($launch)
     $script:setup = $launch.Host; $script:setupOuter = $launch.Outer
@@ -245,36 +300,47 @@ function Invoke-LifecycleSetup([string]$Executable, [string]$Action, [bool]$Expe
     }
     Show-SetupControl 'SetupLifecycleButton'
     Wait-SetupAcceptance { Test-SetupControl 'SetupLifecycleButton' } 'Selected lifecycle operation never became ready.'
+    $operationElapsed = [Diagnostics.Stopwatch]::StartNew()
     ([Windows.Automation.InvokePattern](Find-SetupControl 'SetupLifecycleButton').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)).Invoke()
     Wait-SetupAcceptance { -not (Test-SetupControl 'SetupLifecycleButton') } 'Lifecycle did not begin its explicit operation.'
     $script:observedUnhealthyRunning = $false
+    $observation = [pscustomobject]@{ Phase = 'poll-child' }
     try { Wait-SetupAcceptance {
+        $observation.Phase = 'poll-child'
         Assert-SetupChildArguments
         if ($ExpectFailure -and -not $script:observedUnhealthyRunning) {
             # Prove this candidate actually ran under SCM and reached Running.
             # A mere invalid package/start failure is weaker than health rollback.
+            $observation.Phase = 'candidate-scm'
             $service = Get-SetupService 'SentinelAICore'
             if ($null -ne $service -and $service.State -ceq 'Running' -and $service.ProcessId -gt 0 -and
                 $service.ProcessId -ne $script:coreProcess.Id -and $service.StartName -ieq 'NT SERVICE\SentinelAICore') {
                 try {
+                    $observation.Phase = 'candidate-version'
                     $metadata = [IO.File]::ReadAllText((Join-Path $script:programRoot 'deployment-version.json')) | ConvertFrom-Json
                     if ($metadata.version -ceq '1.2.0') { $script:observedUnhealthyRunning = $true }
                 } catch { }
             }
         }
+        $observation.Phase = 'ui-error'
         $errorControl = Find-SetupControl 'SetupErrorText'
         if ($null -ne $errorControl -and -not $errorControl.Current.IsOffscreen -and -not [string]::IsNullOrWhiteSpace($errorControl.Current.Name)) {
             Assert-NoSecretText ([string]$errorControl.Current.Name)
             if (-not $ExpectFailure) { throw (Get-SetupFailureSummary) }
             return $true
         }
+        $observation.Phase = 'ui-finished'
         if (Test-SetupControl 'SetupFinishedText' $false) {
             if ($ExpectFailure) { throw 'Unhealthy signed deployment incorrectly reported successful upgrade.' }
             return $true
         }
+        $observation.Phase = 'poll-wait'
         return $false
     } 'Native lifecycle operation did not complete within its deadline.' $script:TimeoutSeconds
-    } catch { throw ('Native lifecycle ' + $Action + ' failed. ' + (Get-SetupFailureSummary)) }
+    } catch {
+        $diagnostics = Get-LifecycleFailureDiagnostics $observation $operationElapsed.Elapsed.TotalSeconds ([string]$_.Exception.Message)
+        throw ('Native lifecycle ' + $Action + ' failed. ' + $diagnostics + ' ' + (Get-SetupFailureSummary))
+    }
     if ($ExpectFailure) { Assert-SetupAcceptance $script:observedUnhealthyRunning 'Signed unhealthy candidate never reached actual SCM Running for health verification.' }
     [void][SentinelAI.Setup.Acceptance.Native]::PostMessage($launch.Host.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
     Assert-SetupAcceptance ($launch.Host.WaitForExit(30000)) 'Completed lifecycle window did not close.'

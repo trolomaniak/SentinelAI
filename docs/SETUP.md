@@ -95,7 +95,7 @@ The default fresh output is `artifacts/setup/win-x64/1.0.0/SentinelAI-Setup.exe`
 
 TASK-024's recorded native acceptance passed the actual outer EXE, protected child runtime, rejection of caller-controlled runtime/temp caches, complete services/ACLs, one-use enrollment, LocalService DPAPI isolation/restart, fresh endpoint telemetry and Desktop authentication/independent lifetime. TASK-025's Windows lifecycle acceptance is pending; portable tests or cross-compilation alone do not establish it. Exact verified results and commits belong in [development status](../.agent/STATUS.md).
 
-The lifecycle fixture runs on a fresh isolated Windows machine with three actual published executables sharing one temporary development trust root: initial `1.0.0`, healthy `1.1.0` and a signed `1.2.0` Core service fixture that runs without passing HTTP health. It exercises upgrade, real health-failure rollback, damaged-file repair, retained-data uninstall and confirmed removal through native controls:
+The lifecycle fixture runs on a fresh isolated Windows machine with three actual published executables sharing one temporary development trust root: initial `1.0.0`, healthy `1.1.0` and a signed `1.2.0` Core service fixture that runs without passing HTTP health. It exercises upgrade, real health-failure rollback, damaged-file repair, retained-data uninstall, restoration with the same identity/enrollment and confirmed removal through native controls:
 
 ```powershell
 .\tests\setup\Lifecycle.Acceptance.ps1 `

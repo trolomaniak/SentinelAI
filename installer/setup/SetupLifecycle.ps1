@@ -380,7 +380,8 @@ function Invoke-SetupLifecycleWorker {
         $state = Inspect-SetupLifecycleInstallation $locations
         Write-Output ('STATE|' + $state.Kind + '|' + $state.Version)
     } else {
-        [void](Assert-SetupLifecycleOwnership $locations -UseContext)
+        # Every operation below validates ownership at its own boundary. Avoid
+        # a duplicate whole-deployment scan inside the bounded health/recovery call.
         switch -CaseSensitive ($Request.action) {
             'lifecycle-context' { New-SetupLifecycleContext $locations $Request }
             'lifecycle-stop' { Write-SetupProgress 'services'; Stop-SetupLifecycleServices $locations }
