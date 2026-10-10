@@ -383,13 +383,24 @@ function Assert-ProtectedTree([string]$Root, [string[]]$AllowedWriters) {
     }
 }
 function Assert-PrivateSetupRuntime([string]$Root) {
-    Assert-ProtectedTree $Root @('S-1-5-32-544', 'S-1-5-18')
-    Assert-SetupAcceptance (Get-Acl -LiteralPath $Root).AreAccessRulesProtected 'The native private runtime root inherits permissions.'
-    foreach ($item in @((Get-Item -LiteralPath $Root -Force)) + @(Get-ChildItem -LiteralPath $Root -Recurse -Force)) {
-        foreach ($rule in (Get-Acl -LiteralPath $item.FullName).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
-            if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and [int]$rule.FileSystemRights -ne 0) {
-                Assert-SetupAcceptance ($rule.IdentityReference.Value -cin @('S-1-5-32-544', 'S-1-5-18')) 'The native runtime cache admits an untrusted reader or writer.'
+    # CLR/PowerShell can remove an ephemeral private temp entry while its live
+    # tree is inspected. Repeat the complete inspection only for missing items;
+    # every ownership/ACL/link violation still fails immediately.
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        try {
+            Assert-ProtectedTree $Root @('S-1-5-32-544', 'S-1-5-18')
+            Assert-SetupAcceptance (Get-Acl -LiteralPath $Root).AreAccessRulesProtected 'The native private runtime root inherits permissions.'
+            foreach ($item in @((Get-Item -LiteralPath $Root -Force)) + @(Get-ChildItem -LiteralPath $Root -Recurse -Force)) {
+                foreach ($rule in (Get-Acl -LiteralPath $item.FullName).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+                    if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and [int]$rule.FileSystemRights -ne 0) {
+                        Assert-SetupAcceptance ($rule.IdentityReference.Value -cin @('S-1-5-32-544', 'S-1-5-18')) 'The native runtime cache admits an untrusted reader or writer.'
+                    }
+                }
             }
+            return
+        } catch {
+            if ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound -or $attempt -eq 2) { throw }
+            Start-Sleep -Milliseconds 25
         }
     }
 }
