@@ -293,7 +293,10 @@ function Get-SetupFailureSummary {
                 'Creating the local administrator...', 'Starting Core...', 'Enrolling Agent...',
                 'Installing Windows services and Desktop...', 'Starting Windows services...',
                 'Installing and enrolling Agent...', 'Installing Desktop and Updater...',
-                'Creating Start Menu shortcuts...', 'Installation finished.', 'Stopping setup...')) {
+                'Creating Start Menu shortcuts...', 'Installation finished.', 'Stopping setup...',
+                'Checking the installed deployment...', 'Replacing verified program files...',
+                'Verifying installation health...', 'Restoring the previous working version...',
+                'Removing the owned installation...', 'Recovering the interrupted installation...', 'Operation finished.')) {
                 if ([string]$progress.Current.Name -ceq $known) { $stage = $known; break }
             }
         }

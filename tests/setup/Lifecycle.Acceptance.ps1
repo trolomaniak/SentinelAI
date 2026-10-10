@@ -248,7 +248,7 @@ function Invoke-LifecycleSetup([string]$Executable, [string]$Action, [bool]$Expe
     ([Windows.Automation.InvokePattern](Find-SetupControl 'SetupLifecycleButton').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)).Invoke()
     Wait-SetupAcceptance { -not (Test-SetupControl 'SetupLifecycleButton') } 'Lifecycle did not begin its explicit operation.'
     $script:observedUnhealthyRunning = $false
-    Wait-SetupAcceptance {
+    try { Wait-SetupAcceptance {
         Assert-SetupChildArguments
         if ($ExpectFailure -and -not $script:observedUnhealthyRunning) {
             # Prove this candidate actually ran under SCM and reached Running.
@@ -274,6 +274,7 @@ function Invoke-LifecycleSetup([string]$Executable, [string]$Action, [bool]$Expe
         }
         return $false
     } 'Native lifecycle operation did not complete within its deadline.' $script:TimeoutSeconds
+    } catch { throw ('Native lifecycle ' + $Action + ' failed. ' + (Get-SetupFailureSummary)) }
     if ($ExpectFailure) { Assert-SetupAcceptance $script:observedUnhealthyRunning 'Signed unhealthy candidate never reached actual SCM Running for health verification.' }
     [void][SentinelAI.Setup.Acceptance.Native]::PostMessage($launch.Host.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
     Assert-SetupAcceptance ($launch.Host.WaitForExit(30000)) 'Completed lifecycle window did not close.'

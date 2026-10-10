@@ -137,6 +137,7 @@ public sealed class SetupWindow : Window
             Application.Current.Properties["ExitCode"] = 0;
             _finished.Text = "SentinelAI installation completed. Open Desktop and sign in with the administrator account you created.";
             _finished.Visibility = Visibility.Visible; _open.Visibility = Visibility.Visible;
+            BringResultIntoView(_finished);
         }
         catch (OperationCanceledException) { Application.Current.Properties["ExitCode"] = 1; }
         catch { ShowError("Installation failed safely. No existing installation was replaced. Close Setup and check the installation state before continuing."); }
@@ -180,6 +181,7 @@ public sealed class SetupWindow : Window
             };
             _finished.Visibility = Visibility.Visible;
             if (action != SetupLifecycleAction.Uninstall && _state.Kind != SetupInstallationKind.RecoveryPending) _open.Visibility = Visibility.Visible;
+            BringResultIntoView(_finished);
         }
         catch (OperationCanceledException) { Application.Current.Properties["ExitCode"] = 1; }
         catch { ShowError("The operation could not be completed. Close Setup and inspect the installation state. Support code: SETUP-LIFECYCLE."); }
@@ -213,7 +215,9 @@ public sealed class SetupWindow : Window
         _lifecycle.IsEnabled = available && _installation is not null && _state is not null && _action.SelectedItem is SetupLifecycleAction action &&
             SetupWorkflow.CanExecuteLifecycle(_state, _installation.Metadata.Version, action, _preserveData.IsChecked != false, _removalConfirmation.Text);
     }
-    private void ShowError(string text) { _error.Text = text; _error.Visibility = Visibility.Visible; Application.Current.Properties["ExitCode"] = 1; }
+    private void BringResultIntoView(FrameworkElement result) =>
+        Dispatcher.BeginInvoke(new Action(result.BringIntoView), System.Windows.Threading.DispatcherPriority.Loaded);
+    private void ShowError(string text) { _error.Text = text; _error.Visibility = Visibility.Visible; Application.Current.Properties["ExitCode"] = 1; BringResultIntoView(_error); }
     private void OpenDesktop()
     {
         _open.IsEnabled = false;
