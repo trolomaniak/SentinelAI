@@ -11,11 +11,12 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Product>SentinelAI</Product>
-    <Description>SentinelAI initial Windows deployment setup</Description>
+    <Description>SentinelAI Windows deployment setup and maintenance</Description>
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../SentinelAI.Setup.Foundation/SentinelAI.Setup.Foundation.csproj" />
+    <ProjectReference Include="../../shared/updates/SentinelAI.Updates.csproj" />
     <!-- Compile the existing authoritative trust/bootstrap implementation unchanged. -->
     <Compile Include="../../desktop/SentinelAI.Desktop/Services/WindowsCoreServices.cs" Link="ExistingCore/WindowsCoreServices.cs" />
     <Compile Include="../../desktop/SentinelAI.Desktop/Services/WindowsInstallationTrust.cs" Link="ExistingCore/WindowsInstallationTrust.cs" />

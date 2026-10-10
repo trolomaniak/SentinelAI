@@ -108,7 +108,17 @@
 - **Definition of Done satisfied:** exact implementation `96eca7418f07bd60a43e8821425c75144aad35d3` passed all ten checks in [PR CI `37922351990`](https://github.com/trolomaniak/SentinelAI/actions/runs/37922351990) and [push CI `37922344678`](https://github.com/trolomaniak/SentinelAI/actions/runs/37922344678). Both actual native Setup jobs compile with MSVC, execute the outer EXE/private WPF runtime on a fresh Windows runner, verify services/accounts/ACLs/enrollment/LocalService DPAPI isolation and restart/fresh exact endpoint telemetry, authenticate the installed Desktop, close it without changing either service and refuse a second installation while preserving state. Each job uploads exactly `SentinelAI-Setup.exe`. Existing WPF, Agent, Core service and published Desktop regressions also pass. The scoped review is PR #28; TASK-025 is not started.
 - Added `docs/SETUP.md`, the portable Setup foundation/private WPF host/native bootstrap, development publisher, archive/metadata/protocol/workflow tests and dedicated `setup-windows` CI. Native fixes preserve production controls: explicit token input validation permits cleanup, credential-free private messages use an exact empty string accepted by the existing strict grammar, module cosmetic progress does not corrupt text protocol, and acceptance waits for ready credential inputs before typing. No production private key or customer credential is embedded or committed.
 
+## TASK-025 implementation and validation
+
+- Resumed Issue #31 after Claude's failed Actions run `37927123450`. No published TASK-025 implementation/PR was present; the separate Claude branch changes only README. This scoped task starts from merged TASK-024 main `d803c160b1a3e3485e04214623cfb7e05740367c` and preserves the independently added Claude workflow.
+- Added native existing-installation inspection and version-selected repair/upgrade/uninstall. One independently trusted, development-signed deployment contains Core, Agent, Desktop and Updater and uses the existing transactional updater's exclusive lock, private extraction, backup, journal, authenticated receipt and bounded health rollback. The installed public root/channel/key/environment remain pinned; repair permits exact installed version and exact authenticated package claims. Explicit retained-data restore keeps the prior version floor.
+- Ownership/service commands remain fixed to the existing paths, Core virtual account and Agent LocalService account. An atomic protected snapshot reconciles only version/executable ownership metadata on replacement/recovery. SQLite, administrator/Core/endpoint identities, DPAPI enrollment, protected configuration and licensing state remain outside replaceable code and are not reinitialized. Uninstall removes only proven owned services/code/shortcut; data is preserved by default, with separate opt-in plus exact `DELETE` confirmation for removal.
+- Full solution/dashboard build passes with zero .NET warnings/errors. Portable Setup policy/private-wire tests pass (436 C# and 116 PowerShell assertions). Whole-deployment transaction/repair/restore tests and full regressions are being completed; actual Windows lifecycle acceptance is pending. The new separate Windows job builds/executes older, newer and signed unhealthy native EXEs, checks rollback/identity/configuration/DPAPI/license preservation, damages and repairs assemblies, then tests retained-data and explicit-removal uninstall. No native result is assumed before that job passes.
+- TASK-025 remains in progress. Issue #31's task-specific instruction requires a scoped PR for review, no merge to main and no TASK-026.
+
 ## Current architecture
+
+- TASK-025 extends the same native Setup entry point with explicit local maintenance of the whole code deployment, integrating the existing updater. Code-only deployment archives allow four fixed component directories plus strict signed version metadata, bounded to 4,096 paths/1 GiB; existing Core/Agent component limits stay 1,024 entries/512 MiB. Protected data ownership snapshots reconcile versions across rollback and expose explicit interrupted-operation recovery; no automatic download, scheduling, data migration or enrollment reset is added.
 
 - TASK-024 adds the native single-EXE first-install entry point, portable Setup foundation and private WPF host. It composes existing signed package installers and existing Desktop Core trust checks; Core remains the authority for administrators and enrollment. Ordinary protected runtime directories avoid elevated/service reuse of a user-controlled single-file extraction cache. The default local layout and existing API contracts remain unchanged.
 
@@ -149,7 +159,7 @@
 
 ## Important decisions
 
-TASK-024 uses a native bootstrap before CLR initialization because the .NET single-file extraction cache can reuse caller-controlled existing files. Its private public trust root is independent of the signed bundle. Only the one-use enrollment token reaches PowerShell; administrator login uses the existing native connected-peer checks. Setup is first-install only, with no automatic repair/rollback, policy relaxation, new dependency, production credential or future task. Details and upstream evidence are recorded in `.agent/DECISIONS.md` and `docs/SETUP.md`.
+TASK-024 uses a native bootstrap before CLR initialization because the .NET single-file extraction cache can reuse caller-controlled existing files. Its private public trust root is independent of the signed bundle. Only the one-use enrollment token reaches PowerShell; administrator login uses the existing native connected-peer checks. TASK-025 maintains that bootstrap and adds one signed whole-code transaction with pinned installed trust, exact-version repair, bounded rollback/recovery and explicit data-removal consent. Details are recorded in `.agent/DECISIONS.md` and `docs/SETUP.md`.
 
 TASK-023 keeps the GUI lifetime separate from both protection services, scopes activation to the existing Windows user/session, and stores only explicit nonsecret current-user UI opt-ins. Tray notifications and service status are bounded observations without service control or automatic authentication. The dashboard remains development/diagnostic compatibility only.
 
@@ -337,11 +347,23 @@ TASK-021 Definition of Done is fully satisfied on verified implementation `77604
 - [x] Native Windows acceptance covers the complete path, including enrollment/DPAPI/restart/telemetry and repeated-install refusal.
 - [x] Status records implementation, architecture, decisions, known issues, next task and the exact verified implementation commit and native CI evidence.
 
+## TASK-025 Definition of Done
+
+- [ ] Upgrade from an older supported build succeeds on actual Windows.
+- [ ] Failed signed upgrade rolls back to a working version on actual Windows.
+- [ ] Repair restores damaged program files without resetting identity on actual Windows.
+- [ ] Uninstall removes owned services/code predictably on actual Windows.
+- [ ] Data removal is explicit rather than accidental; native keep/remove flows pass.
+- [ ] Installation lifecycle tests run successfully on Windows.
+- [x] `.agent/STATUS.md` records implementation, architecture, decisions, validation and remaining work.
+
 ## Next task
 
-TASK-024 is complete in scoped PR #28 on the verified implementation below. TASK-025 is next in the sequence and has not been read or started; this task cycle ends with the authorized merge after all final review checks pass. The original TASK-015 console Agent uninstall/reinstall scenario and earlier draft release transfer remain separate outstanding work.
+Finish TASK-025 validation and prepare its scoped PR for review. TASK-026 remains unstarted; Issue #31 explicitly prohibits merging this task to main. The original TASK-015 console Agent uninstall/reinstall scenario and earlier draft release transfer remain separate outstanding work.
 
 ## Last verified commit
+
+Current TASK-025 base is merged main `d803c160b1a3e3485e04214623cfb7e05740367c` (PR #28). TASK-024's final documentation head `48dd5203cdc232447a976b821f6f6bc9aea039c7` passed all ten checks in [PR CI `37923316660`](https://github.com/trolomaniak/SentinelAI/actions/runs/37923316660) and push CI `37923309759`. TASK-025 native verification is pending and will supersede this baseline only after actual results.
 
 `96eca7418f07bd60a43e8821425c75144aad35d3` — TASK-024 implementation in PR #28, all ten push/PR checks green in [PR CI `37922351990`](https://github.com/trolomaniak/SentinelAI/actions/runs/37922351990) and [push CI `37922344678`](https://github.com/trolomaniak/SentinelAI/actions/runs/37922344678). Both native jobs built and executed the actual single EXE and uploaded its artifact. Full fresh deployment, protected runtime/ACLs, services, Agent enrollment/DPAPI/restart/telemetry, Desktop authentication/independent lifetime and repeated-install refusal passed. The final status/README follow-up changes documentation only.
 

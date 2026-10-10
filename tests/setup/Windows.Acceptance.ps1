@@ -6,7 +6,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$ExecutablePath,
-    [ValidateRange(60, 900)][int]$TimeoutSeconds = 300
+    [ValidateRange(60, 900)][int]$TimeoutSeconds = 300,
+    [switch]$PreserveInstallation,
+    [ref]$InstallationContext
 )
 
 Set-StrictMode -Version Latest
@@ -119,6 +121,7 @@ $desktop = $null; $coreProcess = $null; $agentProcess = $null
 $activeProcess = $null; $activeRoot = $null; $client = $null; $accessToken = $null
 $pendingOuter = $null; $pendingChild = $null
 $installationStarted = $false
+$installationCompleted = $false
 $manualShortcutOpened = $false
 $poisonedCaller = Join-Path ([IO.Path]::GetTempPath()) ('sentinelai-setup-untrusted-' + [Guid]::NewGuid().ToString('N'))
 $poisonedExtraction = Join-Path $poisonedCaller 'runtime-cache'
@@ -165,9 +168,9 @@ function Use-SetupWindow([Diagnostics.Process]$Process) {
     } 'The tested executable did not open a native window.'
     $script:activeRoot = [Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
 }
-function Start-TestSetup {
+function Start-TestSetup([string]$SetupExecutable = $script:ExecutablePath) {
     $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $script:ExecutablePath; $start.WorkingDirectory = Split-Path -Parent $script:ExecutablePath
+    $start.FileName = $SetupExecutable; $start.WorkingDirectory = Split-Path -Parent $SetupExecutable
     # The requireAdministrator manifest is exercised under an already elevated
     # token. No silent installation, extracted installer script or UAC bypass.
     $start.UseShellExecute = $false
@@ -651,24 +654,26 @@ try {
     $launch = Start-TestSetup; $rerun = $launch.Host; $rerunOuter = $launch.Outer; $launch = $null
     Use-SetupWindow $rerun
     Assert-NativeSetupRuntime $rerun $rerunOuter
-    Set-SetupCredentials
-    Submit-NativeAction 'SetupInstallButton'
-    Wait-SetupAcceptance { -not (Test-SetupControl 'SetupInstallButton') } 'Repeated Setup did not process its submitted credentials.'
-    Wait-SetupAcceptance {
-        $control = Find-SetupControl 'SetupErrorText'
-        return $null -ne $control -and -not $control.Current.IsOffscreen -and -not [string]::IsNullOrWhiteSpace($control.Current.Name)
-    } 'Actual Setup did not refuse an existing installation.' $TimeoutSeconds
-    Assert-SetupAcceptance (-not (Test-SetupControl 'SetupFinishedText' $false)) 'Setup incorrectly reported a successful second installation.'
-    Assert-NoSecretText ([string](Find-SetupControl 'SetupErrorText').Current.Name)
+    Wait-SetupAcceptance { Test-SetupControl 'SetupLifecycleAction' } 'Repeated Setup did not detect the owned installation and offer maintenance.'
+    $version = Find-SetupControl 'SetupInstallationVersion'
+    Assert-SetupAcceptance ($null -ne $version -and -not [string]::IsNullOrWhiteSpace($version.Current.Name)) 'Maintenance did not display the installed version.'
+    Assert-NoSecretText ([string]$version.Current.Name)
+    Assert-SetupAcceptance (-not (Test-SetupControl 'SetupInstallButton')) 'Existing installation incorrectly offered fresh administrator creation.'
+    Assert-SetupAcceptance (-not (Test-SetupControl 'SetupFinishedText' $false)) 'Detection without an explicit action incorrectly reported a second installation.'
     foreach ($path in $preservedPaths) { Assert-SetupAcceptance ((Read-SetupStateDigest $path) -ceq $preserved[$path]) 'Refused Setup changed existing installation state.' }
     Assert-CoreListener
     Assert-SetupAcceptance (-not $agentProcess.HasExited -and (Get-SetupService 'SentinelAIAgent').ProcessId -eq $agentProcess.Id) 'Refused Setup changed the existing Agent service.'
     [void][SentinelAI.Setup.Acceptance.Native]::PostMessage($rerun.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
-    Assert-SetupAcceptance ($rerun.WaitForExit(30000) -and $rerun.ExitCode -ne 0) 'Refused Setup did not exit with failure.'
-    Assert-SetupAcceptance ($rerunOuter.WaitForExit(30000) -and $rerunOuter.ExitCode -eq $rerun.ExitCode) 'The actual single-EXE wrapper did not propagate first-install refusal.'
+    Assert-SetupAcceptance ($rerun.WaitForExit(30000)) 'Unsubmitted maintenance did not close.'
+    Assert-SetupAcceptance ($rerunOuter.WaitForExit(30000) -and $rerunOuter.ExitCode -eq $rerun.ExitCode) 'The actual single-EXE wrapper did not propagate maintenance closure.'
     Assert-PoisonedCallerUntouched
+    if ($PreserveInstallation -and $null -ne $InstallationContext) {
+        # Private in-process synthetic fixture handoff; never emit this object.
+        $InstallationContext.Value = [pscustomobject]@{ Username = $username; Password = $password; EndpointId = $endpointId }
+    }
+    $installationCompleted = $true
     [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount; Installation = $programRoot; DesktopShortcutFallback = $manualShortcutOpened;
-        NativeSetup = 'Single native EXE, private CLR, unused caller caches, protected layout, administrator, services, enrollment, Desktop sign-in and first-install refusal' }
+        NativeSetup = 'Single native EXE, private CLR, unused caller caches, protected layout, administrator, services, enrollment, Desktop sign-in and nonmutating maintenance detection' }
 } finally {
     foreach ($process in @($desktop, $rerun, $setup, $rerunOuter, $setupOuter)) {
         if ($null -ne $process) {
@@ -679,7 +684,7 @@ try {
     # exact SCM identity checks reject unknown registrations; install itself was
     # exclusively performed by the actual Setup executable above.
     try {
-        if ($installationStarted) {
+        if ($installationStarted -and -not ($PreserveInstallation -and $installationCompleted)) {
             $installer = Join-Path $repositoryRoot 'installer/pilot'
             Import-Module (Join-Path $installer 'PilotInstaller.psm1') -Force -DisableNameChecking
             try {

@@ -120,14 +120,16 @@ try
     var count = SetupWorkflow.WriteWorkerRequest(buffer, "complete", "C:\\ProgramData\\SentinelAI-Setup\\0123456789abcdef0123456789abcdef", metadata, oneUseToken.AsSpan());
     Ensure(count <= 8192 && buffer[count - 1] == '\n', "Worker input is one bounded JSON line");
     using var document = JsonDocument.Parse(buffer.AsMemory(0, count - 1));
-    Ensure(document.RootElement.EnumerateObject().Select(field => field.Name).SequenceEqual(new[] { "action", "workDirectory", "keyId", "channel", "enrollmentToken" }), "Worker has exact five fields without administrator credentials");
+    Ensure(document.RootElement.EnumerateObject().Select(field => field.Name).SequenceEqual(new[] { "action", "workDirectory", "keyId", "channel", "enrollmentToken", "version", "preserveData" }), "Worker has exact seven fields without administrator credentials");
+    Ensure(document.RootElement.EnumerateObject().All(field => field.Value.ValueKind == JsonValueKind.String), "Strict worker grammar uses string values only");
+    Ensure(document.RootElement.GetProperty("version").GetString() == metadata.Version && document.RootElement.GetProperty("preserveData").GetString() == "true", "Fresh installation has an explicit candidate version and preserves data");
     Ensure(document.RootElement.GetProperty("enrollmentToken").GetString() == oneUseToken, "Complete uses one-use token only");
     foreach (var action in new[] { "prepare-core", "start-core" })
     {
         count = SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\ProgramData\\SentinelAI-Setup\\0123456789abcdef0123456789abcdef", metadata, ReadOnlySpan<char>.Empty);
         using var request = JsonDocument.Parse(buffer.AsMemory(0, count - 1));
         Ensure(request.RootElement.GetProperty("action").GetString() == action && request.RootElement.GetProperty("enrollmentToken").ValueKind == JsonValueKind.String && request.RootElement.GetProperty("enrollmentToken").GetString() == "", "Preparing and starting Core use the strict parser's empty credential-free string");
-        Ensure(request.RootElement.EnumerateObject().Count() == 5, "All worker actions use the same exact fields");
+        Ensure(request.RootElement.EnumerateObject().Count() == 7, "All worker actions use the same exact fields");
         await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, oneUseToken.AsSpan()); return Task.CompletedTask; }, "No premature enrollment token");
     }
     foreach (var invalid in new[] { "", new string('a', 63), new string('a', 65), new string('g', 64), new string('ａ', 64), oneUseToken[..63] + "\n", oneUseToken[..63] + " " })
@@ -141,6 +143,21 @@ try
         await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, "prepare-core", path, metadata, ReadOnlySpan<char>.Empty); return Task.CompletedTask; }, "Worker path length bounded before serialization");
     await Reject(() => { SetupWorkflow.WriteWorkerRequest(new byte[8191], "prepare-core", "C:\\safe", metadata, ReadOnlySpan<char>.Empty); return Task.CompletedTask; }, "Fixed worker buffer bound");
     await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, "prepare-core", "C:\\safe", metadata with { KeyId = new string('x', 65) }, ReadOnlySpan<char>.Empty); return Task.CompletedTask; }, "Metadata cannot exceed worker budget");
+    foreach (var action in new[] { "inspect", "lifecycle-stop", "lifecycle-start", "lifecycle-health", "lifecycle-context", "lifecycle-cleanup", "uninstall", "lifecycle-reconcile" })
+    {
+        count = SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, ReadOnlySpan<char>.Empty);
+        using var request = JsonDocument.Parse(buffer.AsMemory(0, count - 1));
+        Ensure(request.RootElement.GetProperty("action").GetString() == action && request.RootElement.GetProperty("enrollmentToken").GetString() == "", "Lifecycle phases are credential-free fixed actions");
+        Ensure(request.RootElement.EnumerateObject().Count() == 7 && request.RootElement.EnumerateObject().All(field => field.Value.ValueKind == JsonValueKind.String), "Lifecycle request obeys the exact string-only grammar");
+        await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, oneUseToken.AsSpan()); return Task.CompletedTask; }, "Maintenance never accepts a fresh enrollment token");
+        if (action != "uninstall")
+            await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, ReadOnlySpan<char>.Empty, false); return Task.CompletedTask; }, "Only an uninstall request can explicitly remove data");
+    }
+    count = SetupWorkflow.WriteWorkerRequest(buffer, "uninstall", "C:\\safe", metadata, ReadOnlySpan<char>.Empty, false);
+    using var removal = JsonDocument.Parse(buffer.AsMemory(0, count - 1));
+    Ensure(removal.RootElement.GetProperty("preserveData").GetString() == "false", "Explicit removal is an exact false string rather than an ambiguous JSON boolean");
+    foreach (var version in new[] { "", "1.0", "1.0.0.0", "+1.0.0", "1.0.0\n", "1.0000000000.0", "1.0.beta", "１.0.0", "1.-1.0", "01.0.0", "65536.0.0", "999999999.0.0" })
+        await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, "inspect", "C:\\safe", metadata with { Version = version }, ReadOnlySpan<char>.Empty); return Task.CompletedTask; }, "Unsupported candidate version never reaches PowerShell");
 }
 finally { CryptographicOperations.ZeroMemory(buffer); }
 foreach (var marker in new[] { "PROGRESS|validate", "PROGRESS|core", "PROGRESS|services", "PROGRESS|agent", "PROGRESS|desktop", "PROGRESS|shortcut" }) Ensure(SetupWorkflow.ProgressFor(marker) is not null, "Fixed progress allowlist");
@@ -149,6 +166,60 @@ foreach (var name in new[] { "DOTNET_STARTUP_HOOKS", "Dotnet_StartUp_Hooks", "do
     Ensure(SetupEnvironmentRules.IsExecutionOverride(name), "Execution override is identified independently of Windows environment casing");
 foreach (var name in new[] { "TEMP", "TMP", "SystemRoot", "PATH", "PSModulePath", "__PSLockdownPolicy", "HTTPS_PROXY", "PSExecutionPolicyPreference", "psExecutionPolicyPreference" })
     Ensure(!SetupEnvironmentRules.IsExecutionOverride(name), "Protected temp, machine policy and unrelated configuration preserved");
+
+foreach (var (candidate, installed, comparison) in new[] { ("1.0.0", "1.0.0", 0), ("10.0.0", "2.9.9", 1), ("2.10.0", "2.9.99", 1), ("1.2.10", "1.2.9", 1), ("1.0.0", "1.0.1", -1), ("65535.0.0", "2.0.0", 1) })
+    Ensure(Math.Sign(SetupWorkflow.CompareVersions(candidate, installed)) == comparison, "Supported versions compare numeric components rather than text");
+foreach (var kind in new[] { SetupInstallationKind.Installed, SetupInstallationKind.Retained })
+{
+    var installation = new SetupInstallation(kind, "2.0.0");
+    Ensure(SetupWorkflow.AllowedLifecycleActions(installation, "2.0.0").SequenceEqual(new[] { SetupLifecycleAction.Repair, SetupLifecycleAction.Uninstall }), "Equal version permits repair without resetting identity");
+    Ensure(SetupWorkflow.AllowedLifecycleActions(installation, "2.0.1").SequenceEqual(new[] { SetupLifecycleAction.Upgrade, SetupLifecycleAction.Uninstall }), "Newer version permits upgrade");
+    Ensure(SetupWorkflow.AllowedLifecycleActions(installation, "1.9.9").SequenceEqual(new[] { SetupLifecycleAction.Uninstall }), "Older setup cannot downgrade or repair with older code");
+    Ensure(SetupWorkflow.CanExecuteLifecycle(installation, "2.0.0", SetupLifecycleAction.Uninstall, true, ""), "Uninstall preserves data by default");
+    foreach (var confirmation in new[] { "", "delete", " DELETE", "DELETE ", "DELETE\n" })
+        Ensure(!SetupWorkflow.CanExecuteLifecycle(installation, "2.0.0", SetupLifecycleAction.Uninstall, false, confirmation), "Accidental or ambiguous destructive selection is refused");
+    Ensure(SetupWorkflow.CanExecuteLifecycle(installation, "2.0.0", SetupLifecycleAction.Uninstall, false, "DELETE"), "Data removal requires explicit exact confirmation");
+    Ensure(!SetupWorkflow.CanExecuteLifecycle(installation, "2.0.0", SetupLifecycleAction.Repair, false, "DELETE"), "Repair always preserves security data");
+    Ensure(!SetupWorkflow.CanExecuteLifecycle(installation, "2.0.1", SetupLifecycleAction.Upgrade, false, "DELETE"), "Upgrade always preserves security data");
+}
+foreach (var kind in new[] { SetupInstallationKind.Fresh, SetupInstallationKind.Foreign })
+    Ensure(SetupWorkflow.AllowedLifecycleActions(new(kind), "2.0.0").Count == 0, "Fresh or foreign state is never adopted as an existing installation");
+Ensure(SetupWorkflow.AllowedLifecycleActions(new(SetupInstallationKind.RecoveryPending, "2.0.0"), "1.0.0").SequenceEqual(new[] { SetupLifecycleAction.Repair }), "Recovery restores the previous deployment independently of candidate version and forbids uninstall until recovered");
+foreach (var marker in new[] { "STATE|Fresh|", "STATE|Installed|1.0.0", "STATE|Retained|1.0.0", "STATE|Foreign|", "STATE|RecoveryPending|", "STATE|RecoveryPending|1.0.0" })
+    Ensure(Enum.IsDefined(SetupWorkflow.ParseInstallationState(marker).Kind), "Only exact fixed state markers are accepted");
+foreach (var marker in new[] { "", "STATE|Unknown|", "STATE|fresh|", "STATE|1|1.0.0", "STATE|Fresh|1.0.0", "STATE|Foreign|1.0.0", "STATE|Installed|", "STATE|Retained|latest", "STATE|RecoveryPending|1", "STATE|Installed|01.0.0", "STATE|Installed|65536.0.0", "STATE|Installed|1.0.0|extra", "STATE|Installed|1.0.0\n", new string('x', 129) })
+    await Reject(() => { _ = SetupWorkflow.ParseInstallationState(marker); return Task.CompletedTask; }, "Malformed or oversized state output cannot enable operations");
+var lifecycle = new FakeLifecycle();
+var current = new SetupInstallation(SetupInstallationKind.Installed, "1.0.0");
+await SetupWorkflow.ExecuteLifecycleAsync(lifecycle, current, "1.0.0", SetupLifecycleAction.Repair, true, "", CancellationToken.None);
+Ensure(lifecycle.Calls == 1 && lifecycle.Action == SetupLifecycleAction.Repair && lifecycle.PreserveData, "Validated lifecycle action reaches the backend without credentials");
+foreach (var (installation, candidate, action, preserve, confirmation) in new[]
+{
+    (new SetupInstallation(SetupInstallationKind.Foreign), "1.0.0", SetupLifecycleAction.Uninstall, false, "DELETE"),
+    (current, "0.9.0", SetupLifecycleAction.Upgrade, true, ""),
+    (current, "1.0.0", SetupLifecycleAction.Uninstall, false, ""),
+    (current, "1.0.0", SetupLifecycleAction.Repair, false, "DELETE"),
+    (new SetupInstallation(SetupInstallationKind.RecoveryPending, "1.0.0"), "1.0.0", SetupLifecycleAction.Uninstall, true, "")
+})
+{
+    lifecycle = new FakeLifecycle();
+    await Reject(() => SetupWorkflow.ExecuteLifecycleAsync(lifecycle, installation, candidate, action, preserve, confirmation, CancellationToken.None), "Invalid lifecycle selection is refused before mutation");
+    Ensure(lifecycle.Calls == 0, "Refused selection cannot reach a privileged backend");
+}
+using (var cancelLifecycle = new CancellationTokenSource())
+{
+    cancelLifecycle.Cancel(); lifecycle = new FakeLifecycle();
+    try { await SetupWorkflow.ExecuteLifecycleAsync(lifecycle, current, "1.0.0", SetupLifecycleAction.Uninstall, false, "DELETE", cancelLifecycle.Token); throw new InvalidOperationException("Canceled lifecycle accepted"); }
+    catch (OperationCanceledException) { assertions++; }
+    Ensure(lifecycle.Calls == 0, "Canceled data-removal request never reaches the backend");
+}
+using (var cancelLifecycle = new CancellationTokenSource())
+{
+    lifecycle = new FakeLifecycle { AfterExecute = cancelLifecycle.Cancel };
+    try { await SetupWorkflow.ExecuteLifecycleAsync(lifecycle, current, "1.0.0", SetupLifecycleAction.Repair, true, "", cancelLifecycle.Token); throw new InvalidOperationException("Canceled lifecycle completion accepted"); }
+    catch (OperationCanceledException) { assertions++; }
+    Ensure(lifecycle.Calls == 1, "Canceled completion is not rendered as a successful operation");
+}
 
 var sequence = new List<string>(); var fake = new FakeWorker(sequence); var administrator = new FakeAdministrator(sequence); var issuer = new FakeIssuer(sequence);
 await SetupWorkflow.InstallAsync(fake, administrator, issuer, " operator ", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None);
@@ -204,6 +275,18 @@ assertions += await EnrollmentProtocolTests.RunAsync();
 Console.WriteLine($"Setup foundation: {assertions} assertions passed.");
 
 sealed class SilentProgress : IProgress<string> { public void Report(string value) { } }
+sealed class FakeLifecycle : ISetupLifecycleBackend
+{
+    public int Calls { get; private set; }
+    public SetupLifecycleAction Action { get; private set; }
+    public bool PreserveData { get; private set; }
+    public Action? AfterExecute { get; init; }
+    public Task<SetupInstallation> InspectAsync(CancellationToken token) => Task.FromResult(new SetupInstallation(SetupInstallationKind.Installed, "1.0.0"));
+    public Task<SetupLifecycleResult> ExecuteAsync(SetupLifecycleAction action, bool preserveData, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested(); Calls++; Action = action; PreserveData = preserveData; AfterExecute?.Invoke(); return Task.FromResult(new SetupLifecycleResult(true));
+    }
+}
 sealed class FakeWorker(List<string> sequence) : ISetupWorker
 {
     public Action? AfterPrepare { get; init; }

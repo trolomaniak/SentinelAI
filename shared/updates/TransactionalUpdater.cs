@@ -34,21 +34,44 @@ public sealed class TransactionalUpdater
             throw new ArgumentException("Update health and recovery timing must be explicitly bounded.");
     }
 
-    public async Task<UpdateInstallResult> InstallAsync(ReadOnlyMemory<byte> signedManifest, string packagePath,
+    public Task<UpdateInstallResult> InstallAsync(ReadOnlyMemory<byte> signedManifest, string packagePath,
         UpdateVerificationPolicy policy, string installationDirectory, IServiceUpdateLifecycle lifecycle,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) => InstallCoreAsync(signedManifest, packagePath, policy,
+            installationDirectory, lifecycle, InstallationMode.Upgrade, cancellationToken);
+
+    /// <summary>Restores code at the authoritative installed version using the same authenticated transaction and rollback.</summary>
+    public Task<UpdateInstallResult> RepairAsync(ReadOnlyMemory<byte> signedManifest, string packagePath,
+        UpdateVerificationPolicy policy, string installationDirectory, IServiceUpdateLifecycle lifecycle,
+        CancellationToken cancellationToken = default) => InstallCoreAsync(signedManifest, packagePath, policy,
+            installationDirectory, lifecycle, InstallationMode.Repair, cancellationToken);
+
+    /// <summary>Restores an empty owned code directory without lowering the authoritative retained version.</summary>
+    public Task<UpdateInstallResult> RestoreAsync(ReadOnlyMemory<byte> signedManifest, string packagePath,
+        UpdateVerificationPolicy policy, string installationDirectory, IServiceUpdateLifecycle lifecycle,
+        CancellationToken cancellationToken = default) => InstallCoreAsync(signedManifest, packagePath, policy,
+            installationDirectory, lifecycle, InstallationMode.Restore, cancellationToken);
+
+    private async Task<UpdateInstallResult> InstallCoreAsync(ReadOnlyMemory<byte> signedManifest, string packagePath,
+        UpdateVerificationPolicy policy, string installationDirectory, IServiceUpdateLifecycle lifecycle,
+        InstallationMode mode, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(lifecycle);
         if (signedManifest.Length is < 1 or > UpdateManifestFormat.MaximumDocumentBytes)
             throw new UpdateValidationException();
         var document = signedManifest.ToArray(); // Keep authenticated metadata immutable across asynchronous work.
-        var verified = UpdateManifestVerifier.Verify(document, policy);
+        var verified = mode switch
+        {
+            InstallationMode.Repair => UpdateManifestVerifier.VerifyForRepair(document, policy),
+            InstallationMode.Restore => VerifyForRestore(document, policy),
+            _ => UpdateManifestVerifier.Verify(document, policy)
+        };
         var expectedExecutable = ExpectedExecutable(verified.Manifest.ArtifactId);
+        var maximumWorkEntries = MaximumWorkEntries(verified.Manifest.ArtifactId);
         var paths = Paths.Create(installationDirectory, mustExist: true);
         await using var installationLock = AcquireLock(paths);
         if (File.Exists(paths.Journal)) throw new IOException("A pending update must be recovered before another installation.");
-        ValidateCodeDirectory(paths.Target, expectedExecutable);
-        ValidateInstalledVersion(paths.Target, verified, policy);
+        ValidateInstallationTarget(paths.Target, expectedExecutable, mode);
+        ValidateInstalledVersion(paths.Target, verified, policy, mode == InstallationMode.Repair);
         cancellationToken.ThrowIfCancellationRequested();
         var transaction = new Journal(Guid.NewGuid().ToString("N"), "prepared", Convert.ToBase64String(document));
         var work = paths.Work(transaction.Id);
@@ -61,7 +84,15 @@ public sealed class TransactionalUpdater
         {
             UpdateFileSystem.RejectReparseAncestors(packagePath);
             await UpdateArtifactVerifier.CopyAndVerifyAsync(packagePath, verifiedPackage, verified, cancellationToken);
-            await PackageExtractor.ExtractAsync(verifiedPackage, replacement, expectedExecutable, cancellationToken);
+            if (verified.Manifest.ArtifactId == PackageExtractor.DeploymentArtifactId)
+            {
+                await PackageExtractor.ExtractDeploymentAsync(verifiedPackage, replacement, cancellationToken);
+                var marker = await ReadBoundedAsync(Path.Combine(replacement, DeploymentPackageVersion.FileName),
+                    DeploymentPackageVersion.MaximumDocumentBytes, cancellationToken);
+                if (DeploymentPackageVersion.Read(marker) != verified.Manifest.Version) throw new UpdateValidationException();
+            }
+            else
+                await PackageExtractor.ExtractAsync(verifiedPackage, replacement, expectedExecutable, cancellationToken);
             // The publisher cannot supply an installed-state receipt; only a healthy transaction writes one.
             if (File.Exists(Path.Combine(replacement, ReceiptFileName))) throw new InvalidDataException("A package cannot contain an update receipt.");
             cancellationToken.ThrowIfCancellationRequested();
@@ -69,7 +100,7 @@ public sealed class TransactionalUpdater
             journalWritten = true;
             await InvokeLifecycleAsync(lifecycle.StopAsync, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            ValidateCodeDirectory(paths.Target, expectedExecutable);
+            ValidateInstallationTarget(paths.Target, expectedExecutable, mode);
             UpdateFileSystem.RejectReparseAncestors(backup);
             Directory.Move(paths.Target, backup);
             transaction = transaction with { Phase = "backed-up" };
@@ -92,15 +123,30 @@ public sealed class TransactionalUpdater
         {
             if (!journalWritten)
             {
-                UpdateFileSystem.DeleteOwnedDirectory(work);
+                UpdateFileSystem.DeleteOwnedDirectory(work, maximumWorkEntries);
                 throw;
             }
-            return await RollbackAsync(paths, transaction, lifecycle, exception is OperationCanceledException ? "cancelled" : "update_failed");
+            return await RollbackAsync(paths, transaction, lifecycle, exception is OperationCanceledException ? "cancelled" : "update_failed", maximumWorkEntries, expectedExecutable);
         }
         // A cleanup problem after the durable healthy commit must not revert successfully running code.
-        try { Cleanup(paths, work); }
+        try { Cleanup(paths, work, maximumWorkEntries); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
         return new UpdateInstallResult(UpdateInstallStatus.Installed, verified.Manifest.Version, null);
+    }
+
+    /// <summary>Authenticates installed metadata without authorizing replay or replacement of code.</summary>
+    public async Task<VerifiedUpdateManifest?> ReadInstalledReceiptAsync(string installationDirectory,
+        UpdateVerificationPolicy policy, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        cancellationToken.ThrowIfCancellationRequested();
+        var paths = Paths.Create(installationDirectory, mustExist: false);
+        var receiptPath = Path.Combine(paths.Target, ReceiptFileName);
+        UpdateFileSystem.RejectReparseAncestors(receiptPath);
+        if (Directory.Exists(receiptPath)) throw new IOException("The installed receipt is not a file.");
+        if (!File.Exists(receiptPath)) return null;
+        return UpdateManifestVerifier.Authenticate(await ReadBoundedAsync(receiptPath,
+            UpdateManifestFormat.MaximumDocumentBytes, cancellationToken), policy);
     }
 
     public async Task<UpdateInstallResult> RecoverAsync(string installationDirectory, UpdateVerificationPolicy policy,
@@ -113,12 +159,13 @@ public sealed class TransactionalUpdater
         cancellationToken.ThrowIfCancellationRequested();
         var transaction = await ReadJournalAsync(paths.Journal, cancellationToken);
         var authenticated = UpdateManifestVerifier.Authenticate(Convert.FromBase64String(transaction.Manifest), policy);
-        ExpectedExecutable(authenticated.Manifest.ArtifactId);
+        var expectedExecutable = ExpectedExecutable(authenticated.Manifest.ArtifactId);
+        var maximumWorkEntries = MaximumWorkEntries(authenticated.Manifest.ArtifactId);
         var work = paths.Work(transaction.Id);
         UpdateFileSystem.RejectReparseAncestors(work);
         if (!Directory.Exists(work) && transaction.Phase is not ("committed" or "rolled-back"))
             throw new IOException("A pending update has lost its transaction directory.");
-        if (Directory.Exists(work)) UpdateFileSystem.ValidateTree(work);
+        if (Directory.Exists(work)) UpdateFileSystem.ValidateTree(work, maximumWorkEntries);
         if (transaction.Phase == "committed")
         {
             // A durable commit can be cleaned up only when the signed receipt matches that exact update.
@@ -126,14 +173,14 @@ public sealed class TransactionalUpdater
             var receipt = await ReadBoundedAsync(Path.Combine(paths.Target, ReceiptFileName), UpdateManifestFormat.MaximumDocumentBytes, cancellationToken);
             if (!receipt.AsSpan().SequenceEqual(Convert.FromBase64String(transaction.Manifest)))
                 throw new IOException("The committed update receipt does not match its transaction.");
-            Cleanup(paths, work);
+            Cleanup(paths, work, maximumWorkEntries);
             return new UpdateInstallResult(UpdateInstallStatus.Installed, authenticated.Manifest.Version, null);
         }
-        return await RollbackAsync(paths, transaction, lifecycle, "interrupted_update");
+        return await RollbackAsync(paths, transaction, lifecycle, "interrupted_update", maximumWorkEntries, expectedExecutable);
     }
 
     private async Task<UpdateInstallResult> RollbackAsync(Paths paths, Journal transaction,
-        IServiceUpdateLifecycle lifecycle, string failureCode)
+        IServiceUpdateLifecycle lifecycle, string failureCode, int maximumWorkEntries, string expectedExecutable)
     {
         using var recovery = new CancellationTokenSource(_recoveryTimeout);
         var work = paths.Work(transaction.Id);
@@ -145,12 +192,12 @@ public sealed class TransactionalUpdater
             await InvokeLifecycleAsync(lifecycle.StopAsync, recovery.Token);
             recovery.Token.ThrowIfCancellationRequested();
             UpdateFileSystem.RejectReparseAncestors(paths.Target);
-            if (Directory.Exists(work)) UpdateFileSystem.ValidateTree(work);
+            if (Directory.Exists(work)) UpdateFileSystem.ValidateTree(work, maximumWorkEntries);
             if (Directory.Exists(backup))
             {
                 if (Directory.Exists(paths.Target))
                 {
-                    UpdateFileSystem.ValidateTree(paths.Target);
+                    ValidateCodeDirectory(paths.Target, expectedExecutable, allowMissingExecutables: true);
                     if (Directory.Exists(failed)) throw new IOException("Rollback paths are ambiguous.");
                     Directory.Move(paths.Target, failed);
                 }
@@ -162,13 +209,13 @@ public sealed class TransactionalUpdater
             }
             else if (!Directory.Exists(paths.Target) || transaction.Phase is "backed-up" or "installed")
                 throw new IOException("The previous installation is unavailable for rollback.");
-            UpdateFileSystem.ValidateTree(paths.Target);
+            ValidateCodeDirectory(paths.Target, expectedExecutable, allowMissingExecutables: true);
             await InvokeLifecycleAsync(token => lifecycle.StartAsync(paths.Target, token), recovery.Token);
             await EnsureHealthyAsync(paths.Target, lifecycle, recovery.Token);
             recovery.Token.ThrowIfCancellationRequested();
             transaction = transaction with { Phase = "rolled-back" };
             await WriteJournalAsync(paths, transaction, recovery.Token);
-            Cleanup(paths, work);
+            Cleanup(paths, work, maximumWorkEntries);
             return new UpdateInstallResult(UpdateInstallStatus.RolledBack, null, failureCode);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
@@ -204,26 +251,81 @@ public sealed class TransactionalUpdater
         await operation(deadline.Token).WaitAsync(deadline.Token);
     }
 
-    private static void ValidateInstalledVersion(string target, VerifiedUpdateManifest candidate, UpdateVerificationPolicy policy)
+    private static void ValidateInstalledVersion(string target, VerifiedUpdateManifest candidate, UpdateVerificationPolicy policy, bool repair)
     {
         var receiptPath = Path.Combine(target, ReceiptFileName);
         if (!File.Exists(receiptPath)) return; // Legacy installations use the explicit operator version floor.
         UpdateFileSystem.RejectReparseAncestors(receiptPath);
         var bytes = ReadBoundedAsync(receiptPath, UpdateManifestFormat.MaximumDocumentBytes, CancellationToken.None).GetAwaiter().GetResult();
         var receipt = UpdateManifestVerifier.Authenticate(bytes, policy);
-        if (Version.Parse(candidate.Manifest.Version) <= Version.Parse(receipt.Manifest.Version)) throw new UpdateValidationException();
+        if (repair)
+        {
+            // Same-version replacement cannot select different signed bytes.
+            // Re-signing identical claims is harmless; signatures are not package identity.
+            if (candidate.Manifest != receipt.Manifest) throw new UpdateValidationException();
+        }
+        else if (Version.Parse(candidate.Manifest.Version) <= Version.Parse(receipt.Manifest.Version)) throw new UpdateValidationException();
+    }
+
+    private static VerifiedUpdateManifest VerifyForRestore(ReadOnlySpan<byte> document, UpdateVerificationPolicy policy)
+    {
+        // Authentication also enforces environment, channel, artifact and key.
+        var verified = UpdateManifestVerifier.Authenticate(document, policy);
+        return Version.Parse(verified.Manifest.Version) == policy.ParsedInstalledVersion
+            ? UpdateManifestVerifier.VerifyForRepair(document, policy)
+            : UpdateManifestVerifier.Verify(document, policy);
+    }
+
+    private static void ValidateInstallationTarget(string target, string executable, InstallationMode mode)
+    {
+        if (mode != InstallationMode.Restore)
+        {
+            ValidateCodeDirectory(target, executable, allowMissingExecutables: mode == InstallationMode.Repair);
+            return;
+        }
+        UpdateFileSystem.ValidateTree(target);
+        if (Directory.EnumerateFileSystemEntries(target).Any())
+            throw new IOException("Restoring retained state requires an empty owned code directory.");
     }
 
     private static string ExpectedExecutable(string artifactId) => artifactId switch
     {
         "sentinelai-agent-win-x64" => "SentinelAI.Agent.exe",
         "sentinelai-core-win-x64" => "SentinelAI.Core.exe",
+        PackageExtractor.DeploymentArtifactId => PackageExtractor.DeploymentExecutables[0],
         _ => throw new UpdateValidationException()
     };
 
-    private static void ValidateCodeDirectory(string target, string executable)
+    // Recovery may hold previous, replacement and failed code simultaneously.
+    // The per-code-tree limit stays 4096; only this owned deployment workspace
+    // accepts a bounded multiple, with room for its private ZIP and directories.
+    private static int MaximumWorkEntries(string artifactId) => artifactId == PackageExtractor.DeploymentArtifactId
+        ? 4 * PackageExtractor.MaximumDeploymentEntries + 16 : 4096;
+
+    private static void ValidateCodeDirectory(string target, string executable, bool allowMissingExecutables = false)
     {
-        UpdateFileSystem.ValidateTree(target);
+        var deployment = executable == PackageExtractor.DeploymentExecutables[0];
+        // The installer-owned receipt is metadata in addition to package paths.
+        var metadataEntries = deployment && File.Exists(Path.Combine(target, ReceiptFileName)) ? 1 : 0;
+        UpdateFileSystem.ValidateTree(target, 4096 + metadataEntries);
+        if (deployment)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(target))
+            {
+                var name = Path.GetFileName(entry);
+                var directory = (File.GetAttributes(entry) & FileAttributes.Directory) != 0;
+                if (name == ReceiptFileName && !directory) continue;
+                if (name == DeploymentPackageVersion.FileName && !directory) continue; // Legacy/damaged marker is repairable code, not an authority.
+                if (!directory || !PackageExtractor.DeploymentDirectories.Contains(name, StringComparer.Ordinal))
+                    throw new IOException("The existing deployment contains an unsupported component.");
+            }
+            if (!allowMissingExecutables)
+                foreach (var required in PackageExtractor.DeploymentExecutables)
+                    if (!File.Exists(Path.Combine(target, required.Replace('/', Path.DirectorySeparatorChar))))
+                        throw new IOException("The target is not a complete SentinelAI code deployment.");
+            return;
+        }
+        if (allowMissingExecutables) return;
         var executablePath = Path.Combine(target, executable);
         if (!File.Exists(executablePath)) throw new IOException("The target is not the expected SentinelAI code installation.");
         UpdateFileSystem.RejectReparseAncestors(executablePath);
@@ -302,12 +404,14 @@ public sealed class TransactionalUpdater
         return bytes;
     }
 
-    private static void Cleanup(Paths paths, string work)
+    private static void Cleanup(Paths paths, string work, int maximumWorkEntries)
     {
-        UpdateFileSystem.DeleteOwnedDirectory(work);
+        UpdateFileSystem.DeleteOwnedDirectory(work, maximumWorkEntries);
         UpdateFileSystem.RejectReparseAncestors(paths.Journal);
         File.Delete(paths.Journal);
     }
+
+    private enum InstallationMode { Upgrade, Repair, Restore }
 
     private sealed record Journal(string Id, string Phase, string Manifest);
     private sealed record Paths(string Target, string Parent, string Prefix)
