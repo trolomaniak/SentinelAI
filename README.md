@@ -6,7 +6,7 @@ The operator interface is **SentinelAI.Desktop**, a native .NET 10 WPF applicati
 
 ## Current project state
 
-The current implementation includes native Desktop workflows and a single **`SentinelAI-Setup.exe`**. TASK-025 adds detection of owned installations, version-aware repair/upgrade, signed whole-deployment replacement with rollback, explicit recovery and uninstall with data retained by default. Its native Windows lifecycle acceptance is pending; TASK-024's fresh-install services/ACLs, Agent enrollment/DPAPI/restart and Desktop sign-in acceptance already passed. See [development status](.agent/STATUS.md) for exact results.
+The current implementation includes native Desktop workflows and a single **`SentinelAI-Setup.exe`**. TASK-025 adds detection of owned installations, version-aware repair/upgrade, signed whole-deployment replacement with rollback, explicit recovery and uninstall with data retained by default. Actual Windows acceptance passed fresh installation, upgrade, health-failed rollback, damaged-file repair, retained-data uninstall/restore and explicitly confirmed data removal. See [development status](.agent/STATUS.md) for exact results.
 
 Distribution is at the **development/pilot stage**: Setup, a self-contained Desktop directory and development-signed packages can be built from source. There is no published release download; the earlier pilot release remains a draft with no uploaded assets. See [validation and limitations](#validation-and-limitations).
 
@@ -75,13 +75,13 @@ Console Core and the same-origin browser dashboard remain development/diagnostic
 
 TASK-024 passed the full build/regression scripts with **zero .NET warnings/errors**, **322 Setup assertions**, **2,814 Desktop assertions** and **63 dashboard tests**. Windows CI built and executed the actual Setup EXE on a fresh runner, verified services/ACLs/Agent state and telemetry, authenticated the installed native Desktop and refused a repeated installation. Existing native WPF, service and Desktop regressions remain in CI. See [STATUS](.agent/STATUS.md) for exact commits and results, or [GitHub Actions](https://github.com/trolomaniak/SentinelAI/actions/workflows/ci.yml) for later runs.
 
-Those are the recorded first-install results. TASK-025 changes repeated launch to an explicit maintenance workflow; its complete Windows lifecycle acceptance is pending.
+TASK-025 passed all twelve push/PR checks: full builds/regressions, **436 Setup assertions**, **903 update assertions**, portable PowerShell worker/lifecycle checks and complete native Windows lifecycle acceptance. Both lifecycle runs verified upgrade, a signed unhealthy candidate's working rollback, damaged-file repair, retained-data uninstall/restoration and confirmed removal while preserving identity, configuration, DPAPI enrollment, license state and security history.
 
 Current limits:
 
 - Detection covers the documented configuration rules. Malware scanning, live antivirus health, patch compliance and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
 - Inventory can be stale. Core does not retain complete inventory/heartbeat history or historical risk scores; reports distinguish current risk from retained incident activity.
-- Setup's fresh Agent enrollment/DPAPI/heartbeat/inventory/restart acceptance passed. The original TASK-015 console pilot's full uninstall/reinstall scenario remains unexecuted. Setup lifecycle acceptance is tracked separately.
+- Setup's fresh Agent enrollment/DPAPI/heartbeat/inventory/restart and complete maintenance lifecycle acceptance passed. The original TASK-015 console pilot's full uninstall/reinstall scenario remains unexecuted.
 - Interactive UAC approval and physical multi-monitor DPI checks remain manual. Tray delivery and auto-start also depend on Windows shell/startup policy.
 - Pilot packages use development manifest signatures. Authenticode signing, production trust provisioning, automatic upgrades and state/account migrations remain outstanding. Unverified ownership is refused; failed transaction recovery requires explicit action.
 - Billing and enforcement of the signed endpoint limit are not implemented.

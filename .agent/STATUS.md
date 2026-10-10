@@ -113,8 +113,9 @@
 - Resumed Issue #31 after Claude's failed Actions run `37927123450`. No published TASK-025 implementation/PR was present; the separate Claude branch changes only README. This scoped task starts from merged TASK-024 main `d803c160b1a3e3485e04214623cfb7e05740367c` and preserves the independently added Claude workflow.
 - Added native existing-installation inspection and version-selected repair/upgrade/uninstall. One independently trusted, development-signed deployment contains Core, Agent, Desktop and Updater and uses the existing transactional updater's exclusive lock, private extraction, backup, journal, authenticated receipt and bounded health rollback. The installed public root/channel/key/environment remain pinned; repair permits exact installed version and exact authenticated package claims. Explicit retained-data restore keeps the prior version floor.
 - Ownership/service commands remain fixed to the existing paths, Core virtual account and Agent LocalService account. An atomic protected snapshot reconciles only version/executable ownership metadata on replacement/recovery. SQLite, administrator/Core/endpoint identities, DPAPI enrollment, protected configuration and licensing state remain outside replaceable code and are not reinitialized. Uninstall removes only proven owned services/code/shortcut; data is preserved by default, with separate opt-in plus exact `DELETE` confirmation for removal.
-- Full solution/dashboard build passes with zero .NET warnings/errors. Portable Setup policy/private-wire tests pass (436 C# and 116 PowerShell assertions), as do 206 whole-deployment transaction/repair/restore assertions and 116 lifecycle adapter assertions. Full Linux regressions and existing native Core/Agent/Desktop/fresh-Setup jobs pass on `4cc6c7c`. The lifecycle job verifies a real healthy upgrade, but complete acceptance remains pending: its signed-unhealthy case failed with an ambiguous fixture diagnostic. Follow-up removes only a redundant ownership scan, retains each operation's full guards, gives the end-to-end fixture time for its independent bounded rollback and adds fixed, secret-free failure classifications. The separate Windows job checks upgrade, actual health rollback, identity/configuration/DPAPI/license preservation, damaged-file repair, retained-data uninstall/restore and confirmed removal. No complete native result is assumed before that job passes.
-- TASK-025 remains in progress. Issue #31's task-specific instruction requires a scoped PR for review, no merge to main and no TASK-026.
+- Full local solution/dashboard build passed with zero .NET warnings/errors. Full `./scripts/build.sh` and `./scripts/test.sh` passed in clean Linux CI, including all backend/licensing regressions, 903 update assertions (191 manifest/hash, 115 original transaction/recovery, 206 deployment transaction/repair/restore, 391 command), 436 Setup assertions, 2,814 Desktop assertions and 63 dashboard tests. Portable PowerShell worker and lifecycle adapter suites also passed locally with 116 assertions each. The resumed local workspace cannot repeat the complete signer-file fixture because `/var/tmp` is read-only and writable temporary roots have repository ancestors; clean CI verifies it without weakening private-key path policy.
+- **Definition of Done satisfied:** exact implementation `16420766b7a820a4b707d8cb383ff4a8b5266e2c` passed all twelve checks in [PR CI `38058384871`](https://github.com/trolomaniak/SentinelAI/actions/runs/38058384871) and [push CI `38058382356`](https://github.com/trolomaniak/SentinelAI/actions/runs/38058382356). Both native lifecycle jobs execute fresh legacy-layout `1.0.0`, upgrade to `1.1.0`, an actual SCM-running signed unhealthy `1.2.0` candidate with working exact-code rollback, damaged Core/Agent/Desktop assembly repair, owned uninstall with retained state, identity-preserving restoration and subsequent confirmed data removal through native controls. They verify unchanged configuration, administrator/Core/endpoint identity, DPAPI enrollment and license metadata, retained security-history rows, a nondecreasing license clock floor, fresh authenticated endpoint telemetry and NTFS/SCM policy. Existing fresh Setup, WPF, Agent, Core service and Desktop acceptance also pass. The healthy `1.1.0` [development Setup artifact](https://github.com/trolomaniak/SentinelAI/actions/runs/38058384871/artifacts/11672164113) is uploaded; the unhealthy fixture is not distributed. Scoped diff, documentation and independent security/native reviews found no remaining task blocker.
+- Prepared scoped [PR #32](https://github.com/trolomaniak/SentinelAI/pull/32) for review. Issue #31's task-specific instruction requires no merge to main and no TASK-026; both constraints remain respected.
 
 ## Current architecture
 
@@ -349,21 +350,21 @@ TASK-021 Definition of Done is fully satisfied on verified implementation `77604
 
 ## TASK-025 Definition of Done
 
-- [ ] Upgrade from an older supported build succeeds on actual Windows.
-- [ ] Failed signed upgrade rolls back to a working version on actual Windows.
-- [ ] Repair restores damaged program files without resetting identity on actual Windows.
-- [ ] Uninstall removes owned services/code predictably on actual Windows.
-- [ ] Data removal is explicit rather than accidental; native keep/remove flows pass.
-- [ ] Installation lifecycle tests run successfully on Windows.
+- [x] Upgrade from an older supported build succeeds on actual Windows.
+- [x] Failed signed upgrade rolls back to a working version on actual Windows.
+- [x] Repair restores damaged program files without resetting identity on actual Windows.
+- [x] Uninstall removes owned services/code predictably on actual Windows.
+- [x] Data removal is explicit rather than accidental; native keep/remove flows pass.
+- [x] Installation lifecycle tests run successfully on Windows.
 - [x] `.agent/STATUS.md` records implementation, architecture, decisions, validation and remaining work.
 
 ## Next task
 
-Finish TASK-025 validation and prepare its scoped PR for review. TASK-026 remains unstarted; Issue #31 explicitly prohibits merging this task to main. The original TASK-015 console Agent uninstall/reinstall scenario and earlier draft release transfer remain separate outstanding work.
+TASK-025 is complete and awaiting review in PR #32. TASK-026 is the next task in the sequence but remains unstarted; Issue #31 explicitly prohibits starting it or merging this task to main. The original TASK-015 console Agent uninstall/reinstall scenario and earlier draft release transfer remain separate outstanding work.
 
 ## Last verified commit
 
-Current TASK-025 base is merged main `d803c160b1a3e3485e04214623cfb7e05740367c` (PR #28). TASK-024's final documentation head `48dd5203cdc232447a976b821f6f6bc9aea039c7` passed all ten checks in [PR CI `37923316660`](https://github.com/trolomaniak/SentinelAI/actions/runs/37923316660) and push CI `37923309759`. TASK-025 native verification is pending and will supersede this baseline only after actual results.
+`16420766b7a820a4b707d8cb383ff4a8b5266e2c` — TASK-025 implementation in PR #32, all twelve checks green in [PR CI `38058384871`](https://github.com/trolomaniak/SentinelAI/actions/runs/38058384871) and [push CI `38058382356`](https://github.com/trolomaniak/SentinelAI/actions/runs/38058382356). Full builds/regressions, existing native acceptance and both complete actual Windows lifecycle runs passed. The final follow-up updates documentation only. Base is merged main `d803c160b1a3e3485e04214623cfb7e05740367c` (PR #28); TASK-024's final documentation head `48dd5203cdc232447a976b821f6f6bc9aea039c7` passed all ten checks in PR CI `37923316660` and push CI `37923309759`.
 
 `96eca7418f07bd60a43e8821425c75144aad35d3` — TASK-024 implementation in PR #28, all ten push/PR checks green in [PR CI `37922351990`](https://github.com/trolomaniak/SentinelAI/actions/runs/37922351990) and [push CI `37922344678`](https://github.com/trolomaniak/SentinelAI/actions/runs/37922344678). Both native jobs built and executed the actual single EXE and uploaded its artifact. Full fresh deployment, protected runtime/ACLs, services, Agent enrollment/DPAPI/restart/telemetry, Desktop authentication/independent lifetime and repeated-install refusal passed. The final status/README follow-up changes documentation only.
 
