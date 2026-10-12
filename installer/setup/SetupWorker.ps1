@@ -8,7 +8,7 @@ $ProgressPreference = 'SilentlyContinue'
 $script:SetupPhase = 'validate'
 
 function Write-SetupProgress {
-    param([ValidateSet('validate','core','services','agent','desktop','shortcut')][string]$Phase)
+    param([ValidateSet('validate','core','services','agent','desktop','shortcut','inspect','replace','health','rollback','uninstall')][string]$Phase)
     $script:SetupPhase = $Phase
     Write-Output ('PROGRESS|' + $Phase)
 }
@@ -55,13 +55,19 @@ function Import-SetupInstallerModules {
     $coreSource = [IO.File]::ReadAllText((Join-Path $WorkDirectory 'bundle\installer\CoreServiceInstaller.psm1'))
     $core = New-Module -Name SentinelAISetupCore -ArgumentList @($pilot) -ScriptBlock ([ScriptBlock]::Create($coreSource))
     Import-Module $core -Global -DisableNameChecking
+    $lifecyclePath = Join-Path $WorkDirectory 'setup\SetupLifecycle.ps1'
+    $item = Get-Item -LiteralPath $lifecyclePath -Force
+    if ($item.PSIsContainer -or $item.Length -gt 262144 -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Invalid lifecycle worker.' }
+    # This script is embedded with the same authenticated payload as the modules.
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($lifecyclePath)))
+    foreach ($command in Get-Command -Name '*-SetupLifecycle*') { Set-Item -Path ('Function:global:' + $command.Name) -Value $command.ScriptBlock }
 }
 
 function Get-SetupLocations {
     $code = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'SentinelAI'
     $data = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) 'SentinelAI'
     $menu = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)) 'SentinelAI'
-    return @{ CoreCode = Join-Path $code 'Core'; CoreData = Join-Path $data 'Core';
+    return @{ CodeRoot = $code; DataRoot = $data; CoreCode = Join-Path $code 'Core'; CoreData = Join-Path $data 'Core';
         AgentCode = Join-Path $code 'Agent'; AgentData = Join-Path $data 'Agent';
         DesktopCode = Join-Path $code 'Desktop'; UpdaterCode = Join-Path $code 'Updater';
         SetupData = Join-Path $data 'Setup'; Menu = $menu }
@@ -200,9 +206,12 @@ function Invoke-SetupInstallation {
 
 function Assert-SetupRequest {
     param($Request)
-    Assert-PilotObjectProperties -Object $Request -Names @('action','workDirectory','keyId','channel','enrollmentToken')
-    if ($Request.action -cnotin @('prepare-core','start-core','complete') -or $Request.keyId -isnot [string] -or
+    Assert-PilotObjectProperties -Object $Request -Names @('action','workDirectory','keyId','channel','enrollmentToken','version','preserveData')
+    if ($Request.action -cnotin @('prepare-core','start-core','complete','inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile','uninstall') -or $Request.keyId -isnot [string] -or
         $Request.keyId -cnotmatch '\Adev-[A-Za-z0-9_-]{1,48}\z' -or $Request.channel -cnotin @('stable','pilot','beta')) { throw 'Invalid policy.' }
+    if ($Request.version -isnot [string] -or $Request.version -cnotmatch '\A(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\z' -or
+        @($Request.version.Split('.') | Where-Object { [int]$_ -gt 65535 }).Count -ne 0 -or
+        $Request.preserveData -cnotin @('true','false') -or ($Request.action -cne 'uninstall' -and $Request.preserveData -cne 'true')) { throw 'Invalid lifecycle policy.' }
     if ($Request.action -ne 'complete') {
         # The private wire uses an empty string, keeping the existing strict
         # Pilot JSON grammar limited to strings/objects without accepting null.
@@ -226,7 +235,8 @@ function Invoke-SetupWorkerMain {
         Import-SetupInstallerModules -WorkDirectory $locator.workDirectory
         $request = Read-PilotStrictJson -Json $raw
         Assert-SetupRequest -Request $request
-        Invoke-SetupInstallation -Request $request
+        if ($request.action -cin @('prepare-core','start-core','complete')) { Invoke-SetupInstallation -Request $request }
+        else { Invoke-SetupLifecycleWorker -Request $request }
         exit 0
     } catch {
         # Component output, exception text, paths and credentials are never UI/log data.

@@ -12,6 +12,15 @@ public static class UpdateManifestVerifier
         return verified;
     }
 
+    /// <summary>Authorizes repair of exactly the operator's installed version, never an upgrade or downgrade.</summary>
+    public static VerifiedUpdateManifest VerifyForRepair(ReadOnlySpan<byte> document, UpdateVerificationPolicy policy)
+    {
+        var verified = Authenticate(document, policy);
+        if (!UpdateManifestFormat.TryVersion(verified.Manifest.Version, out var version) ||
+            version != policy.ParsedInstalledVersion) throw new UpdateValidationException();
+        return verified;
+    }
+
     // Installer receipts/journals authenticate installed metadata without authorizing a replay as an update.
     internal static VerifiedUpdateManifest Authenticate(ReadOnlySpan<byte> document, UpdateVerificationPolicy policy)
     {

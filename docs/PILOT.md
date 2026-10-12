@@ -80,7 +80,7 @@ Restart-Service SentinelAIAgent
 & $install -Component UninstallAgent
 ```
 
-Uninstall stops/deletes only a matching installer-owned `SentinelAIAgent` service. It preserves code, configuration, Core SQLite, installation ID, endpoint receipt and DPAPI enrollment state. No data purge or automatic endpoint deletion occurs. Reinstall with the same paths, account and exact signed package uses the existing enrollment; it does not consume another token. Existing services without a matching ownership receipt or changed code/configuration are refused. This install workflow does not overwrite an older release; upgrades use the separate transactional update foundation and require later integration.
+Uninstall stops/deletes only a matching installer-owned `SentinelAIAgent` service. It preserves code, configuration, Core SQLite, installation ID, endpoint receipt and DPAPI enrollment state. No data purge or automatic endpoint deletion occurs. Reinstall with the same paths, account and exact signed package uses the existing enrollment; it does not consume another token. Existing services without a matching ownership receipt or changed code/configuration are refused. This console-pilot installer does not overwrite an older release. Transactional maintenance of owned Setup deployments is available through the [Setup lifecycle](SETUP.md#repair-upgrade-and-uninstall); it does not adopt or convert this separate console-pilot installation.
 
 The separate [Core service workflow](CORE-SERVICE.md) provides managed startup/stop/restart and service-only removal. Closing Desktop leaves Core and Agent running. Remove retained files only as a separate operator decision after backups; this task provides no data-deletion command.
 

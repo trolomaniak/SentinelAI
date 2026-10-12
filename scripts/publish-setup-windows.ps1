@@ -6,7 +6,10 @@ param(
     [Parameter(Mandatory = $true)][string]$PublicKeyPath,
     [Parameter(Mandatory = $true)][ValidatePattern('^dev-[A-Za-z0-9_-]{1,48}$')][string]$KeyId,
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    # Development-only lifecycle acceptance input. The override affects only
+    # the signed whole-deployment candidate, never the fresh-install bundle.
+    [string]$DevelopmentCoreAssemblyOverride
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,49 +45,85 @@ function Assert-SetupPath {
 }
 
 function New-SetupPayload {
-    param([string]$Source, [string]$Destination)
-    # Keep these bounds aligned with the Setup extractor. Inspect each directory
-    # before descending so a link cannot pull arbitrary build-machine data in.
-    $maximumEntries = 4096
-    $maximumExpandedBytes = 1GB
+    param([string]$Source, [string]$Destination,
+          [ValidateRange(1, 4096)][int]$MaximumEntries = 4096,
+          [ValidateRange(1, 1073741824)][long]$MaximumExpandedBytes = 1GB)
+    # Defaults match the Setup and whole-deployment extractors. Existing
+    # per-component updater preparation retains its lower 1024/512-MiB bounds.
+    # Inspect each directory before descending so a link cannot pull arbitrary
+    # build-machine data in. Stable entry order/timestamps make packaging repeatable.
     $paths = New-Object 'System.Collections.Generic.Stack[string]'
     $paths.Push($Source)
-    $entryNames = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $files = New-Object 'System.Collections.Generic.SortedDictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
+    while ($paths.Count -gt 0) {
+        $directory = $paths.Pop()
+        if (([IO.File]::GetAttributes($directory) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Payload links are not allowed.' }
+        foreach ($path in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
+            $attributes = [IO.File]::GetAttributes($path)
+            if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Payload links are not allowed.' }
+            if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) { $paths.Push($path); continue }
+            if ([IO.Path]::GetExtension($path) -in @('.pem', '.key')) { throw 'Payload key files are not allowed.' }
+            $name = $path.Substring($Source.Length + 1).Replace('\', '/')
+            Assert-SetupRelativePath -Path $name
+            if ($files.ContainsKey($name) -or $files.Count -ge $MaximumEntries) { throw 'Payload entry bounds exceeded.' }
+            $files.Add($name, $path)
+        }
+    }
     $total = [long]0
-    $count = 0
     $output = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
     $archive = $null
     try {
         $archive = New-Object IO.Compression.ZipArchive($output, [IO.Compression.ZipArchiveMode]::Create, $true)
-        while ($paths.Count -gt 0) {
-            $directory = $paths.Pop()
-            foreach ($path in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
-                $attributes = [IO.File]::GetAttributes($path)
-                if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Payload links are not allowed.' }
-                if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) { $paths.Push($path); continue }
-                # Trust is embedded separately; no PEM/key file belongs in the
-                # payload and the development private key is never copied.
-                if ([IO.Path]::GetExtension($path) -in @('.pem', '.key')) { throw 'Payload key files are not allowed.' }
-                $name = $path.Substring($Source.Length + 1).Replace('\', '/')
-                if (-not $entryNames.Add($name) -or ++$count -gt $maximumEntries) { throw 'Payload entry bounds exceeded.' }
-                $input = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-                try {
-                    $length = $input.Length
-                    if ($length -gt 512MB -or $length -gt $maximumExpandedBytes - $total) { throw 'Expanded payload bounds exceeded.' }
-                    $total += $length
-                    $entry = $archive.CreateEntry($name, [IO.Compression.CompressionLevel]::Optimal)
-                    $entryOutput = $entry.Open()
-                    try { $input.CopyTo($entryOutput) } finally { $entryOutput.Dispose() }
-                    if ($input.Position -ne $length -or $input.Length -ne $length) { throw 'A payload source changed while packaging.' }
-                } finally { $input.Dispose() }
-            }
+        foreach ($file in $files.GetEnumerator()) {
+            $input = [IO.File]::Open($file.Value, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try {
+                $length = $input.Length
+                if ($length -gt 512MB -or $length -gt $MaximumExpandedBytes - $total) { throw 'Expanded payload bounds exceeded.' }
+                $total += $length
+                $entry = $archive.CreateEntry($file.Key, [IO.Compression.CompressionLevel]::Optimal)
+                $entry.LastWriteTime = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+                $entryOutput = $entry.Open()
+                try { $input.CopyTo($entryOutput) } finally { $entryOutput.Dispose() }
+                if ($input.Position -ne $length -or $input.Length -ne $length) { throw 'A payload source changed while packaging.' }
+            } finally { $input.Dispose() }
         }
-        if ($count -eq 0) { throw 'The setup payload is empty.' }
+        if ($files.Count -eq 0) { throw 'The setup payload is empty.' }
     } finally {
         if ($null -ne $archive) { $archive.Dispose() }
         $output.Dispose()
     }
     if ((Get-Item -LiteralPath $Destination).Length -gt 512MB) { throw 'Compressed payload bounds exceeded.' }
+}
+
+function Copy-SetupCodeTree {
+    param([string]$Source, [string]$Destination)
+    $Source = Assert-SetupPath -Path $Source
+    if (-not (Test-Path -LiteralPath $Source -PathType Container) -or (Test-Path -LiteralPath $Destination)) { throw 'A fresh deployment component directory is required.' }
+    New-Item -ItemType Directory -Path $Destination | Out-Null
+    $pending = New-Object 'System.Collections.Generic.Stack[string]'
+    $pending.Push($Source)
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Pop()
+        foreach ($path in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
+            $attributes = [IO.File]::GetAttributes($path)
+            if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Deployment links are not allowed.' }
+            $relative = $path.Substring($Source.Length + 1).Replace('\', '/')
+            Assert-SetupRelativePath -Path $relative
+            $target = Join-Path $Destination $relative
+            if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) {
+                New-Item -ItemType Directory -Path $target | Out-Null
+                $pending.Push($path)
+                continue
+            }
+            if ([IO.Path]::GetExtension($path) -in @('.pem', '.key')) { throw 'Deployment key files are not allowed.' }
+            $input = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try {
+                if ($input.Length -gt 512MB) { throw 'Deployment file bounds exceeded.' }
+                $output = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                try { $input.CopyTo($output); $output.Flush($true) } finally { $output.Dispose() }
+            } finally { $input.Dispose() }
+        }
+    }
 }
 
 function ConvertTo-SetupCString {
@@ -265,14 +304,27 @@ try {
     if (-not (Test-Path -LiteralPath $DevelopmentPrivateKey -PathType Leaf) -or
         -not (Test-Path -LiteralPath $PublicKeyPath -PathType Leaf)) { throw 'Separate development signing and public trust files are required.' }
     if (Test-Path -LiteralPath $OutputDirectory) { throw 'The output directory must be new.' }
+    if (-not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) {
+        if ($DevelopmentCoreAssemblyOverride -notmatch '\A(?:[A-Za-z]:[\\/]|\\\\)') { throw 'An absolute development Core assembly path is required.' }
+        $DevelopmentCoreAssemblyOverride = Assert-SetupPath -Path $DevelopmentCoreAssemblyOverride
+        if (-not (Test-Path -LiteralPath $DevelopmentCoreAssemblyOverride -PathType Leaf) -or
+            [IO.Path]::GetFileName($DevelopmentCoreAssemblyOverride) -cne 'SentinelAI.Core.dll' -or
+            $DevelopmentCoreAssemblyOverride.StartsWith($OutputDirectory.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'A separate development Core assembly is required.'
+        }
+        $overrideLength = (Get-Item -LiteralPath $DevelopmentCoreAssemblyOverride).Length
+        if ($overrideLength -le 0 -or $overrideLength -gt 512MB) { throw 'The development Core assembly is outside its size bounds.' }
+    }
     $trustLength = (Get-Item -LiteralPath $PublicKeyPath).Length
     if ($trustLength -le 0 -or $trustLength -gt 16384) { throw 'The public trust file is invalid.' }
     $trustBytes = [IO.File]::ReadAllBytes($PublicKeyPath)
     $trustText = [Text.Encoding]::UTF8.GetString($trustBytes)
     if ($trustBytes.Length -le 0 -or $trustBytes.Length -gt 16384 -or $trustText.Contains('PRIVATE KEY') -or
         -not $trustText.Contains('-----BEGIN PUBLIC KEY-----')) { throw 'Only a bounded public trust root can be embedded.' }
-    $worker = Join-Path $repo 'installer/setup/SetupWorker.ps1'
+    $worker = Assert-SetupPath -Path (Join-Path $repo 'installer/setup/SetupWorker.ps1')
     if (-not (Test-Path -LiteralPath $worker -PathType Leaf)) { throw 'The trusted setup worker is missing.' }
+    $lifecycleWorker = Assert-SetupPath -Path (Join-Path $repo 'installer/setup/SetupLifecycle.ps1')
+    if (-not (Test-Path -LiteralPath $lifecycleWorker -PathType Leaf)) { throw 'The trusted setup lifecycle worker is missing.' }
 
     New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
     $work = $OutputDirectory + '.work-' + [Guid]::NewGuid().ToString('N')
@@ -303,10 +355,58 @@ try {
     foreach ($required in @('SentinelAI.Desktop.exe', 'SentinelAI.Desktop.dll', 'SentinelAI.Desktop.deps.json', 'SentinelAI.Desktop.runtimeconfig.json', 'PresentationFramework.dll', 'coreclr.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $desktop $required) -PathType Leaf)) { throw 'A Desktop runtime file is missing.' }
     }
+
+    # One candidate covers the entire code root, so the transactional updater
+    # can restore all four components together. ProgramData is never packaged.
+    $script:SetupPublishingPhase = 'deployment-preparation'
+    $deploymentCode = Join-Path $work 'deployment-code'
+    New-Item -ItemType Directory -Path $deploymentCode | Out-Null
+    foreach ($component in @('core', 'agent')) {
+        $componentDirectory = if ($component -eq 'core') { 'Core' } else { 'Agent' }
+        Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'updater/SentinelAI.Updater.csproj'), '--configuration', 'Release', '--', 'prepare',
+            '--manifest', (Join-Path $bundle ($component + '.manifest.json')), '--package', (Join-Path $bundle ($component + '.zip')),
+            '--public-key', $trust, '--key-id', $KeyId, '--environment', 'development', '--channel', $Channel,
+            '--artifact-id', ('sentinelai-' + $component + '-win-x64'), '--installed-version', '0.0.0',
+            '--output', (Join-Path $deploymentCode $componentDirectory))
+    }
+    Copy-SetupCodeTree -Source $desktop -Destination (Join-Path $deploymentCode 'Desktop')
+    Copy-SetupCodeTree -Source (Join-Path $bundle 'updater') -Destination (Join-Path $deploymentCode 'Updater')
+    if (-not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) {
+        # A CI fixture can run a real SCM host without HTTP health. There is no
+        # installed runtime test flag, unsigned override or production mode.
+        $input = [IO.File]::Open($DevelopmentCoreAssemblyOverride, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            if ($input.Length -le 0 -or $input.Length -gt 512MB) { throw 'The development Core assembly changed.' }
+            $output = [IO.File]::Open((Join-Path $deploymentCode 'Core/SentinelAI.Core.dll'), [IO.FileMode]::Truncate, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try { $input.CopyTo($output); $output.Flush($true) } finally { $output.Dispose() }
+        } finally { $input.Dispose() }
+    }
+    foreach ($required in @('Core/SentinelAI.Core.exe', 'Agent/SentinelAI.Agent.exe', 'Desktop/SentinelAI.Desktop.exe', 'Updater/SentinelAI.Updater.exe')) {
+        $entryPoint = Join-Path $deploymentCode $required
+        if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf) -or (Get-Item -LiteralPath $entryPoint).Length -le 0) { throw 'A deployment executable is missing.' }
+    }
+    $deploymentVersion = [ordered]@{ format = 'sentinelai-deployment-v1'; version = $Version }
+    [IO.File]::WriteAllText((Join-Path $deploymentCode 'deployment-version.json'), ($deploymentVersion | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $script:SetupPublishingPhase = 'deployment-signing'
+    $deploymentPackage = Join-Path $bundle 'deployment.zip'
+    $deploymentManifest = Join-Path $bundle 'deployment.manifest.json'
+    New-SetupPayload -Source $deploymentCode -Destination $deploymentPackage -MaximumEntries 4096 -MaximumExpandedBytes 1GB
+    Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'tools/update-dev/SentinelAI.UpdateDev.csproj'), '--configuration', 'Release', '--', 'sign',
+        '--private-key', $DevelopmentPrivateKey, '--key-id', $KeyId, '--package', $deploymentPackage, '--version', $Version,
+        '--artifact-id', 'sentinelai-deployment-win-x64', '--artifact-url', ('https://updates.example.invalid/pilot/' + $Version + '/deployment.zip'),
+        '--channel', $Channel, '--output', $deploymentManifest)
+    $script:SetupPublishingPhase = 'deployment-verification'
+    Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'updater/SentinelAI.Updater.csproj'), '--configuration', 'Release', '--', 'verify',
+        '--manifest', $deploymentManifest, '--package', $deploymentPackage, '--public-key', $trust,
+        '--key-id', $KeyId, '--environment', 'development', '--channel', $Channel,
+        '--artifact-id', 'sentinelai-deployment-win-x64', '--installed-version', '0.0.0')
+
     $script:SetupPublishingPhase = 'payload-packaging'
     $setupSource = Join-Path $payloadSource 'setup'
     New-Item -ItemType Directory -Path $setupSource | Out-Null
     Copy-Item -LiteralPath $worker -Destination (Join-Path $setupSource 'SetupWorker.ps1')
+    Copy-Item -LiteralPath $lifecycleWorker -Destination (Join-Path $setupSource 'SetupLifecycle.ps1')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $payload = Join-Path $work 'payload.zip'
     New-SetupPayload -Source $payloadSource -Destination $payload

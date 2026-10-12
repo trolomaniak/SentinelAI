@@ -15,7 +15,7 @@ function Reject-SetupTest([scriptblock]$Operation, [string]$Label) {
 $syntheticToken = '0123456789abcdef' * 4
 function New-SetupTestRequest([string]$Action = 'prepare-core') {
     [pscustomobject]@{ action = $Action; workDirectory = Join-Path ([IO.Path]::GetTempPath()) 'synthetic-setup-worker';
-        keyId = 'dev-setup-test'; channel = 'pilot'; enrollmentToken = $(if ($Action -eq 'complete') { $syntheticToken } else { '' }) }
+        keyId = 'dev-setup-test'; channel = 'pilot'; enrollmentToken = $(if ($Action -eq 'complete') { $syntheticToken } else { '' }); version = '1.0.0'; preserveData = 'true' }
 }
 Assert-SetupRequest (New-SetupTestRequest)
 Assert-SetupRequest (New-SetupTestRequest 'complete')
@@ -42,7 +42,7 @@ foreach ($action in @('prepare-core','start-core')) {
 }
 $nullWire = New-SetupTestRequest; $nullWire.enrollmentToken = $null
 Reject-SetupTest { Read-PilotStrictJson -Json ($nullWire | ConvertTo-Json -Compress) } 'strict pilot JSON still rejects null primitives'
-foreach ($action in @('Complete','repair','uninstall','')) {
+foreach ($action in @('Complete','repair','Uninstall','')) {
     $request = New-SetupTestRequest; $request.action = $action
     Reject-SetupTest { Assert-SetupRequest $request } 'unsupported action'
 }
@@ -67,6 +67,28 @@ Reject-SetupTest { Assert-SetupRequest $request } 'administrator identity forbid
 $request = New-SetupTestRequest; $request | Add-Member -NotePropertyName destination -NotePropertyValue 'other'
 Reject-SetupTest { Assert-SetupRequest $request } 'destination overrides forbidden'
 Reject-SetupTest { Read-PilotStrictJson '{"action":"prepare-core","action":"complete"}' } 'duplicate JSON field'
+foreach ($action in @('inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile','uninstall')) {
+    $request = New-SetupTestRequest $action
+    $decoded = Read-PilotStrictJson -Json ($request | ConvertTo-Json -Compress)
+    Assert-SetupRequest $decoded
+    Assert-SetupTest ($decoded.version -ceq '1.0.0' -and $decoded.preserveData -ceq 'true') 'maintenance wire retains version and explicit preserve-data policy'
+    $request.enrollmentToken = $syntheticToken
+    Reject-SetupTest { Assert-SetupRequest $request } 'maintenance never receives enrollment credentials'
+}
+foreach ($value in @($null, $true, 'True', 'FALSE', '', '0')) {
+    $request = New-SetupTestRequest 'uninstall'; $request.preserveData = $value
+    Reject-SetupTest { Assert-SetupRequest $request } 'preserve-data wire is exact string enum'
+}
+$request = New-SetupTestRequest 'uninstall'; $request.preserveData = 'false'
+Assert-SetupRequest $request; $script:checks++
+foreach ($action in @('prepare-core','start-core','complete','inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile')) {
+    $request = New-SetupTestRequest $action; $request.preserveData = 'false'
+    Reject-SetupTest { Assert-SetupRequest $request } 'data deletion forbidden outside explicit uninstall'
+}
+foreach ($version in @('01.0.0','1.0','-1.0.0','1.0.0-beta','65536.0.0',$null,123)) {
+    $request = New-SetupTestRequest; $request.version = $version
+    Reject-SetupTest { Assert-SetupRequest $request } 'unsupported setup version'
+}
 
 # In-memory hosting must import the same pilot implementation into Core's own scope.
 $pilotModule = New-Module -Name SetupPortablePilot -ScriptBlock ([ScriptBlock]::Create([IO.File]::ReadAllText((Join-Path $repo 'installer/pilot/PilotInstaller.psm1'))))
