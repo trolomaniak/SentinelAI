@@ -57,6 +57,22 @@ jobs:
             Write-Output "::error title=Windows Agent enrollment test::$message"
           }
           exit $testExitCode
+      - name: Verify native posture change monitoring on Windows
+        shell: pwsh
+        run: |
+          # Elevated: toggles HKLM RunAsPPL (applied only at boot) and restores the original value.
+          dotnet run --project tests/SentinelAI.Agent.Tests/SentinelAI.Agent.Tests.csproj --configuration Release --no-build -- --native-posture-acceptance *> "$env:RUNNER_TEMP\sentinelai-posture-acceptance.log"
+          $testExitCode = $LASTEXITCODE
+          $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-posture-acceptance.log" | Where-Object { $_ -notlike '{*' } | Select-Object -Last 25
+          $tail
+          if ($testExitCode -ne 0) {
+            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows posture monitoring acceptance::$message"
+          } else {
+            $latency = Get-Content "$env:RUNNER_TEMP\sentinelai-posture-acceptance.log" | Where-Object { $_ -like 'Native posture acceptance:*' -or $_ -like 'Native registry posture change*' }
+            Write-Output "::notice title=Windows posture monitoring acceptance::$($latency -join ' ')"
+          }
+          exit $testExitCode
       - name: Publish standalone Agent EXE
         shell: bash
         run: ./scripts/publish-agent-windows.sh

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SentinelAI.Contracts.Heartbeat;
+using SentinelAI.Contracts.Inventory;
 
 namespace SentinelAI.Agent;
 
@@ -13,9 +14,14 @@ public sealed class HeartbeatWorker(
     EnrollmentStateStore enrollmentStateStore,
     AgentEnrollmentClient enrollmentClient,
     InventoryCollector inventoryCollector,
+    PostureMonitor postureMonitor,
     HttpClient httpClient,
     ILogger<HeartbeatWorker> logger) : BackgroundService
 {
+    // Full inventory reconciliation is independent of change-triggered deliveries.
+    public static readonly TimeSpan InventoryInterval = TimeSpan.FromHours(6);
+    public static readonly TimeSpan InventoryRetryDelay = TimeSpan.FromMinutes(5);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var installationId = await identityStore.LoadOrCreateAsync(stoppingToken);
@@ -89,12 +95,14 @@ public sealed class HeartbeatWorker(
                 acknowledged = false;
             }
 
-            if (acknowledged && enrollment is not null && DateTimeOffset.UtcNow >= nextInventoryUtc)
+            var reconciliationDue = DateTimeOffset.UtcNow >= nextInventoryUtc;
+            var postureChangeDue = postureMonitor.IsDeliveryDue(DateTimeOffset.UtcNow);
+            if (acknowledged && enrollment is not null && (reconciliationDue || postureChangeDue))
             {
-                bool inventorySent;
+                InventoryReport? delivered;
                 try
                 {
-                    inventorySent = await SendInventoryAsync(enrollment, stoppingToken);
+                    delivered = await SendInventoryAsync(enrollment, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -103,18 +111,35 @@ public sealed class HeartbeatWorker(
                 catch (Exception exception)
                 {
                     logger.LogWarning(exception, "Inventory collection or delivery failed");
-                    inventorySent = false;
+                    delivered = null;
                 }
 
-                nextInventoryUtc = DateTimeOffset.UtcNow +
-                    (inventorySent ? TimeSpan.FromHours(6) : TimeSpan.FromMinutes(5));
+                if (delivered is null)
+                {
+                    postureMonitor.RecordDeliveryFailed();
+                }
+                else
+                {
+                    postureMonitor.RecordDelivered(delivered);
+                    if (postureChangeDue)
+                    {
+                        logger.LogInformation("Security posture change delivered to Core");
+                    }
+                }
+
+                if (reconciliationDue)
+                {
+                    nextInventoryUtc = DateTimeOffset.UtcNow +
+                        (delivered is not null ? InventoryInterval : InventoryRetryDelay);
+                }
             }
 
             var delay = acknowledged ? options.HeartbeatInterval : nextRetryDelay;
             nextRetryDelay = acknowledged ? options.RetryDelay : DoubleDelay(nextRetryDelay, options.MaxRetryDelay);
             try
             {
-                await Task.Delay(delay, stoppingToken);
+                // Only a reachable, enrolled Agent wakes early; an outage keeps its retry backoff.
+                await WaitForNextCycleAsync(delay, acknowledged && enrollment is not null, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -158,12 +183,46 @@ public sealed class HeartbeatWorker(
         return true;
     }
 
+    private async Task WaitForNextCycleAsync(TimeSpan delay, bool deliverPostureChanges,
+        CancellationToken stoppingToken)
+    {
+        if (!deliverPostureChanges)
+        {
+            await Task.Delay(delay, stoppingToken);
+            return;
+        }
+
+        var deadline = DateTimeOffset.UtcNow + delay;
+        while (true)
+        {
+            // Capture the signal before reading state so a concurrent detection still wakes us.
+            var changed = postureMonitor.ChangeDetected;
+            var now = DateTimeOffset.UtcNow;
+            if (now >= deadline || postureMonitor.IsDeliveryDue(now))
+            {
+                return;
+            }
+
+            var wait = deadline - now;
+            if (postureMonitor.PendingDeliveryUtc is { } dueUtc && dueUtc - now < wait)
+            {
+                // A detection racing this read may already be due; never pass a negative delay.
+                wait = dueUtc > now ? dueUtc - now : TimeSpan.Zero;
+            }
+
+            using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            await Task.WhenAny(Task.Delay(wait, waitCancellation.Token), changed.WaitAsync(waitCancellation.Token));
+            await waitCancellation.CancelAsync();
+            stoppingToken.ThrowIfCancellationRequested();
+        }
+    }
+
     private static TimeSpan DoubleDelay(TimeSpan delay, TimeSpan maximum) =>
         delay.Ticks >= maximum.Ticks / 2
             ? maximum
             : TimeSpan.FromTicks(delay.Ticks * 2);
 
-    private async Task<bool> SendInventoryAsync(
+    private async Task<InventoryReport?> SendInventoryAsync(
         EnrollmentState enrollment,
         CancellationToken cancellationToken)
     {
@@ -179,10 +238,10 @@ public sealed class HeartbeatWorker(
         if (!response.IsSuccessStatusCode)
         {
             logger.LogWarning("Inventory upload failed with HTTP {StatusCode}", (int)response.StatusCode);
-            return false;
+            return null;
         }
 
         logger.LogDebug("Inventory acknowledged for endpoint {EndpointId}", enrollment.EndpointId);
-        return true;
+        return report;
     }
 }

@@ -35,7 +35,12 @@ public static class AgentHost
             AgentOptions.FromConfiguration(provider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()));
         builder.Services.AddSingleton<InstallationIdentityStore>();
         builder.Services.AddSingleton<EnrollmentStateStore>();
+        builder.Services.AddSingleton<ISecurityPostureReader, SecurityPostureReader>();
         builder.Services.AddSingleton<InventoryCollector>();
+        builder.Services.AddSingleton<IPostureChangeSource>(_ => OperatingSystem.IsWindows()
+            ? RegistryPostureChangeSource.ForSecurityConfiguration()
+            : new NoPostureChangeSource());
+        builder.Services.AddSingleton<PostureMonitor>();
         builder.Services.AddSingleton(provider =>
         {
             var options = provider.GetRequiredService<AgentOptions>();
@@ -54,6 +59,7 @@ public static class AgentHost
             return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
         });
         builder.Services.AddSingleton<AgentEnrollmentClient>();
+        builder.Services.AddHostedService(provider => provider.GetRequiredService<PostureMonitor>());
         builder.Services.AddHostedService<HeartbeatWorker>();
 
         return builder;

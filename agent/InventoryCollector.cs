@@ -5,9 +5,13 @@ using SentinelAI.Contracts.Inventory;
 
 namespace SentinelAI.Agent;
 
-public sealed class InventoryCollector
+public sealed class InventoryCollector(ISecurityPostureReader postureReader)
 {
     private const int MaximumDisks = 16;
+
+    public InventoryCollector() : this(new SecurityPostureReader())
+    {
+    }
 
     public InventoryReport Collect(Guid endpointId)
     {
@@ -29,9 +33,7 @@ public sealed class InventoryCollector
             new CpuInventory(isWindows ? ReadCpuModel() : null, Environment.ProcessorCount),
             isWindows ? ReadInstalledRamBytes() : null,
             isWindows ? ReadFixedDisks() : [],
-            isWindows
-                ? WindowsSecurityConfigurationCollector.CollectPosture()
-                : new SecurityPostureInventory(null, null, null),
+            postureReader.Read(),
             windowsOs?.DisplayVersion,
             windowsOs?.InstallationType);
     }
