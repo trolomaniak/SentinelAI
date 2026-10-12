@@ -43,11 +43,7 @@ public sealed class DeviceStore(AdminStore admins)
             throw new ArgumentException("An installation ID is required.", nameof(installationId));
         }
 
-        var utcTicks = DateTimeOffset.UtcNow.UtcDateTime.Ticks;
-        await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using var upsert = connection.CreateCommand();
-        upsert.CommandText = """
+        return await UpsertAsync(installationId, DeviceEnrollmentStatus.Unverified, """
             INSERT INTO Devices (InstallationId, LastSeenUtcTicks, HealthStatus, EnrollmentStatus)
             SELECT $installationId, $lastSeenUtcTicks, $healthStatus, $enrollmentStatus
             WHERE NOT EXISTS (
@@ -61,23 +57,7 @@ public sealed class DeviceStore(AdminStore admins)
                   SELECT 1 FROM EndpointEnrollments WHERE InstallationId = $installationId
               )
             RETURNING LastSeenUtcTicks, HealthStatus, EnrollmentStatus;
-            """;
-        upsert.Parameters.AddWithValue("$installationId", installationId.ToString("D"));
-        upsert.Parameters.AddWithValue("$lastSeenUtcTicks", utcTicks);
-        upsert.Parameters.AddWithValue("$healthStatus", DeviceHealthStatus.Reporting);
-        upsert.Parameters.AddWithValue("$enrollmentStatus", DeviceEnrollmentStatus.Unverified);
-
-        await using var reader = await upsert.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
-        {
-            return null;
-        }
-
-        return new DeviceRecord(
-            installationId,
-            new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
-            reader.GetString(1),
-            reader.GetString(2));
+            """, cancellationToken);
     }
 
     public async Task<DeviceRecord> RecordEnrolledHeartbeatAsync(
@@ -89,11 +69,7 @@ public sealed class DeviceStore(AdminStore admins)
             throw new ArgumentException("An installation ID is required.", nameof(installationId));
         }
 
-        var utcTicks = DateTimeOffset.UtcNow.UtcDateTime.Ticks;
-        await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using var upsert = connection.CreateCommand();
-        upsert.CommandText = """
+        return await UpsertAsync(installationId, DeviceEnrollmentStatus.Enrolled, """
             INSERT INTO Devices (InstallationId, LastSeenUtcTicks, HealthStatus, EnrollmentStatus)
             VALUES ($installationId, $lastSeenUtcTicks, $healthStatus, $enrollmentStatus)
             ON CONFLICT (InstallationId) DO UPDATE SET
@@ -101,20 +77,44 @@ public sealed class DeviceStore(AdminStore admins)
                 HealthStatus = excluded.HealthStatus,
                 EnrollmentStatus = excluded.EnrollmentStatus
             RETURNING LastSeenUtcTicks, HealthStatus, EnrollmentStatus;
-            """;
-        upsert.Parameters.AddWithValue("$installationId", installationId.ToString("D"));
-        upsert.Parameters.AddWithValue("$lastSeenUtcTicks", utcTicks);
-        upsert.Parameters.AddWithValue("$healthStatus", DeviceHealthStatus.Reporting);
-        upsert.Parameters.AddWithValue("$enrollmentStatus", DeviceEnrollmentStatus.Enrolled);
-        await using var reader = await upsert.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
+            """, cancellationToken)
+            ?? throw new InvalidOperationException("The enrolled heartbeat was not persisted.");
+    }
+
+    private async Task<DeviceRecord?> UpsertAsync(
+        Guid installationId,
+        string enrollmentStatus,
+        string commandText,
+        CancellationToken cancellationToken)
+    {
+        var utcTicks = DateTimeOffset.UtcNow.UtcDateTime.Ticks;
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        // An autocommit RETURNING statement commits when its reader is disposed, where Microsoft.Data.Sqlite
+        // does not retry SQLITE_BUSY. An explicit COMMIT waits for concurrent readers up to DefaultTimeout.
+        using var transaction = connection.BeginTransaction(deferred: false);
+        DeviceRecord? device = null;
+        await using (var upsert = connection.CreateCommand())
         {
-            throw new InvalidOperationException("The enrolled heartbeat was not persisted.");
+            upsert.Transaction = transaction;
+            upsert.CommandText = commandText;
+            upsert.Parameters.AddWithValue("$installationId", installationId.ToString("D"));
+            upsert.Parameters.AddWithValue("$lastSeenUtcTicks", utcTicks);
+            upsert.Parameters.AddWithValue("$healthStatus", DeviceHealthStatus.Reporting);
+            upsert.Parameters.AddWithValue("$enrollmentStatus", enrollmentStatus);
+            await using var reader = await upsert.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                device = new DeviceRecord(
+                    installationId,
+                    new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
+                    reader.GetString(1),
+                    reader.GetString(2));
+            }
         }
 
-        return new DeviceRecord(installationId,
-            new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
-            reader.GetString(1), reader.GetString(2));
+        transaction.Commit();
+        return device;
     }
 
     public async Task<DeviceRecord?> FindByInstallationIdAsync(
