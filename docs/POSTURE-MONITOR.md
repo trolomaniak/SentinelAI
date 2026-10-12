@@ -27,7 +27,7 @@ Rule meaning, evidence and severity do not change. Notifications carry no data: 
 4. **Delivery.** If the last heartbeat was acknowledged and the Agent is enrolled, the heartbeat worker wakes immediately, sends a heartbeat and then a freshly collected full inventory. Change-triggered uploads are spaced at least 30 seconds apart by default; a change inside that window waits for it and replaces any earlier pending change.
 5. **Verification fallback.** Every five minutes, the monitor re-arms and re-reads even without notifications. This covers missed notifications, deleted/recreated keys, keys the service account cannot watch and hosts without registry notifications.
 
-With defaults, a supported setting change normally reaches Core in about two to three seconds. Automated tests measured roughly 140 ms end to end with a 100 ms settle delay and a five-minute heartbeat interval.
+With defaults, a supported setting change normally reaches Core in about two to three seconds. Automated tests measured roughly 140–200 ms end to end (measured by polling Core) with a 100 ms settle delay and a five-minute heartbeat interval.
 
 ## Reconciliation
 
@@ -74,4 +74,4 @@ These keys are not part of the pilot/Setup `--config` allowlist, so installed se
 
 - Portable tests (all platforms) cover configuration bounds, watch-list/collector equivalence, coalescing of 1,000-notification bursts into one read, bounded reads under a continuous storm, revert/duplicate suppression, single-slot spacing and five-minute retry, periodic fallback and contained failures. With a real Core, they also cover delivery in seconds with a five-minute heartbeat, current findings, tracked alerts and Risk, duplicate bursts with zero extra uploads, preserved alert meaning after restoration, a Core outage with bounded retries and one latest upload, inventory rejection without retry storms, and restart reconciliation without persisted queue state.
 - On Windows CI, the same suite uses actual registry notifications on a private `HKCU` copy of the monitored keys, including creation of an absent policy key, to deliver a change to Core.
-- The elevated `package-agent-windows` step runs `--native-posture-acceptance` with the production Agent composition and default intervals. It changes the real `HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RunAsPPL` value, which Windows applies only at boot. It then requires SA-LSA-001 in Core within 15 seconds and restores the original value.
+- The elevated `package-agent-windows` step runs `--native-posture-acceptance` with the production Agent composition and default intervals. It changes the real `HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RunAsPPL` value, which Windows applies only at boot. It then requires SA-LSA-001 in Core within 30 seconds, allowing a heartbeat retry, and restores the original value. The first CI run measured 2.2 seconds.
