@@ -26,6 +26,21 @@ Ensure(typeof(SentinelAI.Agent.Program).Assembly.EntryPoint is not null,
 var testDirectory = Path.Combine(Path.GetTempPath(), $"sentinelai-agent-tests-{Guid.NewGuid():N}");
 Directory.CreateDirectory(testDirectory);
 
+if (args is ["--native-posture-acceptance"])
+{
+    try
+    {
+        await PostureMonitorTests.RunNativeAcceptanceAsync(testDirectory);
+    }
+    finally
+    {
+        SqliteConnection.ClearAllPools();
+        Directory.Delete(testDirectory, recursive: true);
+    }
+
+    return;
+}
+
 try
 {
     VerifyInventoryCollection();
@@ -36,7 +51,8 @@ try
     await VerifyRetryAndStableIdentityAsync(Path.Combine(testDirectory, "retry"));
     await VerifyAgentToCoreAsync(Path.Combine(testDirectory, "end-to-end"));
     await VerifyAgentEnrollmentAsync(Path.Combine(testDirectory, "enrollment"));
-    Console.WriteLine("Agent heartbeat tests passed.");
+    await PostureMonitorTests.RunAsync(Path.Combine(testDirectory, "posture"));
+    Console.WriteLine("Agent heartbeat and posture monitoring tests passed.");
 }
 finally
 {

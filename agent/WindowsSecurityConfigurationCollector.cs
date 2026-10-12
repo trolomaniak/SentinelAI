@@ -11,6 +11,24 @@ public static class WindowsSecurityConfigurationCollector
     private const string TerminalServicesPolicy = @"SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services";
     private const string TerminalServer = @"SYSTEM\CurrentControlSet\Control\Terminal Server";
     private const string RdpTcp = TerminalServer + @"\WinStations\RDP-Tcp";
+    private const string SmbServer = @"SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters";
+    private const string GuestPolicy = @"SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation";
+    private const string GuestLocal = @"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters";
+    private const string Winlogon = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+    private const string Lsa = @"SYSTEM\CurrentControlSet\Control\Lsa";
+    private const string UpdatePolicy = @"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU";
+    private const string FirewallPolicy = @"SOFTWARE\Policies\Microsoft\WindowsFirewall\";
+    private const string FirewallLocal = @"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\";
+    private static readonly string[] FirewallProfiles = ["DomainProfile", "StandardProfile", "PublicProfile"];
+
+    /// <summary>Every registry key the collector may read; posture monitoring watches exactly these.</summary>
+    public static IReadOnlyList<string> ConfigurationKeyPaths { get; } =
+    [
+        .. FirewallProfiles.Select(profile => FirewallPolicy + profile),
+        .. FirewallProfiles.Select(profile => FirewallLocal + profile),
+        SystemPolicy, TerminalServicesPolicy, TerminalServer, RdpTcp,
+        SmbServer, GuestPolicy, GuestLocal, Winlogon, Lsa, UpdatePolicy
+    ];
 
     [SupportedOSPlatform("windows")]
     public static SecurityPostureInventory CollectPosture() => CollectPosture(ReadLocalMachineValue);
@@ -23,9 +41,9 @@ public static class WindowsSecurityConfigurationCollector
         ArgumentNullException.ThrowIfNull(readValue);
 
         return new SecurityPostureInventory(
-            ReadFirewallEnabled(readValue, "DomainProfile"),
-            ReadFirewallEnabled(readValue, "StandardProfile"),
-            ReadFirewallEnabled(readValue, "PublicProfile"),
+            ReadFirewallEnabled(readValue, FirewallProfiles[0]),
+            ReadFirewallEnabled(readValue, FirewallProfiles[1]),
+            ReadFirewallEnabled(readValue, FirewallProfiles[2]),
             new WindowsSecurityConfiguration(
                 UacEnabled: Read(readValue, "EnableLUA", BooleanDword, SystemPolicy),
                 AdminConsentPromptBehavior: Read(readValue, "ConsentPromptBehaviorAdmin",
@@ -38,24 +56,17 @@ public static class WindowsSecurityConfigurationCollector
                     value => BoundedDword(value, 0, 2), TerminalServicesPolicy, RdpTcp),
                 RdpMinimumEncryptionLevel: Read(readValue, "MinEncryptionLevel",
                     value => BoundedDword(value, 1, 4), TerminalServicesPolicy, RdpTcp),
-                Smb1ServerEnabled: Read(readValue, "SMB1", BooleanDword,
-                    @"SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters"),
+                Smb1ServerEnabled: Read(readValue, "SMB1", BooleanDword, SmbServer),
                 SmbInsecureGuestLogonsAllowed: Read(readValue, "AllowInsecureGuestAuth", BooleanDword,
-                    @"SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation",
-                    @"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters"),
-                AutomaticAdminLogonEnabled: Read(readValue, "AutoAdminLogon", BooleanString,
-                    @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"),
+                    GuestPolicy, GuestLocal),
+                AutomaticAdminLogonEnabled: Read(readValue, "AutoAdminLogon", BooleanString, Winlogon),
                 // ConfigureLsaProtectedProcess policy writes RunAsPPL here directly.
-                LsaProtectionEnabled: Read(readValue, "RunAsPPL", LsaProtection,
-                    @"SYSTEM\CurrentControlSet\Control\Lsa"),
-                AutomaticUpdatesDisabled: Read(readValue, "NoAutoUpdate", BooleanDword,
-                    @"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU")));
+                LsaProtectionEnabled: Read(readValue, "RunAsPPL", LsaProtection, Lsa),
+                AutomaticUpdatesDisabled: Read(readValue, "NoAutoUpdate", BooleanDword, UpdatePolicy)));
     }
 
     private static bool? ReadFirewallEnabled(Func<string, string, object?> readValue, string profile) =>
-        Read(readValue, "EnableFirewall", BooleanDword,
-            @"SOFTWARE\Policies\Microsoft\WindowsFirewall\" + profile,
-            @"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\" + profile);
+        Read(readValue, "EnableFirewall", BooleanDword, FirewallPolicy + profile, FirewallLocal + profile);
 
     private static T? Read<T>(Func<string, string, object?> readValue, string valueName,
         Func<object, T?> parse, params string[] keyPaths) where T : struct

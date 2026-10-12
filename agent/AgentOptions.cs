@@ -14,6 +14,13 @@ public sealed record AgentOptions(
     string? CoreCertificateSha256,
     string? EnrollmentTokenFile = null)
 {
+    // Posture monitoring: periodic verification when notifications are missed or unavailable,
+    // quiet period that coalesces a burst of notifications, and minimum spacing between
+    // change-triggered inventory deliveries.
+    public TimeSpan PostureCheckInterval { get; init; } = TimeSpan.FromMinutes(5);
+    public TimeSpan PostureSettleDelay { get; init; } = TimeSpan.FromSeconds(2);
+    public TimeSpan PostureDeliveryInterval { get; init; } = TimeSpan.FromSeconds(30);
+
     public bool HasEnrollmentToken => EnrollmentToken is not null || EnrollmentTokenFile is not null;
     public Uri HeartbeatUrl => new(CoreUrl, "/api/agent/heartbeat");
     public Uri EnrollmentUrl => new(CoreUrl, "/api/agent/enroll");
@@ -78,6 +85,13 @@ public sealed record AgentOptions(
             throw new InvalidOperationException("Agent:RetryDelay must not exceed Agent:MaxRetryDelay.");
         }
 
+        var postureCheckInterval = ReadBoundedInterval(configuration, "Agent:PostureCheckInterval",
+            TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(1), TimeSpan.FromHours(6));
+        var postureSettleDelay = ReadBoundedInterval(configuration, "Agent:PostureSettleDelay",
+            TimeSpan.FromSeconds(2), TimeSpan.FromMilliseconds(100), TimeSpan.FromMinutes(1));
+        var postureDeliveryInterval = ReadBoundedInterval(configuration, "Agent:PostureDeliveryInterval",
+            TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(1), TimeSpan.FromHours(1));
+
         var enrollmentToken = string.IsNullOrWhiteSpace(configuration["Agent:EnrollmentToken"])
             ? null : configuration["Agent:EnrollmentToken"]!.Trim();
         var enrollmentTokenFile = configuration["Agent:EnrollmentTokenFile"];
@@ -102,7 +116,12 @@ public sealed record AgentOptions(
             maxRetryDelay,
             enrollmentToken,
             certificatePin,
-            enrollmentTokenFile);
+            enrollmentTokenFile)
+        {
+            PostureCheckInterval = postureCheckInterval,
+            PostureSettleDelay = postureSettleDelay,
+            PostureDeliveryInterval = postureDeliveryInterval
+        };
     }
 
     private static TimeSpan ReadPositiveInterval(IConfiguration configuration, string key, TimeSpan fallback)
@@ -116,6 +135,20 @@ public sealed record AgentOptions(
         if (!TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out var interval) || interval <= TimeSpan.Zero)
         {
             throw new InvalidOperationException($"{key} must be a positive TimeSpan.");
+        }
+
+        return interval;
+    }
+
+    private static TimeSpan ReadBoundedInterval(IConfiguration configuration, string key, TimeSpan fallback,
+        TimeSpan minimum, TimeSpan maximum)
+    {
+        var interval = ReadPositiveInterval(configuration, key, fallback);
+        if (interval < minimum || interval > maximum)
+        {
+            throw new InvalidOperationException(
+                $"{key} must be between {minimum.ToString("c", CultureInfo.InvariantCulture)} and " +
+                $"{maximum.ToString("c", CultureInfo.InvariantCulture)}.");
         }
 
         return interval;
