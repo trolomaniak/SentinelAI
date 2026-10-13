@@ -465,12 +465,13 @@ public sealed class SecurityEventPipeline : BackgroundService
             catch (EventChannelUnavailableException exception) when (!cancellationToken.IsCancellationRequested)
             {
                 Commit(draft, state, pass);
-                SetUnavailable(state, exception.State, exception.ErrorCode, now);
+                SetUnavailable(state, exception.State, exception.ErrorCode, null, now);
             }
             catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
+                // Includes read timeouts and EventLog cancellations that are not this host stopping.
                 Commit(draft, state, pass);
-                SetUnavailable(state, SecurityEventSourceStates.Error, exception.HResult, now);
+                SetUnavailable(state, SecurityEventSourceStates.Error, exception.HResult, exception.GetType().Name, now);
             }
             finally
             {
@@ -762,13 +763,14 @@ public sealed class SecurityEventPipeline : BackgroundService
             null);
     }
 
-    private void SetUnavailable(ChannelState state, string sourceState, int errorCode, DateTimeOffset now)
+    private void SetUnavailable(ChannelState state, string sourceState, int errorCode, string? exceptionType,
+        DateTimeOffset now)
     {
         state.RetryAtUtc = now + _timings.ChannelRetry;
-        Transition(state, sourceState, errorCode);
+        Transition(state, sourceState, errorCode, exceptionType);
     }
 
-    private void Transition(ChannelState state, string sourceState, int? errorCode)
+    private void Transition(ChannelState state, string sourceState, int? errorCode, string? exceptionType = null)
     {
         state.State = sourceState;
         state.LastErrorCode = errorCode;
@@ -777,7 +779,8 @@ public sealed class SecurityEventPipeline : BackgroundService
         if (sourceState == SecurityEventSourceStates.Collecting)
             _logger.LogInformation("Security event channel {Channel} is collecting", state.Channel);
         else if (errorCode is { } code)
-            _logger.LogWarning("Security event channel {Channel} is {State} (0x{HResult:X8})", state.Channel, sourceState, code);
+            _logger.LogWarning("Security event channel {Channel} is {State} ({ExceptionType}, 0x{HResult:X8})",
+                state.Channel, sourceState, exceptionType ?? "-", code);
         else
             _logger.LogWarning("Security event channel {Channel} is {State}", state.Channel, sourceState);
     }

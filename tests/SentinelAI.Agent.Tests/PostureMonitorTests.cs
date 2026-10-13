@@ -651,7 +651,9 @@ internal static class PostureMonitorTests
             builder.Configuration["Agent:HeartbeatInterval"] = "00:05:00";
             builder.Configuration["Agent:EnrollmentToken"] = await core.IssueEnrollmentTokenAsync();
             builder.Configuration["Agent:CoreCertificateSha256"] = null;
-            // Production posture reader, HKLM change source and default monitoring intervals.
+            // Production posture reader, HKLM change source and default monitoring intervals; no event channels.
+            builder.Services.RemoveAll<IEventLogAccess>();
+            builder.Services.AddSingleton<IEventLogAccess>(new NoEventLogAccess());
             using var agent = builder.Build();
             Ensure(agent.Services.GetRequiredService<IPostureChangeSource>() is RegistryPostureChangeSource &&
                    agent.Services.GetRequiredService<ISecurityPostureReader>() is SecurityPostureReader,
@@ -737,6 +739,8 @@ internal static class PostureMonitorTests
         builder.Services.AddSingleton(reader);
         builder.Services.RemoveAll<IPostureChangeSource>();
         builder.Services.AddSingleton(source);
+        builder.Services.RemoveAll<IEventLogAccess>();
+        builder.Services.AddSingleton<IEventLogAccess>(new NoEventLogAccess());
         return builder.Build();
     }
 
