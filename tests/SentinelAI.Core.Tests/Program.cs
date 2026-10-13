@@ -10,6 +10,7 @@ using Microsoft.Data.Sqlite;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Contracts.Inventory;
+using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 
@@ -178,6 +179,7 @@ try
     await OperatingSystemApiTests.VerifyAsync(username, password);
     await ReportApiTests.VerifyAsync(username, password);
     await RiskApiTests.VerifyAsync(username, password);
+    await SecurityEventApiTests.VerifyAsync(username, password);
 
     // Existing installations must work without retaining the bootstrap secret in configuration.
     Environment.SetEnvironmentVariable("SENTINELAI_BOOTSTRAP_USERNAME", null);
@@ -279,10 +281,29 @@ try
             Ensure(inventory.StatusCode == HttpStatusCode.Forbidden,
                 "Core accepted inventory and an Agent credential over remote HTTP.");
         }
+        using (var securityEvents = new HttpRequestMessage(HttpMethod.Post, "/api/agent/security-events")
+               {
+                   Content = JsonContent.Create(new SecurityEventBatch(endpointId, SecurityEventContract.Format,
+                       "0.1.0-test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [], [], []),
+                       options: SecurityEventContract.Json)
+               })
+        {
+            securityEvents.Headers.Authorization = new AuthenticationHeaderValue(
+                "SentinelAgent", $"{endpointId:D}.{agentCredential}");
+            using var response = await client.SendAsync(securityEvents);
+            Ensure(response.StatusCode == HttpStatusCode.Forbidden,
+                "Core accepted security events and an Agent credential over remote HTTP.");
+        }
         using (var deviceList = await GetAsBearerAsync(client, "/api/admin/devices", accessToken))
         {
             Ensure(deviceList.StatusCode == HttpStatusCode.Forbidden,
                 "Core exposed the administrator device list over remote HTTP.");
+        }
+        using (var eventSources = await GetAsBearerAsync(
+                   client, $"/api/admin/devices/{endpointId:D}/event-sources", accessToken))
+        {
+            Ensure(eventSources.StatusCode == HttpStatusCode.Forbidden,
+                "Core exposed event-source status over remote HTTP.");
         }
         using (var deviceDetail = await GetAsBearerAsync(
                    client, $"/api/admin/devices/{endpointId:D}", accessToken))
