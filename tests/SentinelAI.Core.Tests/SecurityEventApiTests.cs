@@ -288,6 +288,10 @@ internal static class SecurityEventApiTests
         }
 
         var wrongCredential = a with { Credential = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)) };
+        // Oversized bodies that Core must refuse unread are offered with Expect: 100-continue, so they are
+        // never transmitted unless Core starts reading. A body Core cannot drain closes that connection, so
+        // every request here uses its own connection.
+        var unread = new HashSet<string>(StringComparer.Ordinal) { "anonymous oversized body", "Content-Length over the cap" };
         var cases = new (string Name, HttpStatusCode Expected, Agent? Agent, Func<HttpContent> Content)[]
         {
             ("anonymous valid body", HttpStatusCode.Unauthorized, null, () => Raw(valid)),
@@ -301,7 +305,7 @@ internal static class SecurityEventApiTests
             ("Content-Length over the cap", HttpStatusCode.RequestEntityTooLarge, a, () => Raw(oversized)),
             ("chunked body over the cap", HttpStatusCode.RequestEntityTooLarge, a, () => Chunked(probe with
             {
-                AgentVersion = new string('x', 300 * 1024)
+                AgentVersion = new string('x', SecurityEventContract.MaxRequestBytes)
             })),
             ("malformed JSON", HttpStatusCode.BadRequest, a, () => Raw(valid[..^2])),
             ("invalid UTF-8", HttpStatusCode.BadRequest, a, () => InvalidUtf8(valid)),
@@ -338,9 +342,24 @@ internal static class SecurityEventApiTests
         var baseline = await SnapshotAsync(store, a, b);
         foreach (var (name, expected, agent, content) in cases)
         {
-            using var response = await PostAsync(client, agent, content());
-            Check(response.StatusCode == expected,
-                $"Security event ingest returned HTTP {(int)response.StatusCode} instead of {(int)expected} for: {name}.");
+            HttpResponseMessage response;
+            try
+            {
+                response = await PostAsync(client, agent, content(), headers =>
+                {
+                    headers.ConnectionClose = true;
+                    if (unread.Contains(name)) headers.ExpectContinue = true;
+                });
+            }
+            catch (HttpRequestException exception)
+            {
+                throw new InvalidOperationException($"Security event ingest transport failed for: {name}.", exception);
+            }
+            using (response)
+            {
+                Check(response.StatusCode == expected,
+                    $"Security event ingest returned HTTP {(int)response.StatusCode} instead of {(int)expected} for: {name}.");
+            }
         }
         Check(await SnapshotAsync(store, a, b) == baseline, "A rejected security event request changed Core state.");
 
@@ -618,10 +637,12 @@ internal static class SecurityEventApiTests
                ?? throw new InvalidOperationException("Core returned no security event batch result.");
     }
 
-    private static async Task<HttpResponseMessage> PostAsync(HttpClient client, Agent? agent, HttpContent content)
+    private static async Task<HttpResponseMessage> PostAsync(HttpClient client, Agent? agent, HttpContent content,
+        Action<HttpRequestHeaders>? configure = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, IngestPath) { Content = content };
         if (agent is not null) request.Headers.Authorization = new AuthenticationHeaderValue("SentinelAgent", agent.Authorization);
+        configure?.Invoke(request.Headers);
         return await client.SendAsync(request);
     }
 
