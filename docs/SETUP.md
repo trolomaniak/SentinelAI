@@ -50,12 +50,14 @@ If rollback cannot finish, Setup reports failure and retains recovery material. 
 | `%ProgramFiles%\SentinelAI\Agent` | Signed Agent package and runtime; LocalService read/execute, installer-controlled code. |
 | `%ProgramFiles%\SentinelAI\Updater` | Public-only verification client and runtime; protected installer-controlled code. |
 | `%ProgramData%\SentinelAI\Core` | Existing private SQLite/configuration/ownership layout; Core can update SQLite while protected configuration/receipts remain immutable to it. |
-| `%ProgramData%\SentinelAI\Agent` | Existing LocalService inventory/enrollment state; credential protected with that account's DPAPI. |
+| `%ProgramData%\SentinelAI\Agent` | Existing LocalService inventory/enrollment state and security event positions; credential protected with that account's DPAPI. |
 | `%ProgramData%\SentinelAI\Setup` | Pinned public trust key, ownership receipt, retained-installation marker and temporary maintenance receipt snapshot; no administrator password, bearer or enrollment token. |
 | `%ProgramData%\SentinelAI-Setup` | Protected private payload workspaces and the exclusive setup-operation lock; no persistent application state. |
 | Common Start Menu `SentinelAI\SentinelAI.lnk` | Exact installed Desktop target, no credential or startup arguments. |
 
 Core uses `NT SERVICE\SentinelAICore`, delayed automatic startup and its existing recovery policy. Agent uses automatic `NT AUTHORITY\LocalService`. Core listens only at `http://127.0.0.1:5000`; Setup does not provision remote listeners, TLS certificates, firewall rules, cloud credentials, licensing entitlements or automatic updates. Desktop preferences and AI consent retain their default-off behavior.
+
+Under LocalService, the Agent collects the selected System, PowerShell and Defender events where those channels are readable and reports the Security channel as access denied; Setup grants no additional event log access (see [security event collection](SECURITY-EVENTS.md#channel-access-and-localservice)).
 
 ## Bootstrap and package trust
 

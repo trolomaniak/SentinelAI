@@ -64,7 +64,7 @@ These keys are not part of the pilot/Setup `--config` allowlist, so installed se
 
 ## Limits
 
-- Posture is current state, not an event history. A change that is reverted within the settle/spacing window, or during a Core outage, is not reported individually. Windows security event collection is TASK-027.
+- Posture is current state, not an event history. A change that is reverted within the settle/spacing window, or during a Core outage, is not reported individually. Windows security events are collected separately; see [continuous security event collection](SECURITY-EVENTS.md).
 - Detection covers the registry values above. Settings enforced only through mechanisms that do not update them are not observed, consistent with the rule catalog.
 - The Agent runs as `NT AUTHORITY\LocalService`. A key it cannot read was already reported as Unknown; one it cannot watch is covered only by the five-minute verification.
 - Group Policy refresh or other writes in watched keys cause cheap re-reads; nothing is uploaded unless the monitored posture changed.
