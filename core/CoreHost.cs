@@ -15,6 +15,7 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Contracts.Inventory;
+using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Reports;
 using SentinelAI.Licensing;
@@ -81,6 +82,8 @@ public static class CoreHost
         builder.Services.AddSingleton<DeviceReadStore>();
         builder.Services.AddSingleton<EnrollmentStore>();
         builder.Services.AddSingleton<InventoryStore>();
+        builder.Services.AddSingleton(SecurityEventRetention.Default);
+        builder.Services.AddSingleton<SecurityEventStore>();
         builder.Services.AddSingleton<AlertStore>();
         builder.Services.AddSingleton(RuleEngine.CreateDefault());
         var riskOptions = RiskScoringOptions.Load(builder.Configuration);
@@ -160,6 +163,16 @@ public static class CoreHost
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+            // Agents space event batches at least 2 s apart (<= 30/min); this leaves 2x headroom.
+            options.AddPolicy("security-events", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 60,
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0,
                     AutoReplenishment = true
@@ -336,6 +349,61 @@ public static class CoreHost
             .RequireRateLimiting("inventory")
             .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
 
+        app.MapPost("/api/agent/security-events", async (
+                HttpContext context,
+                EnrollmentStore enrollments,
+                SecurityEventStore events,
+                ILogger<SecurityEventStore> logger,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                // Authenticate before any body byte is read, so anonymous callers cannot make Core parse a batch.
+                if (!TryReadAgentCredential(context.Request.Headers.Authorization.ToString(),
+                        out var endpointId, out var credential) ||
+                    !await enrollments.AuthenticateEndpointAsync(endpointId, credential, cancellationToken))
+                {
+                    return Results.Unauthorized();
+                }
+
+                // Bodies and parser messages are never logged; only the endpoint and status code.
+                var read = await SecurityEventRequestReader.ReadAsync(context.Request, cancellationToken);
+                if (read.ErrorStatus is { } status)
+                {
+                    logger.LogWarning("Security event batch from endpoint {EndpointId} rejected with HTTP {StatusCode}",
+                        endpointId, status);
+                    return Results.StatusCode(status);
+                }
+
+                if (read.Batch!.EndpointId != endpointId)
+                {
+                    return Results.Unauthorized();
+                }
+
+                if (!SecurityEventContract.IsValidEnvelope(read.Batch))
+                {
+                    logger.LogWarning("Security event batch from endpoint {EndpointId} rejected with HTTP {StatusCode}",
+                        endpointId, StatusCodes.Status400BadRequest);
+                    return Results.BadRequest();
+                }
+
+                // No license or Safe Mode gate: event collection is local monitoring.
+                var result = await events.RecordAsync(endpointId, read.Batch, cancellationToken);
+                if (result.Rejected > 0)
+                {
+                    logger.LogWarning("Security event batch from endpoint {EndpointId}: {Rejected} items rejected",
+                        endpointId, result.Rejected);
+                }
+
+                return Results.Ok(result);
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting("security-events")
+            .WithMetadata(new RequestSizeLimitAttribute(SecurityEventContract.MaxRequestBytes));
+
         app.MapPost("/api/auth/login", async (
                 LoginRequest? request,
                 AdminStore admins,
@@ -403,6 +471,29 @@ public static class CoreHost
 
                 var device = await devices.FindAsync(endpointId, cancellationToken);
                 return device is null ? Results.NotFound() : Results.Ok(device);
+            })
+            .RequireAuthorization();
+
+        // Status only (states, counters, record numbers and gap metadata), never observation content.
+        app.MapGet("/api/admin/devices/{endpointId:guid}/event-sources", async (
+                Guid endpointId,
+                HttpContext context,
+                DeviceReadStore devices,
+                SecurityEventStore events,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (await devices.FindAsync(endpointId, cancellationToken) is null)
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.Ok(await events.GetSourcesViewAsync(endpointId, cancellationToken));
             })
             .RequireAuthorization();
 

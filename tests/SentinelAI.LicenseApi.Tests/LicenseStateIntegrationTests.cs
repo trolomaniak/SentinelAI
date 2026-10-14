@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Contracts.Inventory;
+using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 using SentinelAI.LicenseApi;
@@ -320,6 +321,31 @@ internal static class LicenseStateIntegrationTests
         }
         Check((await app.Services.GetRequiredService<InventoryStore>().FindLatestAsync(enrolled.EndpointId))?.CollectedUtc ==
               report.CollectedUtc, "Safe Mode failed to persist accepted telemetry.");
+        // Security event collection has no license gate: a status and one observation are still stored.
+        var events = new SecurityEventBatch(enrolled.EndpointId, SecurityEventContract.Format, "0.1.0-test",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(-1),
+            [new SecurityEventSourceStatus(SecurityEventChannels.System, SecurityEventSourceStates.Collecting, null, 1, 2, 1,
+                1024 * 1024, DateTimeOffset.UtcNow, 2, 1, 0, 0, 0, 0, 0, 0, 0)],
+            [],
+            [new SecurityEventObservation(SecurityEventChannels.System, SecurityEventProviders.ServiceControlManager, 7045, 0, 4, 2,
+                new DateTimeOffset(2026, 1, 1, 0, 0, 2, TimeSpan.Zero), SecurityEventKinds.ServiceInstalled,
+                ServiceInstall: new ServiceInstallEvent("test-only-service", "svc.exe", ServiceImageLocations.ProgramFiles,
+                    ServiceTypes.UserModeService, ServiceStartTypes.Demand, ServiceAccountKinds.LocalSystem))]);
+        using (var eventRequest = new HttpRequestMessage(HttpMethod.Post, "/api/agent/security-events")
+               { Content = JsonContent.Create(events, options: SecurityEventContract.Json) })
+        {
+            eventRequest.Headers.Authorization = new AuthenticationHeaderValue("SentinelAgent", agentCredential);
+            using var eventResponse = await client.SendAsync(eventRequest);
+            Check(eventResponse.StatusCode == HttpStatusCode.OK &&
+                  await eventResponse.Content.ReadFromJsonAsync<SecurityEventBatchResult>(SecurityEventContract.Json) ==
+                  new SecurityEventBatchResult(1, 0, 0, 0),
+                "Safe Mode stopped authenticated security event collection.");
+        }
+        var securityEvents = app.Services.GetRequiredService<SecurityEventStore>();
+        Check(await securityEvents.CountAsync(enrolled.EndpointId) == 1 &&
+              (await securityEvents.ListSourcesAsync(enrolled.EndpointId)).Single() is
+                  { Channel: SecurityEventChannels.System, State: SecurityEventSourceStates.Collecting },
+            "Safe Mode failed to persist accepted security event observations and status.");
         using (var findings = await RequestAsync(client, HttpMethod.Get,
                    $"/api/admin/devices/{enrolled.EndpointId:D}/alerts", token))
         {
