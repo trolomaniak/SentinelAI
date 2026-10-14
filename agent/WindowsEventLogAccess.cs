@@ -34,11 +34,16 @@ public sealed class WindowsEventLogAccess(SecurityEventCatalog catalog, TimeSpan
         EnsureChannel(channel);
         return Mapped(() =>
         {
-            var information = EventLogSession.GlobalSession.GetLogInformation(channel, PathType.LogName);
-            var oldest = information.OldestRecordNumber;
-            var newest = information.RecordCount is > 0 && oldest is { } first ? first + information.RecordCount - 1 : null;
+            // The extent comes from the actual last and first records. The log file header behind
+            // GetLogInformation lags records the service has not flushed yet, so on a busy channel its
+            // oldest + count - 1 falls below the newest readable record and would look like a reset. The
+            // newest is read first: a clear between the two reads leaves the anchor missing, which the
+            // pipeline resolves by describing the channel again.
+            var newest = EdgeRecordId(channel, reverse: true);
+            var oldest = newest is null ? null : EdgeRecordId(channel, reverse: false);
             var (maximumBytes, enabled) = Configuration(channel);
-            return new ChannelExtent(oldest, newest, maximumBytes, enabled);
+            return oldest is null ? new ChannelExtent(null, null, maximumBytes, enabled)
+                : new ChannelExtent(oldest, newest, maximumBytes, enabled);
         });
     }
 
@@ -58,6 +63,21 @@ public sealed class WindowsEventLogAccess(SecurityEventCatalog catalog, TimeSpan
                 Release(reader);
             }
         });
+    }
+
+    private long? EdgeRecordId(string channel, bool reverse)
+    {
+        var reader = Track(new EventLogReader(new EventLogQuery(channel, PathType.LogName) { ReverseDirection = reverse })
+            { BatchSize = 1 });
+        try
+        {
+            using var record = reader.ReadEvent(ReadTimeout);
+            return record?.RecordId;
+        }
+        finally
+        {
+            Release(reader);
+        }
     }
 
     public IEventRecordCursor Open(string channel, long? after, long through, bool forceFallback = false)

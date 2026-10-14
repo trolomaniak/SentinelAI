@@ -87,7 +87,7 @@ Other degraded states follow the same rule. A missing channel is `notFound`, any
 ## How events reach Core
 
 1. **Dormant until linked.** The pipeline does nothing (no reads, no checkpoint file, no traffic) until the Agent is enrolled and Core has acknowledged its latest heartbeat. On a platform without the Windows event log it logs that collection is unavailable and stays idle.
-2. **Poll.** Every `Agent:EventPollInterval` (5 seconds by default) it makes one metadata call per channel for the oldest and newest record numbers, starting from a different channel on each poll for fairness. A channel with no new records costs nothing more.
+2. **Poll.** Every `Agent:EventPollInterval` (5 seconds by default) it reads the newest and the oldest record of each channel (two single-record reads; the log file header's counts lag records Windows has not flushed yet, so they are not used), starting from a different channel on each poll for fairness. A channel with no new records costs nothing more.
 3. **Server filter plus anchor membership.** A channel with new records is read by one `EventLogReader` query generated from the catalog. Windows applies the provider, event ID and level filters, and the query also selects up to two records by number: the newest record seen by the metadata call and, when the channel's position is still in the log, the position itself (the anchor). For System at position 1234 with newest record 5678:
 
    ```text
@@ -132,7 +132,7 @@ Positions are kept in `<Agent:DataDirectory>/event-checkpoints` (installed: `%Pr
 ## Outage, buffering and overflow
 
 - **No spool.** Exactly one prepared batch is held in memory, and no event payload is written to disk. Each Windows channel is the durable, size-bounded buffer; its capacity is reported as `logMaximumBytes`, and the lag is `newestRecordId − checkpointRecordId`.
-- **Backpressure.** While a batch waits for Core, the Agent makes no metadata call, query or read. During an outage it makes no event log calls after preparing one batch.
+- **Backpressure.** While a batch waits for Core, the Agent makes no event log query or read. During an outage it makes no event log calls after preparing one batch.
 - **Transient failures.** A transport failure, a timeout or any status other than those below (including 401, 403, 408, 429 and 5xx) keeps the batch and retries after 5, 10, 20, 40, 60, 60 … seconds, using the existing `Agent:RetryDelay` and `Agent:MaxRetryDelay`. The first failure is logged, then at most one warning every 10 minutes; recovery is logged with the attempt count.
 - **Incompatible Core.** 400, 404, 405, 413 or 415 (an older Core without the route, a format mismatch or a contract bug) holds the batch without dropping anything and retries every 15 minutes, with one warning per transition. A batch that fails the Agent's own validation is held the same way and logged once as an error.
 - **Link lost.** While heartbeats are not acknowledged, no batch is sent. Reading continues only until one batch is prepared. When the link returns, delivery is attempted immediately with the backoff reset.
@@ -165,7 +165,7 @@ Gaps are computed from the acknowledged scanned-through position, not from the l
 
 | Resource | Agent | Core |
 | --- | --- | --- |
-| CPU | **Idle:** one metadata call per channel every 5 seconds, with the channel size and enablement cached for 5 minutes; an unavailable channel is touched once a minute. **New records:** one query, one seek and reads in batches of 64; only catalog records plus at most two numbered records are returned, and fields are rendered only for catalog records. **Backlog:** at most 1,024 records per channel and 2,048 per poll, re-polled after 1 second. **Pending batch:** no event log calls. | At most 60 requests per minute per remote IP. Each request: one credential check before the body is read, at most 256 KiB buffered, and one SQLite transaction with at most 256 observation inserts, 32 gap upserts plus one `rejected` gap row per invalid observation, 4 status upserts, a per-endpoint cap and an age sweep of at most 500 observations and 100 gaps. |
+| CPU | **Idle:** two single-record reads (newest and oldest) per channel every 5 seconds, with the channel size and enablement cached for 5 minutes; an unavailable channel is touched once a minute. **New records:** one query, one seek and reads in batches of 64; only catalog records plus at most two numbered records are returned, and fields are rendered only for catalog records. **Backlog:** at most 1,024 records per channel and 2,048 per poll, re-polled after 1 second. **Pending batch:** no event log calls. | At most 60 requests per minute per remote IP. Each request: one credential check before the body is read, at most 256 KiB buffered, and one SQLite transaction with at most 256 observation inserts, 32 gap upserts plus one `rejected` gap row per invalid observation, 4 status upserts, a per-endpoint cap and an age sweep of at most 500 observations and 100 gaps. |
 | Memory | One prepared batch (at most 256 observations, 192 KiB serialized and 32 gaps), four channel states, one cached property selector per catalog field list and one current record (plus the reader's internal batch of 64). | At most 256 KiB of buffer per request. |
 | Disk | One file of at most 4 KiB: up to 30 writes per minute under sustained backlog (one per acknowledgement), at most 12 per hour for positions advanced past records with nothing to collect, none when idle. | At most 10,000 observations and 1,000 gap rows per endpoint, 30 days by receipt, and at most four status rows per endpoint. |
 | Network | At most 30 requests per minute, each under the 256 KiB request limit (the worst case measures 207,253 bytes). Idle status reports at most every 5 minutes when counters change, plus one per hour. Transient retries back off from 5 seconds to 1 minute; an incompatible Core is retried every 15 minutes. | — |
@@ -235,9 +235,9 @@ Retention is fixed for installed Core. No API returns observation content; the o
 | `sources[]` | The latest accepted status of each reported channel, ordered by channel name. |
 | `channel`, `state` | `collecting`, `disabled`, `accessDenied`, `notFound` or `error`. |
 | `lastErrorCode` | The HResult behind an `accessDenied`, `notFound` or `error` state, as a signed 32-bit number (no message text); null while the channel is readable. |
-| `oldestRecordId`, `newestRecordId` | The channel's record range at the Agent's last metadata call. |
+| `oldestRecordId`, `newestRecordId` | The channel's record range at the Agent's last read of it. |
 | `checkpointRecordId` | The acknowledged position; null until coverage is acknowledged. |
-| `logMaximumBytes`, `lastReadUtc` | Channel size (the buffer capacity) and the Agent time of the last successful metadata call. |
+| `logMaximumBytes`, `lastReadUtc` | Channel size (the buffer capacity) and the Agent time of the last successful read of the channel's range. |
 | `scanned`, `observed`, `delivered`, `droppedUnparsed`, `droppedOversize`, `fieldsDiscarded`, `gaps`, `skippedRecords`, `seekFallbacks` | Counters since `countersSinceUtc`. |
 | `reportedUtc` | When Core received this status. |
 | `agentSentUtc`, `countersSinceUtc`, `agentVersion` | The Agent's send time, the start of its counters (each Agent start resets them) and its version. |
