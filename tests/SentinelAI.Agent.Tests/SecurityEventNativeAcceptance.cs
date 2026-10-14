@@ -65,6 +65,10 @@ internal static class SecurityEventNativeAcceptance
                     cleanupFailures.Add($"marker service ({exception.GetType().Name})");
                 }
             }
+
+            // Also visible when the scenario failed first and its exception ends the run.
+            if (cleanupFailures.Count > 0)
+                Console.WriteLine($"Native event cleanup failed: {string.Join(", ", cleanupFailures)}.");
         }
 
         Ensure(cleanupFailures.Count == 0, $"Native event acceptance cleanup failed: {string.Join(", ", cleanupFailures)}.");
@@ -228,17 +232,29 @@ internal static class SecurityEventNativeAcceptance
             using var access = new WindowsEventLogAccess(catalog);
             using var system = new WindowsEventLogAccess(SecurityEventCatalog.Production);
 
-            // a) A new source may be refused until the service has loaded it; each attempt registers afresh.
-            await WaitForAsync(() => TryWrite(log, source, message), "The test-only source could not be written.", Latency);
-            await WaitForAsync(() => TryDescribe(access, log)?.NewestRecordId is not null,
-                "The first test-only record did not reach the test log.", Latency);
-            // Record numbers follow the plan's 1..8; r is 0 in a new log.
-            var r = TryDescribe(access, log)!.NewestRecordId!.Value - 1;
+            // a) Until the service has loaded a new source, a write is refused or lands in the Application log, so
+            // marker-free probes outside the catalog are repeated until one reaches the test log.
+            var probing = Stopwatch.StartNew();
+            var nextProbe = TimeSpan.Zero;
+            while (TryDescribe(access, log)?.NewestRecordId is null)
+            {
+                Ensure(probing.Elapsed < Latency, "The test-only source could not write to the test log.");
+                if (probing.Elapsed >= nextProbe)
+                {
+                    WriteProbe(log, source);
+                    nextProbe = probing.Elapsed + TimeSpan.FromSeconds(3);
+                }
+
+                await Task.Delay(250);
+            }
+
             using var writer = new EventLog(log) { Source = source };
-            foreach (var id in new[] { OtherEventId, OtherEventId, TestEventId, TestEventId, OtherEventId, OtherEventId, OtherEventId })
+            foreach (var id in new[] { OtherEventId, OtherEventId, OtherEventId, TestEventId, TestEventId, OtherEventId, OtherEventId, OtherEventId })
                 writer.WriteEntry(message, EventLogEntryType.Information, id);
-            await WaitForAsync(() => TryDescribe(access, log) is { } extent && extent.OldestRecordId == r + 1 && extent.NewestRecordId == r + 8,
-                "The test-only log did not hold the eight written records.", Latency);
+            // Every probe was written before the plan, so the plan's records are the newest eight: r+1..r+8.
+            var written = await SettleAsync(access, log);
+            var r = written.NewestRecordId!.Value - 8;
+            Ensure(r >= 1 && written.OldestRecordId <= r + 1, "The test-only log did not hold the eight written records.");
 
             // b) Without an anchor the query selects the catalog records plus the newest member.
             var plain = ReadAll(access, log, null, r + 8, out _);
@@ -344,6 +360,11 @@ internal static class SecurityEventNativeAcceptance
             {
                 Console.WriteLine($"Native event channel access: {channel}: accessDenied");
             }
+            catch (Exception exception) when (exception is EventLogException or ArgumentException)
+            {
+                // Printed, not asserted: a configuration or descriptor this step cannot read is only reported.
+                Console.WriteLine($"Native event channel access: {channel}: unreadable ({exception.GetType().Name})");
+            }
         }
 
         Console.WriteLine("Native event channel access expectation: Security has no SU/LS read ACE (a LocalService Agent reports accessDenied).");
@@ -405,17 +426,17 @@ internal static class SecurityEventNativeAcceptance
         return stopwatch.Elapsed.TotalMicroseconds / 256;
     }
 
-    private static bool TryWrite(string log, string source, string message)
+    // Each attempt registers the source afresh. A refused write is simply probed again later.
+    private static void WriteProbe(string log, string source)
     {
         try
         {
             using var probe = new EventLog(log) { Source = source };
-            probe.WriteEntry(message, EventLogEntryType.Information, OtherEventId);
-            return true;
+            probe.WriteEntry("test-only native event acceptance probe", EventLogEntryType.Information, OtherEventId);
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
-            return false;
+            // The service has not loaded the source yet.
         }
     }
 
@@ -553,8 +574,10 @@ internal static class SecurityEventNativeAcceptance
         }
     }
 
-    // EventLog.Delete clears the log (System 104) and removes its registry tree with its sources. The registry
-    // names no file for a log created this way, so the .evtx file is removed here once the service releases it.
+    // As EventLog.Delete does, the log is cleared (System 104) and its registry tree is removed with its sources,
+    // but never through the classic API: OpenEventLog opens the Application log for a log the service has not
+    // loaded yet, so EventLog.Delete would clear Application. EvtClearLog fails instead. The registry names no
+    // file for a log created this way, so the .evtx file is removed here once the service releases it.
     private static async Task DeleteTestLogAsync(string log, string? source, List<string> failures)
     {
         var file = Path.Combine(Environment.SystemDirectory, "winevt", "Logs", log + ".evtx");
@@ -570,20 +593,21 @@ internal static class SecurityEventNativeAcceptance
 
         try
         {
-            if (EventLog.Exists(log)) EventLog.Delete(log);
+            EventLogSession.GlobalSession.ClearLog(log);
         }
         catch (Exception)
         {
-            // A log the service cannot clear keeps its registration; remove it directly.
-            try
-            {
-                using var root = Registry.LocalMachine.OpenSubKey(EventLogKey, writable: true);
-                root?.DeleteSubKeyTree(log, throwOnMissingSubKey: false);
-            }
-            catch (Exception)
-            {
-                // Reported by the existence check below.
-            }
+            // Not loaded by the service: there is nothing to clear.
+        }
+
+        try
+        {
+            using var root = Registry.LocalMachine.OpenSubKey(EventLogKey, writable: true);
+            root?.DeleteSubKeyTree(log, throwOnMissingSubKey: false);
+        }
+        catch (Exception)
+        {
+            // Reported by the existence check below.
         }
 
         try
