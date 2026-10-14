@@ -745,6 +745,10 @@ internal static class SecurityEventPipelineTests
                   saved.Checkpoints[channel] == new EventCheckpoint(tails[channel] + 1,
                       SyntheticEventLog.TimeOf(0, tails[channel] + 1).UtcTicks)),
             "The acknowledged coverage positions or anchors are wrong.");
+        await rig.AdvanceAsync(TimeSpan.FromSeconds(2));
+        Check(rig.Uploader.Attempts[^1] is { Events.Count: 0, Gaps.Count: 0 } covered &&
+              covered.Sources.All(source => source.CheckpointRecordId == tails[source.Channel] + 1),
+            "Established coverage was not reported at the next delivery slot.");
         for (var step = 0; step < 5; step++) await rig.AdvanceAsync(Poll);
         Check(rig.Uploader.Attempts.All(batch => batch.Events.Count == 0), "History before coverage was delivered.");
     }
@@ -799,6 +803,50 @@ internal static class SecurityEventPipelineTests
         Check(sized.Length == 2 && sized[0].Events.Count == SecurityEventContract.MaxBatchEventBytes / size &&
               sized[0].Events.Sum(SecurityEventContract.MeasureBytes) <= SecurityEventContract.MaxBatchEventBytes &&
               sized.Sum(batch => batch.Events.Count) == 150, "Large observations did not stop at the byte budget.");
+
+        // Dropped records stop at the gap cap, leaving room for every other channel's continuity gaps.
+        var gapRig = await Rig.CoveredAsync(Path.Combine(directory, "gaps"));
+        var service = SecurityEventFixtures.For(7045);
+        var untimed = Enumerable.Range(0, 40).Select(_ => gapRig.Log.Append(SecurityEventChannels.System, service.Provider,
+            service.EventId, service.Fields, service.Level, withoutTime: true)).ToArray();
+        foreach (var channel in new[] { SecurityEventChannels.Security, SecurityEventChannels.PowerShell, SecurityEventChannels.Defender })
+        {
+            gapRig.Log.AppendNoise(channel, 10);
+            gapRig.Log.Trim(channel, 5);
+        }
+
+        var gapBatches = gapRig.Uploader.AcceptedBatches.Count;
+        for (var step = 0; step < 5; step++) await gapRig.AdvanceAsync(Poll);
+        var gapsSent = gapRig.Uploader.AcceptedBatches.Skip(gapBatches).SelectMany(batch => batch.Gaps).ToArray();
+        Check(gapRig.Uploader.AcceptedBatches.Skip(gapBatches).All(batch => batch.Gaps.Count <= SecurityEventContract.MaxGapsPerBatch) &&
+              gapsSent.Where(gap => gap.Reason == SecurityEventGapReasons.Dropped).Select(gap => gap.FirstRecordId).Order()
+                  .SequenceEqual(untimed) &&
+              gapsSent.Count(gap => gap.Reason == SecurityEventGapReasons.Overwritten) == 3 &&
+              gapRig.Source(SecurityEventChannels.System).CheckpointRecordId == untimed[^1],
+            "Dropped records exceeded the gap cap or were not each reported once.");
+
+        // Continuity gaps found after the batch is full still move their positions on acknowledgement.
+        var fullRig = await Rig.CoveredAsync(Path.Combine(directory, "full-gaps"));
+        while (fullRig.Pipeline.Snapshot.Polls % SecurityEventChannels.All.Count != 0) await fullRig.AdvanceAsync(Poll);
+        for (var index = 0; index < 300; index++) SecurityEventFixtures.Append(fullRig.Log, SecurityEventFixtures.For(4625));
+        foreach (var channel in new[] { SecurityEventChannels.System, SecurityEventChannels.PowerShell, SecurityEventChannels.Defender })
+        {
+            fullRig.Log.AppendNoise(channel, 10);
+            fullRig.Log.Trim(channel, 5);
+        }
+
+        var fullBatches = fullRig.Uploader.AcceptedBatches.Count;
+        await fullRig.AdvanceAsync(Poll);
+        var full = fullRig.Uploader.AcceptedBatches[^1];
+        Check(full.Events.Count == SecurityEventContract.MaxEventsPerBatch && full.Gaps.Count == 3 &&
+              full.Gaps.All(gap => gap is { Reason: SecurityEventGapReasons.Overwritten, FirstRecordId: 1, LastRecordId: 5 }),
+            "The full batch did not carry the continuity gaps found after it filled.");
+        for (var step = 0; step < 5; step++) await fullRig.AdvanceAsync(TimeSpan.FromSeconds(2));
+        Check(fullRig.Uploader.AcceptedBatches.Skip(fullBatches).Sum(batch => batch.Gaps.Count) == 3 &&
+              fullRig.Uploader.AcceptedBatches.Skip(fullBatches).Sum(batch => batch.Events.Count) == 300 &&
+              new[] { SecurityEventChannels.System, SecurityEventChannels.PowerShell, SecurityEventChannels.Defender }
+                  .All(channel => fullRig.Source(channel) is { CheckpointRecordId: 10, SkippedRecords: 5 }),
+            "A gap found after the batch filled was sent again or its position did not move.");
     }
 
     // D12: nothing is read while a batch is pending; the retry schedule; link loss and return.
@@ -827,8 +875,10 @@ internal static class SecurityEventPipelineTests
 
         SecurityEventFixtures.Append(rig.Log, SecurityEventFixtures.For(7045));
         rig.Uploader.Enqueue(ScriptedUploader.Failed, ScriptedUploader.Failed);
+        var beforeFailures = rig.Uploader.Attempts.Count;
         await rig.AdvanceAsync(Poll);
         await rig.AdvanceAsync(TimeSpan.FromSeconds(5));
+        Check(rig.Uploader.Attempts.Count == beforeFailures + 2, "An acknowledgement did not reset the retry backoff.");
         var attempts = rig.Uploader.Attempts.Count;
         rig.Link.Publish(null);
         for (var step = 0; step < 120; step++) await rig.AdvanceAsync(Poll);
@@ -857,11 +907,13 @@ internal static class SecurityEventPipelineTests
             rig.Uploader.Enqueue(ScriptedUploader.Incompatible(status), ScriptedUploader.Incompatible(status));
             var attempts = rig.Uploader.Attempts.Count;
             await rig.AdvanceAsync(Poll);
+            var (describe, open) = (rig.Log.DescribeCalls, rig.Log.OpenCalls);
             for (var minute = 1; minute < 15; minute++) await rig.AdvanceAsync(TimeSpan.FromMinutes(1));
             await rig.AdvanceAsync(TimeSpan.FromSeconds(59));
             Check(rig.Uploader.Attempts.Count == attempts + 1 && rig.Pipeline.Snapshot.PreparedEvents == 1 &&
-                  rig.Source(SecurityEventChannels.System).CheckpointRecordId == position,
-                $"HTTP {status} did not hold the batch without moving positions.");
+                  rig.Source(SecurityEventChannels.System).CheckpointRecordId == position &&
+                  rig.Log.DescribeCalls == describe && rig.Log.OpenCalls == open,
+                $"HTTP {status} did not hold the batch without moving positions or reading.");
             await rig.AdvanceAsync(TimeSpan.FromSeconds(1));
             await rig.AdvanceAsync(TimeSpan.FromMinutes(15));
             Check(rig.Uploader.Attempts.Count == attempts + 3 && rig.Source(SecurityEventChannels.System).Delivered == 1,
@@ -1001,20 +1053,52 @@ internal static class SecurityEventPipelineTests
               untimedTail.Uploader.AcceptedBatches.Skip(1).All(batch => batch.Gaps.Count == 0),
             "Coverage on a tail record without a creation time was taken for a reset.");
 
-        // (f) and (g): a seek that misses the anchor, and a failing bookmark seek, both fall back exactly.
-        foreach (var mode in new[] { "f", "g" })
+        // (f) and (g): a seek that misses the anchor, and a failing bookmark seek, both fall back exactly; a
+        // seek that lands before the anchor reads up to it without a fallback.
+        foreach (var (mode, fallbacks) in new[] { ("f", 1), ("g", 1), ("early", 0) })
         {
             rig = await Rig.CoveredAsync(Path.Combine(directory, mode), logs: PrivacyLogs);
             AppendMany(rig.Log, service, 10);
             await rig.AdvanceAsync(Poll);
             AppendMany(rig.Log, service, 5);
             if (mode == "f") rig.Log.DropAnchorOnce(System);
-            else rig.Log.FailBookmarkSeek(System, true);
+            else if (mode == "g") rig.Log.FailBookmarkSeek(System, true);
+            else rig.Log.SeekLandsEarlyOnce(System, 3);
             await rig.AdvanceAsync(Poll);
             Check(rig.Uploader.AcceptedBatches[^1].Events.Select(o => o.RecordId).SequenceEqual(Range(11, 15)) &&
-                  rig.Uploader.AcceptedBatches[^1].Gaps.Count == 0 && rig.Source(System).SeekFallbacks == 1,
-                $"Seek fallback mode {mode} did not deliver exactly the new records.");
+                  rig.Uploader.AcceptedBatches[^1].Gaps.Count == 0 && rig.Source(System).SeekFallbacks == fallbacks,
+                $"Seek mode {mode} did not deliver exactly the new records.");
         }
+
+        // A single overwritten record after the position is still an exact gap.
+        rig = await Rig.CoveredAsync(Path.Combine(directory, "a2"), logs: PrivacyLogs);
+        AppendMany(rig.Log, service, 50);
+        await rig.AdvanceAsync(Poll);
+        AppendMany(rig.Log, service, 10);
+        rig.Log.Trim(System, 51);
+        await rig.AdvanceAsync(Poll);
+        Check(rig.Uploader.AcceptedBatches[^1].Gaps.SingleOrDefault() is
+                  { Reason: SecurityEventGapReasons.Overwritten, FirstRecordId: 51, LastRecordId: 51 } &&
+              rig.Uploader.AcceptedBatches[^1].Events.Select(o => o.RecordId).SequenceEqual(Range(52, 60)) &&
+              rig.Source(System).SkippedRecords == 1, "A single overwritten record was not reported exactly.");
+
+        // A read that fails mid-scan keeps what was evaluated: those records move the position on
+        // acknowledgement and the rest follows after the channel retry, with nothing sent twice.
+        rig = await Rig.CoveredAsync(Path.Combine(directory, "read-failure"), logs: PrivacyLogs);
+        AppendMany(rig.Log, service, 20);
+        await rig.AdvanceAsync(Poll);
+        AppendMany(rig.Log, service, 10);
+        rig.Log.ThrowOnReadOnce(System, 26, new TimeoutException(SecurityEventFixtures.Marker));
+        await rig.AdvanceAsync(Poll);
+        Check(rig.Source(System) is { State: SecurityEventSourceStates.Error, CheckpointRecordId: 25 } failed &&
+              failed.LastErrorCode == new TimeoutException().HResult,
+            "A failed read did not keep the evaluated records and report the channel error.");
+        for (var poll = 0; poll < 12; poll++) await rig.AdvanceAsync(Poll);
+        var afterFailure = rig.Uploader.AcceptedBatches.SelectMany(batch => batch.Events)
+            .Where(o => o.Channel == System && o.RecordId > 20).Select(o => o.RecordId).ToArray();
+        Check(afterFailure.SequenceEqual(Range(21, 30)) &&
+              rig.Source(System) is { State: SecurityEventSourceStates.Collecting, CheckpointRecordId: 30 },
+            "Records around a failed read were lost or sent twice.");
 
         // (h) The anchor is overwritten between Describe and Open.
         rig = await Rig.CoveredAsync(Path.Combine(directory, "h"), logs: PrivacyLogs);
@@ -1162,11 +1246,15 @@ internal static class SecurityEventPipelineTests
         var logon = SecurityEventFixtures.For(4624);
         for (var index = 0; index < 5000; index++) SecurityEventFixtures.Append(rig.Log, logon, new() { ["LogonType"] = 3 });
         var selected = SecurityEventFixtures.Append(rig.Log, logon);
+        // System is just as busy, so together they exhaust every poll's budget unless the start rotates.
+        for (var index = 0; index < 5000; index++)
+            SecurityEventFixtures.Append(rig.Log, SecurityEventFixtures.For(7040), new() { ["param4"] = "BITS" });
         var defender = SecurityEventFixtures.Append(rig.Log, SecurityEventFixtures.For(1116));
         var writes = rig.Store.Writes;
         var batches = rig.Uploader.AcceptedBatches.Count;
         await rig.AdvanceAsync(Poll);
         var deliveredAt = 0;
+        var defenderAt = 0;
         for (var poll = 1; poll <= 5; poll++)
         {
             var before = rig.Pipeline.Snapshot.Sources.ToDictionary(source => source.Channel, source => source.Scanned);
@@ -1180,12 +1268,15 @@ internal static class SecurityEventPipelineTests
             if (deliveredAt == 0 && rig.Uploader.AcceptedBatches.SelectMany(batch => batch.Events)
                     .Any(o => o.Channel == SecurityEventChannels.Security && o.RecordId == selected))
                 deliveredAt = poll;
+            if (defenderAt == 0 && rig.Uploader.AcceptedBatches.SelectMany(batch => batch.Events)
+                    .Any(o => o.Channel == SecurityEventChannels.Defender && o.RecordId == defender))
+                defenderAt = poll;
             if (poll is > 1 and < 5) Check(rig.Store.Writes == writes + 1, "Scan-only progress was written more than once per 5 minutes.");
         }
 
         var first = rig.Uploader.AcceptedBatches.Skip(batches).First(batch => batch.Events.Count > 0);
-        Check(first.Events.Any(o => o.Channel == SecurityEventChannels.Defender && o.RecordId == defender),
-            "Another channel's event waited behind a scan backlog.");
+        Check(first.Events.Any(o => o.Channel == SecurityEventChannels.Defender && o.RecordId == defender) && defenderAt is 1 or 2,
+            $"Another channel's event waited behind a scan backlog until poll {defenderAt}.");
         Check(deliveredAt == 5, $"The selected record behind 5,000 rejected records was delivered at poll {deliveredAt}.");
         Check(rig.Source(SecurityEventChannels.Security).CheckpointRecordId == selected, "Scan-only progress was not applied.");
     }
@@ -1213,6 +1304,21 @@ internal static class SecurityEventPipelineTests
         await foreign.StepAsync();
         Check(foreign.Uploader.Attempts[0].Gaps.Count(gap => gap.Cause == SecurityEventCoverageCauses.EndpointChanged) == 4,
             "A foreign endpoint's checkpoint was not reported as endpointChanged.");
+
+        // A failed save keeps the acknowledged positions dirty and is retried on a later step.
+        var failing = await Rig.CoveredAsync(Path.Combine(directory, "save-failure"), logs: logs);
+        var writes = failing.Store.Writes;
+        File.Delete(failing.CheckpointPath);
+        Directory.CreateDirectory(failing.CheckpointPath);
+        var record = SecurityEventFixtures.Append(failing.Log, SecurityEventFixtures.For(7045));
+        await failing.AdvanceAsync(Poll);
+        Check(failing.Store.Writes == writes && failing.Source(SecurityEventChannels.System).Delivered == 1 &&
+              logs.Count(LogLevel.Warning, "could not be saved") == 1, "A failed checkpoint save was not reported.");
+        Directory.Delete(failing.CheckpointPath);
+        await failing.AdvanceAsync(Poll);
+        Check(failing.Store.Writes == writes + 1 &&
+              (await failing.Store.LoadAsync(failing.Enrollment.EndpointId)).Checkpoints[SecurityEventChannels.System].RecordId == record,
+            "A failed checkpoint save was not retried.");
     }
 
     // D19: no marker, field value or exception message reaches the logs; types and HResults do.

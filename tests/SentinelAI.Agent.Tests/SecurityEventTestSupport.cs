@@ -154,6 +154,24 @@ internal sealed class SyntheticEventLog : IEventLogAccess
         }
     }
 
+    /// <summary>The next seek lands this many result-set records before the anchor (an undocumented landing).</summary>
+    public void SeekLandsEarlyOnce(string channel, int records)
+    {
+        lock (_gate)
+        {
+            _channels[channel].SeekLandsEarly = records;
+        }
+    }
+
+    /// <summary>Reading the given record throws once, as a timed-out or failed native read would.</summary>
+    public void ThrowOnReadOnce(string channel, long recordId, Exception exception)
+    {
+        lock (_gate)
+        {
+            _channels[channel].ReadFailure = (recordId, exception);
+        }
+    }
+
     public void SetEnabled(string channel, bool? enabled)
     {
         lock (_gate)
@@ -201,6 +219,7 @@ internal sealed class SyntheticEventLog : IEventLogAccess
     {
         bool fallback;
         bool dropAnchor;
+        int early;
         lock (_gate)
         {
             var log = _channels[channel];
@@ -213,17 +232,23 @@ internal sealed class SyntheticEventLog : IEventLogAccess
             fallback = after is not null && (forceFallback || log.FailBookmarkSeek);
             dropAnchor = after is not null && !fallback && log.DropAnchorOnce;
             if (dropAnchor) log.DropAnchorOnce = false;
+            early = after is not null && !fallback ? log.SeekLandsEarly : 0;
+            log.SeekLandsEarly = 0;
         }
 
         BeforeOpen?.Invoke(channel);
         lock (_gate)
         {
-            var records = _channels[channel].Records.Where(record =>
-                    (_catalog.MatchesHeader(channel, record.Provider, record.EventId, record.Level) ||
-                     record.Id == after || record.Id == through) &&
-                    (after is null || record.Id >= after) && !(dropAnchor && record.Id == after))
+            var log = _channels[channel];
+            var selected = log.Records.Where(record =>
+                    _catalog.MatchesHeader(channel, record.Provider, record.EventId, record.Level) ||
+                    record.Id == after || record.Id == through)
+                .ToList();
+            var first = after is null ? 0 : selected.FindIndex(record => record.Id >= after);
+            if (first < 0) first = selected.Count;
+            var records = selected.Skip(Math.Max(0, first - early)).Where(record => !(dropAnchor && record.Id == after))
                 .ToArray();
-            return new Cursor(this, records, fallback);
+            return new Cursor(this, log, records, fallback);
         }
     }
 
@@ -269,11 +294,14 @@ internal sealed class SyntheticEventLog : IEventLogAccess
         public Exception? OpenFailure { get; set; }
         public bool FailBookmarkSeek { get; set; }
         public bool DropAnchorOnce { get; set; }
+        public int SeekLandsEarly { get; set; }
+        public (long RecordId, Exception Exception)? ReadFailure { get; set; }
         public bool? Enabled { get; set; } = true;
         public int DescribeCalls { get; set; }
     }
 
-    private sealed class Cursor(SyntheticEventLog owner, SyntheticRecord[] records, bool usedFallback) : IEventRecordCursor
+    private sealed class Cursor(SyntheticEventLog owner, ChannelLog log, SyntheticRecord[] records, bool usedFallback)
+        : IEventRecordCursor
     {
         private int _index = -1;
 
@@ -283,6 +311,15 @@ internal sealed class SyntheticEventLog : IEventLogAccess
         {
             header = default;
             if (_index >= records.Length) return false;
+            lock (owner._gate)
+            {
+                if (_index + 1 < records.Length && log.ReadFailure is { } failure && records[_index + 1].Id == failure.RecordId)
+                {
+                    log.ReadFailure = null;
+                    throw failure.Exception;
+                }
+            }
+
             _index++;
             if (_index >= records.Length) return false;
             Interlocked.Increment(ref owner._recordsYielded);
