@@ -702,6 +702,8 @@ internal static class SecurityEventPipelineTests
         Check(rig.Log.DescribeCalls == 0 && rig.Log.OpenCalls == 0 && rig.Uploader.Attempts.Count == 0 &&
               !File.Exists(rig.CheckpointPath), "The unlinked pipeline read events or wrote state.");
         Check(!rig.Pipeline.Snapshot.Active, "The unlinked pipeline reported itself active.");
+        Check(rig.Pipeline.NextWakeUtc > rig.Time.GetUtcNow() + TimeSpan.FromDays(1),
+            "An unlinked pipeline asked its loop to wake at once.");
     }
 
     // D9: first start covers each channel at its tail; history is never delivered.
@@ -1033,6 +1035,18 @@ internal static class SecurityEventPipelineTests
         var delivered = rig.Uploader.AcceptedBatches.SelectMany(batch => batch.Events)
             .Where(o => o.Channel == SecurityEventChannels.Security).Select(o => o.RecordId).ToArray();
         Check(delivered.SequenceEqual([postGrant]), "Records written before a grant were delivered.");
+
+        // An unexpected uploader exception is a transient failure: held, backed off and never escaping the step.
+        var attempts = rig.Uploader.Attempts.Count;
+        SecurityEventFixtures.Append(rig.Log, SecurityEventFixtures.For(7045));
+        rig.Uploader.ThrowNext = new InvalidOperationException(SecurityEventFixtures.Marker);
+        await rig.AdvanceAsync(Poll);
+        Check(rig.Uploader.Attempts.Count == attempts + 1 && rig.Pipeline.Snapshot.PreparedEvents == 1 &&
+              rig.Pipeline.NextWakeUtc == rig.Time.GetUtcNow() + rig.Options.RetryDelay,
+            "An uploader exception was not contained as a transient failure.");
+        await rig.AdvanceAsync(rig.Options.RetryDelay);
+        Check(rig.Uploader.Attempts.Count == attempts + 2 && rig.Pipeline.Snapshot.PreparedEvents == 0 &&
+              rig.Source(SecurityEventChannels.System).Delivered == 2, "The batch was not delivered after an uploader exception.");
     }
 
     // D16: status-only reports on change, counter changes at most every 5 minutes, liveness hourly.

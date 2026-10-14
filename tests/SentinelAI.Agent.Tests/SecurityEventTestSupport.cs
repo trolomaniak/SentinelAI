@@ -333,6 +333,9 @@ internal sealed class ScriptedUploader : ISecurityEventUploader
     public static UploadOutcome Failed => new(UploadResult.Failed, 503, null);
     public static UploadOutcome Incompatible(int status) => new(UploadResult.Incompatible, status, null);
 
+    /// <summary>Thrown by the next attempt instead of returning an outcome, as an unexpected client failure.</summary>
+    public Exception? ThrowNext { get; set; }
+
     public IReadOnlyList<SecurityEventBatch> Attempts
     {
         get
@@ -369,6 +372,12 @@ internal sealed class ScriptedUploader : ISecurityEventUploader
         lock (_gate)
         {
             _attempts.Add(batch);
+            if (ThrowNext is { } failure)
+            {
+                ThrowNext = null;
+                throw failure;
+            }
+
             var outcome = _outcomes.Count > 0 ? _outcomes.Dequeue() : Accepted;
             if (outcome.Result == UploadResult.Accepted) _accepted.Add(batch);
             return Task.FromResult(outcome);

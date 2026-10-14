@@ -127,6 +127,8 @@ public sealed class SecurityEventPipeline : BackgroundService
     {
         get
         {
+            // Before initialization nothing is due until the link appears; the loop also wakes on link changes.
+            if (!_initialized) return DateTimeOffset.MaxValue;
             if (_prepared is not null) return _link.Current is null ? DateTimeOffset.MaxValue : _nextDeliveryUtc;
             var now = _time.GetUtcNow();
             return _initialized && _link.Current is not null && StatusDue(now) && _nextDeliveryUtc < _nextPollUtc
@@ -623,7 +625,19 @@ public sealed class SecurityEventPipeline : BackgroundService
         }
 
         _deliveryAttempts++;
-        var outcome = await _uploader.SendAsync(batch, linked, cancellationToken);
+        UploadOutcome outcome;
+        string? exceptionType = null;
+        try
+        {
+            outcome = await _uploader.SendAsync(batch, linked, cancellationToken);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Contained as a transient failure so the backoff still spaces the attempts.
+            exceptionType = $"{exception.GetType().Name}, 0x{exception.HResult:X8}";
+            outcome = new UploadOutcome(UploadResult.Failed, null, null);
+        }
+
         switch (outcome.Result)
         {
             case UploadResult.Accepted:
@@ -655,8 +669,10 @@ public sealed class SecurityEventPipeline : BackgroundService
                 if (_failureClass != FailureClass.Failed || now - _lastFailureLogUtc >= FailureLogInterval)
                 {
                     _lastFailureLogUtc = now;
-                    _logger.LogWarning("Security event delivery failed (HTTP {StatusCode}); retrying in {RetryDelay}",
-                        outcome.StatusCode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none", _retryDelay);
+                    _logger.LogWarning("Security event delivery failed ({Failure}); retrying in {RetryDelay}",
+                        outcome.StatusCode is { } status
+                            ? "HTTP " + status.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                            : exceptionType ?? "no response", _retryDelay);
                 }
 
                 _failureClass = FailureClass.Failed;
