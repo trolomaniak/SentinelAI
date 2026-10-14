@@ -146,8 +146,10 @@ public sealed class EventCheckpointStore(AgentOptions options)
             var anchorElement = entry.GetProperty("anchorUtcTicks");
             if (anchorElement.ValueKind != JsonValueKind.Null)
             {
+                // Any representable event time: an anchor is compared only for equality, and a record logged
+                // under a clock before 1970 must not invalidate every channel's position.
                 if (anchorElement.ValueKind != JsonValueKind.Number || !anchorElement.TryGetInt64(out var ticks) ||
-                    ticks < DateTime.UnixEpoch.Ticks || ticks > DateTime.MaxValue.Ticks || recordId == 0)
+                    ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks || recordId == 0)
                     return null;
                 anchor = ticks;
             }

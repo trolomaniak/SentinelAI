@@ -651,7 +651,9 @@ internal static class SecurityEventPipelineTests
         await Invalid("a duplicate property", Encoding.ASCII.GetBytes(Document(Entry.Replace("{\"channel\"", "{\"recordId\":1,\"channel\""))));
         await Invalid("a negative record", Encoding.ASCII.GetBytes(Document(Entry.Replace("\"recordId\":5", "\"recordId\":-1"))));
         await Invalid("record zero with ticks", Encoding.ASCII.GetBytes(Document(Entry.Replace("\"recordId\":5", "\"recordId\":0"))));
-        await Invalid("pre-epoch ticks", Encoding.ASCII.GetBytes(Document(Entry.Replace("639000000001234567", "1"))));
+        await Invalid("negative ticks", Encoding.ASCII.GetBytes(Document(Entry.Replace("639000000001234567", "-1"))));
+        await Invalid("ticks beyond the calendar", Encoding.ASCII.GetBytes(Document(Entry.Replace("639000000001234567",
+            (DateTime.MaxValue.Ticks + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)))));
         await Invalid("a fractional record", Encoding.ASCII.GetBytes(Document(Entry.Replace("\"recordId\":5", "\"recordId\":5.5"))));
         await Invalid("bad UTF-8", [.. Encoding.ASCII.GetBytes(Document(Entry))[..^2], 0xC3, 0x28]);
         await Invalid("depth 5", Encoding.ASCII.GetBytes(Document("{\"channel\":\"System\",\"recordId\":5,\"anchorUtcTicks\":[[1]]}")));
@@ -660,6 +662,13 @@ internal static class SecurityEventPipelineTests
         Check((await store.LoadAsync(endpoint)) is { Cause: SecurityEventCoverageCauses.NoCheckpoint } entryLoad &&
               entryLoad.Checkpoints[SecurityEventChannels.System] == new EventCheckpoint(5, 639000000001234567),
             "A hand-written valid checkpoint was rejected.");
+
+        // An anchor from a record logged under a clock before 1970 still round-trips.
+        var early = new DateTime(1601, 1, 1, 0, 0, 1, DateTimeKind.Utc).Ticks;
+        await store.SaveAsync(endpoint, [(SecurityEventChannels.System, new EventCheckpoint(7, early))]);
+        Check((await store.LoadAsync(endpoint)) is { Cause: SecurityEventCoverageCauses.NoCheckpoint } earlyLoad &&
+              earlyLoad.Checkpoints[SecurityEventChannels.System] == new EventCheckpoint(7, early),
+            "An anchor before 1970 invalidated the checkpoint.");
 
         // Orphaned temporary files are swept, bounded, and nothing else is touched.
         var others = new[] { ".event-checkpoints.x.tmpx", "event-checkpoints.tmp", ".enrollment-state.x.tmp" };
