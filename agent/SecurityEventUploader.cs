@@ -18,8 +18,16 @@ public interface ISecurityEventUploader
 /// Posts one batch to Core. A success status means Core committed every item; incompatibility
 /// statuses hold the batch for a long retry and anything else is transient. Nothing is logged here.
 /// </summary>
-public sealed class HttpSecurityEventUploader(HttpClient httpClient, AgentOptions options) : ISecurityEventUploader
+/// <remarks>
+/// HttpClient.Timeout ends when the headers arrive; the small result body has its own bound
+/// (<paramref name="resultReadTimeout"/>, 10 seconds by default) so a peer that stalls after a 2xx can never
+/// hold the loop.
+/// </remarks>
+public sealed class HttpSecurityEventUploader(HttpClient httpClient, AgentOptions options,
+    TimeSpan? resultReadTimeout = null) : ISecurityEventUploader
 {
+    private readonly TimeSpan _resultReadTimeout = resultReadTimeout ?? TimeSpan.FromSeconds(10);
+
     public async Task<UploadOutcome> SendAsync(SecurityEventBatch batch, EnrollmentState enrollment,
         CancellationToken cancellationToken)
     {
@@ -37,7 +45,8 @@ public sealed class HttpSecurityEventUploader(HttpClient httpClient, AgentOption
             if (response.IsSuccessStatusCode)
             {
                 // Core already committed; the counts are informational and never cause a resend.
-                return new(UploadResult.Accepted, status, await ReadCountsAsync(response, cancellationToken));
+                return new(UploadResult.Accepted, status,
+                    await ReadCountsAsync(response, _resultReadTimeout, cancellationToken));
             }
 
             return new(status is 400 or 404 or 405 or 413 or 415 ? UploadResult.Incompatible : UploadResult.Failed,
@@ -54,16 +63,18 @@ public sealed class HttpSecurityEventUploader(HttpClient httpClient, AgentOption
     }
 
     private static async Task<SecurityEventBatchResult?> ReadCountsAsync(HttpResponseMessage response,
-        CancellationToken cancellationToken)
+        TimeSpan readTimeout, CancellationToken cancellationToken)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(readTimeout);
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             var buffer = new byte[SecurityEventContract.MaxResultBytes + 1];
             var length = 0;
             int read;
             while (length < buffer.Length &&
-                   (read = await stream.ReadAsync(buffer.AsMemory(length), cancellationToken)) > 0)
+                   (read = await stream.ReadAsync(buffer.AsMemory(length), timeout.Token)) > 0)
             {
                 length += read;
             }

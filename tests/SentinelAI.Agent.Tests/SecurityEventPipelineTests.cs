@@ -355,6 +355,16 @@ internal static class SecurityEventPipelineTests
         Check(!rig.Log.RequestedFieldNames.Intersect(SecurityEventFixtures.ExcludedFields, StringComparer.OrdinalIgnoreCase).Any(),
             "An excluded field was requested from the event log.");
 
+        // A condition field that cannot be rendered may hide a selected record: it is dropped with a gap.
+        var unevaluated = SecurityEventFixtures.Append(rig.Log, SecurityEventFixtures.For(4624),
+            new() { ["LogonType"] = SyntheticEventLog.RenderFailure });
+        await rig.AdvanceAsync(Poll);
+        Check(rig.Uploader.AcceptedBatches[^1].Gaps.SingleOrDefault() == new SecurityEventGap(SecurityEventChannels.Security,
+                  SecurityEventGapReasons.Dropped, unevaluated, unevaluated, rig.Time.GetUtcNow()) &&
+              rig.Uploader.AcceptedBatches[^1].Events.Count == 0 &&
+              rig.Source(SecurityEventChannels.Security).DroppedUnparsed == 1,
+            "A record whose condition could not be evaluated was skipped without a gap.");
+
         static bool NoPayload(SecurityEventObservation o) =>
             o is { Logon: null, ScheduledTask: null, LogCleared: null, ServiceInstall: null, ServiceStartType: null,
                 ScriptBlock: null, Malware: null, DefenderSetting: null };
@@ -672,6 +682,13 @@ internal static class SecurityEventPipelineTests
               earlyLoad.Checkpoints[SecurityEventChannels.System] == new EventCheckpoint(7, early),
             "An anchor before 1970 invalidated the checkpoint.");
 
+        // Another process reading the file (a scanner or a backup) never makes a valid checkpoint unreadable.
+        await using (new FileStream(store.StatePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        {
+            Check((await store.LoadAsync(endpoint)).Checkpoints.GetValueOrDefault(SecurityEventChannels.System) ==
+                  new EventCheckpoint(7, early), "A checkpoint held open by another reader was not loaded.");
+        }
+
         // Orphaned temporary files are swept, bounded, and nothing else is touched.
         var others = new[] { ".event-checkpoints.x.tmpx", "event-checkpoints.tmp", ".enrollment-state.x.tmp" };
         foreach (var name in others) await File.WriteAllTextAsync(Path.Combine(directory, name), "x");
@@ -776,6 +793,14 @@ internal static class SecurityEventPipelineTests
         await rig.AdvanceAsync(Poll);
         Check(rig.Log.OpenCalls == open && rig.Log.DescribeCalls == describe + 4 && rig.Store.Writes == writes &&
               rig.Uploader.Attempts.Count == attempts + 1, "An idle poll opened a channel, wrote state or sent data.");
+
+        // A backwards clock step moves every schedule back with it, so collection does not stall for the step.
+        rig.Time.Advance(TimeSpan.FromHours(-1));
+        var afterStep = SecurityEventFixtures.Append(rig.Log, system);
+        await rig.AdvanceAsync(Poll);
+        await rig.AdvanceAsync(Poll);
+        Check(rig.Uploader.Attempts[^1].Events.Select(o => o.RecordId).SequenceEqual([afterStep]),
+            "A backwards clock step stalled collection.");
     }
 
     // D11: count and byte caps, with no loss or duplicate across batches.
@@ -1135,6 +1160,30 @@ internal static class SecurityEventPipelineTests
               sink.Gaps[key].LastRecordId == 90 && sink.Duplicates == 10 &&
               Range(51, 100).Count(id => sink.Rows.Keys.Any(row => row.Channel == System && row.RecordId == id)) == 20,
             "A re-detected gap was not merged into one row after a lost acknowledgement.");
+
+        // (j) A reset whose new generation cannot be read in that pass keeps the old position, so a second
+        // clear before the next read is still detected against it.
+        rig = await Rig.CoveredAsync(Path.Combine(directory, "j"), logs: PrivacyLogs);
+        AppendMany(rig.Log, service, 20);
+        await rig.AdvanceAsync(Poll);
+        rig.Log.Clear(System, restartIds: true);
+        AppendMany(rig.Log, service, 3);
+        rig.Log.ThrowOnOpen(System, new IOException(SecurityEventFixtures.Marker));
+        await rig.AdvanceAsync(Poll);
+        Check(rig.Source(System) is { State: SecurityEventSourceStates.Error, CheckpointRecordId: 20 } &&
+              rig.Uploader.AcceptedBatches.SelectMany(batch => batch.Gaps).All(gap => gap.Reason != SecurityEventGapReasons.LogReset),
+            "A reset was committed without reading its new generation.");
+        rig.Log.ThrowOnOpen(System, null);
+        rig.Log.Clear(System, restartIds: true);
+        AppendMany(rig.Log, service, 2);
+        var secondGeneration = rig.Log.Generation(System);
+        for (var poll = 0; poll < 12; poll++) await rig.AdvanceAsync(Poll);
+        Check(rig.Uploader.AcceptedBatches.SelectMany(batch => batch.Gaps).Where(gap => gap.Channel == System)
+                  .SingleOrDefault(gap => gap.Reason == SecurityEventGapReasons.LogReset) is { FirstRecordId: 21, LastRecordId: null } &&
+              rig.Uploader.AcceptedBatches.Last(batch => batch.Events.Count > 0).Events.Select(o => (o.RecordId, o.TimeCreatedUtc))
+                  .SequenceEqual(Range(1, 2).Select(id => (id, SyntheticEventLog.TimeOf(secondGeneration, id)))) &&
+              rig.Source(System) is { State: SecurityEventSourceStates.Collecting, CheckpointRecordId: 2 },
+            "A second clear after an unread reset was not detected against the old position.");
     }
 
     // D15: per-channel degradation never stops other channels or escapes the step.
@@ -1201,6 +1250,21 @@ internal static class SecurityEventPipelineTests
         await rig.AdvanceAsync(rig.Options.RetryDelay);
         Check(rig.Uploader.Attempts.Count == attempts + 2 && rig.Pipeline.Snapshot.PreparedEvents == 0 &&
               rig.Source(SecurityEventChannels.System).Delivered == 2, "The batch was not delivered after an uploader exception.");
+
+        // A channel that is described but cannot be read logs one error, not a collecting/error pair per retry.
+        var flipLogs = new CapturingEventLoggerProvider();
+        var flip = await Rig.CoveredAsync(Path.Combine(directory, "flip"), logs: flipLogs);
+        SecurityEventFixtures.Append(flip.Log, SecurityEventFixtures.For(7045));
+        flip.Log.ThrowOnOpen(SecurityEventChannels.System, new IOException(SecurityEventFixtures.Marker));
+        var collecting = flipLogs.Count(LogLevel.Information, "System is collecting");
+        for (var poll = 0; poll < 120; poll++) await flip.AdvanceAsync(Poll);
+        Check(flipLogs.Count(LogLevel.Information, "System is collecting") == collecting &&
+              flipLogs.Count(LogLevel.Warning, "System is error") == 1,
+            "A channel failing after Describe logged a transition on every retry.");
+        flip.Log.ThrowOnOpen(SecurityEventChannels.System, null);
+        for (var poll = 0; poll < 12; poll++) await flip.AdvanceAsync(Poll);
+        Check(flipLogs.Count(LogLevel.Information, "System is collecting") == collecting + 1 &&
+              flip.Source(SecurityEventChannels.System).Delivered == 1, "A recovered channel was not logged once.");
     }
 
     // D16: status-only reports on change, counter changes at most every 5 minutes, liveness hourly.
@@ -1321,6 +1385,24 @@ internal static class SecurityEventPipelineTests
         Check(failing.Store.Writes == writes + 1 &&
               (await failing.Store.LoadAsync(failing.Enrollment.EndpointId)).Checkpoints[SecurityEventChannels.System].RecordId == record,
             "A failed checkpoint save was not retried.");
+
+        // A checkpoint another process holds exclusively is retried, not discarded: the positions survive.
+        var held = await Rig.CoveredAsync(Path.Combine(directory, "held"), logs: logs);
+        SecurityEventFixtures.Append(held.Log, SecurityEventFixtures.For(7045));
+        await held.AdvanceAsync(Poll);
+        held.Restart();
+        var whileStopped = SecurityEventFixtures.Append(held.Log, SecurityEventFixtures.For(7045));
+        await using (new FileStream(held.CheckpointPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            await held.StepAsync();
+            Check(!held.Pipeline.Snapshot.Active, "A checkpoint held by another process was discarded at once.");
+        }
+
+        await held.AdvanceAsync(Poll);
+        Check(held.Pipeline.Snapshot.Active &&
+              held.Uploader.AcceptedBatches[^1].Events.Select(o => o.RecordId).SequenceEqual([whileStopped]) &&
+              held.Uploader.AcceptedBatches[^1].Gaps.Count == 0,
+            "Positions were lost after a held checkpoint became readable.");
     }
 
     // D19: no marker, field value or exception message reaches the logs; types and HResults do.
@@ -1389,6 +1471,18 @@ internal static class SecurityEventPipelineTests
         {
             assertions++;
         }
+
+        // A committed status whose body stalls is bounded by the result read timeout, not held until stop.
+        var stalled = new StubHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new StallingStream())
+        }));
+        using var stopAfter = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        Check(await new HttpSecurityEventUploader(new HttpClient(stalled), options, TimeSpan.FromMilliseconds(200))
+                  .SendAsync(batch, enrollment, stopAfter.Token) == new UploadOutcome(UploadResult.Accepted, 200, null) &&
+              System.Diagnostics.Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(10),
+            "A stalled result body held the upload.");
     }
 
     // D21: the link signals only when it appears, disappears or changes endpoint.

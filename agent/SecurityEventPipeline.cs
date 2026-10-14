@@ -59,6 +59,8 @@ public sealed class SecurityEventPipeline : BackgroundService
     public const int MaxScanPerPoll = 2048;
     // A reset plus an overwrite at the start of the new generation, before any dropped record.
     private const int MaxContinuityGapsPerChannel = 2;
+    // An unreadable checkpoint file is retried on this many steps before coverage restarts.
+    private const int MaxCheckpointLoadAttempts = 6;
     private static readonly TimeSpan FailureLogInterval = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan FlushTimeout = TimeSpan.FromSeconds(5);
     private static readonly string AgentVersion =
@@ -77,6 +79,7 @@ public sealed class SecurityEventPipeline : BackgroundService
     private readonly Dictionary<string, ChannelState> _byName;
 
     private bool _initialized;
+    private int _checkpointLoadFailures;
     private Guid _boundEndpointId;
     private bool _endpointChangeLogged;
     private DateTimeOffset _countersSinceUtc;
@@ -95,6 +98,7 @@ public sealed class SecurityEventPipeline : BackgroundService
     private Dirty _dirty;
     private DateTimeOffset _lastScanFlushUtc;
     private DateTimeOffset _lastSaveFailureLogUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastStepUtc;
     private long _polls;
     private long _deliveryAttempts;
     private SecurityEventPipelineSnapshot _snapshot;
@@ -153,8 +157,10 @@ public sealed class SecurityEventPipeline : BackgroundService
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
+            // Usually transient (another process holding the file): retried on the next steps first.
             _logger.LogWarning("Security event checkpoints could not be loaded ({ExceptionType}, 0x{HResult:X8})",
                 exception.GetType().Name, exception.HResult);
+            if (++_checkpointLoadFailures < MaxCheckpointLoadAttempts) return false;
             load = new EventCheckpointLoad(new Dictionary<string, EventCheckpoint>(),
                 SecurityEventCoverageCauses.CheckpointInvalid);
         }
@@ -182,6 +188,7 @@ public sealed class SecurityEventPipeline : BackgroundService
         _nextPollUtc = now;
         _nextDeliveryUtc = now;
         _lastScanFlushUtc = now;
+        _lastStepUtc = now;
         _initialized = true;
         _logger.LogInformation("Security event collection started for {ChannelCount} channels", _channels.Length);
         return true;
@@ -197,6 +204,8 @@ public sealed class SecurityEventPipeline : BackgroundService
         }
 
         var now = _time.GetUtcNow();
+        if (now < _lastStepUtc) RebaseSchedule(now - _lastStepUtc);
+        _lastStepUtc = now;
         var linked = _link.Current;
         if (linked is null)
         {
@@ -303,6 +312,25 @@ public sealed class SecurityEventPipeline : BackgroundService
         }
     }
 
+    /// <summary>
+    /// The wall clock stepped back (a time correction or a manual change): every schedule moves back by the
+    /// same amount, so polling, delivery, status and channel retries keep their intervals instead of
+    /// stalling for the length of the step.
+    /// </summary>
+    private void RebaseSchedule(TimeSpan by)
+    {
+        _nextPollUtc = Shift(_nextPollUtc, by);
+        _nextDeliveryUtc = Shift(_nextDeliveryUtc, by);
+        _lastStatusAckUtc = Shift(_lastStatusAckUtc, by);
+        _lastScanFlushUtc = Shift(_lastScanFlushUtc, by);
+        _lastFailureLogUtc = Shift(_lastFailureLogUtc, by);
+        _lastSaveFailureLogUtc = Shift(_lastSaveFailureLogUtc, by);
+        foreach (var channel in _channels) channel.RetryAtUtc = Shift(channel.RetryAtUtc, by);
+    }
+
+    private static DateTimeOffset Shift(DateTimeOffset value, TimeSpan by) =>
+        value == DateTimeOffset.MinValue || value == DateTimeOffset.MaxValue ? value : value + by;
+
     private void Poll(DateTimeOffset now, CancellationToken cancellationToken)
     {
         _polls++;
@@ -405,6 +433,22 @@ public sealed class SecurityEventPipeline : BackgroundService
                     if (definition.Predicate is { } predicate)
                     {
                         predicateValues = ReadFieldsSafe(cursor, predicate, cancellationToken);
+                        if (predicateValues is null)
+                        {
+                            // The condition could not be evaluated: the record may be selected, so it is
+                            // dropped with a gap rather than treated as a mismatch.
+                            if (!HasGapRoom(draft, reserve))
+                            {
+                                budgetFull = backlog = true;
+                                break;
+                            }
+
+                            state.DroppedUnparsed++;
+                            AddGap(draft, state, SecurityEventGapReasons.Dropped, id, id, null, now);
+                            Advance(state, ref pass, id, header);
+                            continue;
+                        }
+
                         if (!SecurityEventNormalizer.PassesPredicate(definition, predicateValues, out var discarded))
                         {
                             state.FieldsDiscarded += discarded;
@@ -485,6 +529,7 @@ public sealed class SecurityEventPipeline : BackgroundService
             finally
             {
                 cursor?.Dispose();
+                LogTransition(state);
             }
         }
 
@@ -567,14 +612,15 @@ public sealed class SecurityEventPipeline : BackgroundService
     /// <summary>
     /// A reset with records in the new generation, which is read in the same pass so its position never
     /// rests at 0. Unread old records are inside the reset gap; the new generation is numbered from 1,
-    /// so records below its oldest were overwritten before they could be read.
+    /// so records below its oldest were overwritten before they could be read. The pass is marked unread
+    /// until a record of the new generation is consumed (see <see cref="Commit"/>).
     /// </summary>
     private ChannelPass StartGeneration(Draft draft, ChannelState state, long position, long oldest, DateTimeOffset now)
     {
         AddGap(draft, state, SecurityEventGapReasons.LogReset, position + 1, null, null, now);
-        if (oldest <= 1) return new ChannelPass(0, null);
+        if (oldest <= 1) return new ChannelPass(0, null, UnreadGeneration: true);
         AddGap(draft, state, SecurityEventGapReasons.Overwritten, 1, oldest - 1, null, now);
-        return new ChannelPass(oldest - 1, null);
+        return new ChannelPass(oldest - 1, null, UnreadGeneration: true);
     }
 
     private static void Advance(ChannelState state, ref ChannelPass pass, long id, EventRecordHeader header)
@@ -589,6 +635,15 @@ public sealed class SecurityEventPipeline : BackgroundService
     /// </summary>
     private void Commit(Draft draft, ChannelState state, ChannelPass pass)
     {
+        if (pass.UnreadGeneration)
+        {
+            // A reset whose new generation was not read (scan budget, a full batch or a read failure) is not
+            // committed: a position at the generation start could not detect another clear. The old position
+            // stays, so the next pass finds the same reset again and reads the generation with it.
+            draft.RemoveGaps(state.Channel);
+            return;
+        }
+
         if (draft.HasItemsFor(state.Channel))
         {
             draft.End[state.Channel] = (pass.End, pass.EndTicks);
@@ -809,19 +864,29 @@ public sealed class SecurityEventPipeline : BackgroundService
         Transition(state, sourceState, errorCode, exceptionType);
     }
 
-    private void Transition(ChannelState state, string sourceState, int? errorCode, string? exceptionType = null)
+    private static void Transition(ChannelState state, string sourceState, int? errorCode, string? exceptionType = null)
     {
         state.State = sourceState;
         state.LastErrorCode = errorCode;
-        if (state.LoggedState == sourceState) return;
-        state.LoggedState = sourceState;
-        if (sourceState == SecurityEventSourceStates.Collecting)
+        state.LastExceptionType = exceptionType;
+    }
+
+    /// <summary>
+    /// Logs the state a channel ends its pass in, once per change of state or error code: a channel described
+    /// successfully and then failing to read stays one quiet error instead of alternating with 'collecting'.
+    /// </summary>
+    private void LogTransition(ChannelState state)
+    {
+        if (state.LoggedState == state.State && state.LoggedErrorCode == state.LastErrorCode) return;
+        state.LoggedState = state.State;
+        state.LoggedErrorCode = state.LastErrorCode;
+        if (state.State == SecurityEventSourceStates.Collecting)
             _logger.LogInformation("Security event channel {Channel} is collecting", state.Channel);
-        else if (errorCode is { } code)
+        else if (state.LastErrorCode is { } code)
             _logger.LogWarning("Security event channel {Channel} is {State} ({ExceptionType}, 0x{HResult:X8})",
-                state.Channel, sourceState, exceptionType ?? "-", code);
+                state.Channel, state.State, state.LastExceptionType ?? "-", code);
         else
-            _logger.LogWarning("Security event channel {Channel} is {State}", state.Channel, sourceState);
+            _logger.LogWarning("Security event channel {Channel} is {State}", state.Channel, state.State);
     }
 
     private SecurityEventSourceStatus[] BuildSources() =>
@@ -836,15 +901,20 @@ public sealed class SecurityEventPipeline : BackgroundService
         new(_initialized, BuildSources(), _prepared?.Events.Count ?? 0, _prepared?.Gaps.Count ?? 0, _polls,
             _deliveryAttempts, _checkpoints.Writes, _nextDeliveryUtc, _retryDelay);
 
-    /// <summary>Progress through one channel: the scanned-through record and its creation ticks.</summary>
-    private readonly record struct ChannelPass(long End, long? EndTicks);
+    /// <summary>
+    /// Progress through one channel: the scanned-through record and its creation ticks. UnreadGeneration
+    /// marks a reset whose new generation has not had a record consumed yet.
+    /// </summary>
+    private readonly record struct ChannelPass(long End, long? EndTicks, bool UnreadGeneration = false);
 
     private sealed class ChannelState(string channel)
     {
         public string Channel { get; } = channel;
         public string State { get; set; } = SecurityEventSourceStates.Collecting;
         public int? LastErrorCode { get; set; }
+        public string? LastExceptionType { get; set; }
         public string? LoggedState { get; set; }
+        public int? LoggedErrorCode { get; set; }
         // Acknowledged scanned-through position; null until coverage is acknowledged.
         public long? Position { get; set; }
         public long? AnchorTicks { get; set; }
@@ -881,5 +951,12 @@ public sealed class SecurityEventPipeline : BackgroundService
         public bool HasItems => Events.Count > 0 || Gaps.Count > 0;
         public bool HasItemsFor(string channel) =>
             EventCounts.GetValueOrDefault(channel) > 0 || GapCounts.GetValueOrDefault(channel) > 0;
+
+        /// <summary>Withdraws a channel's gaps; only valid while the channel has consumed no record.</summary>
+        public void RemoveGaps(string channel)
+        {
+            Gaps.RemoveAll(gap => gap.Channel == channel);
+            GapCounts.Remove(channel);
+        }
     }
 }

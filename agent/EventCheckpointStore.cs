@@ -34,7 +34,11 @@ public sealed class EventCheckpointStore(AgentOptions options)
     /// <summary>Completed checkpoint writes, exposed for bounded-work checks.</summary>
     public long Writes => Interlocked.Read(ref _writes);
 
-    /// <summary>Never throws for content problems: anything invalid restarts coverage on every channel.</summary>
+    /// <summary>
+    /// Never throws for content problems: anything invalid restarts coverage on every channel. A file that
+    /// cannot be opened or read (IO, sharing or access) throws, so the caller can retry instead of
+    /// discarding valid positions.
+    /// </summary>
     public async Task<EventCheckpointLoad> LoadAsync(Guid endpointId, CancellationToken cancellationToken = default)
     {
         try
@@ -44,7 +48,10 @@ public sealed class EventCheckpointStore(AgentOptions options)
             if (!File.Exists(StatePath)) return Empty(SecurityEventCoverageCauses.NoCheckpoint);
 
             byte[] bytes;
-            await using (var stream = new FileStream(StatePath, FileMode.Open, FileAccess.Read, FileShare.None))
+            // The file is only ever replaced by rename, so a shared read sees one complete version, and another
+            // process reading it (a scanner or a backup) does not make a valid checkpoint unreadable.
+            await using (var stream = new FileStream(StatePath, FileMode.Open, FileAccess.Read,
+                             FileShare.Read | FileShare.Delete))
             {
                 if (stream.Length is < 1 or > MaxBytes) return Empty(SecurityEventCoverageCauses.CheckpointInvalid);
                 bytes = new byte[stream.Length];
@@ -57,9 +64,10 @@ public sealed class EventCheckpointStore(AgentOptions options)
                 new JsonDocumentOptions { MaxDepth = 4, AllowDuplicateProperties = false });
             return Parse(document.RootElement, endpointId) ?? Empty(SecurityEventCoverageCauses.CheckpointInvalid);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not (OperationCanceledException or IOException or
+                                              UnauthorizedAccessException))
         {
-            // A link, an IO error or malformed content: coverage restarts and the change is reported.
+            // A link or malformed content: coverage restarts and the change is reported.
             return Empty(SecurityEventCoverageCauses.CheckpointInvalid);
         }
     }
@@ -180,21 +188,28 @@ public sealed class EventCheckpointStore(AgentOptions options)
 
     private void SweepTemporaryFiles()
     {
-        // Temporary files orphaned by a crash between create and rename; bounded per load.
-        if (!Directory.Exists(options.DataDirectory)) return;
-        foreach (var path in Directory.EnumerateFiles(options.DataDirectory, ".event-checkpoints.*.tmp").Take(MaxSweep))
+        // Temporary files orphaned by a crash between create and rename; bounded per load and best effort,
+        // so a sweep failure never affects the load.
+        try
         {
-            try
+            if (!Directory.Exists(options.DataDirectory)) return;
+            foreach (var path in Directory.EnumerateFiles(options.DataDirectory, ".event-checkpoints.*.tmp").Take(MaxSweep))
             {
-                var file = new FileInfo(path);
-                if (file.Name.StartsWith(".event-checkpoints.", StringComparison.Ordinal) &&
-                    file.Name.EndsWith(".tmp", StringComparison.Ordinal) && file.LinkTarget is null &&
-                    (file.Attributes & FileAttributes.ReparsePoint) == 0)
-                    file.Delete();
+                try
+                {
+                    var file = new FileInfo(path);
+                    if (file.Name.StartsWith(".event-checkpoints.", StringComparison.Ordinal) &&
+                        file.Name.EndsWith(".tmp", StringComparison.Ordinal) && file.LinkTarget is null &&
+                        (file.Attributes & FileAttributes.ReparsePoint) == 0)
+                        file.Delete();
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                }
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
         }
     }
 
