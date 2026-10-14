@@ -1929,11 +1929,21 @@ internal static class SecurityEventPipelineTests
         long? noise;
         using (var agent = SecurityEventTestHost.BuildEventAgent(agentDirectory, core.Url, httpClient, log))
         {
+            // Enrolled but not yet acknowledged by Core: the pipeline stays dormant until a heartbeat succeeds.
+            var (describes, newest, opens, attempts, heartbeats) =
+                (log.DescribeCalls, log.ReadNewestCalls, log.OpenCalls, link.EventAttempts, link.Heartbeats);
+            link.Outage = true;
             await agent.StartAsync();
             var stopped = false;
             try
             {
                 var pipeline = agent.Services.GetRequiredService<SecurityEventPipeline>();
+                await WaitForAsync(() => link.Heartbeats >= heartbeats + 2, "The restarted Agent did not retry its heartbeat.");
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                Check(log.DescribeCalls == describes && log.ReadNewestCalls == newest && log.OpenCalls == opens &&
+                      link.EventAttempts == attempts && !pipeline.Snapshot.Active,
+                    "The pipeline read or sent events before Core acknowledged a heartbeat.");
+                link.Outage = false;
                 await WaitForAsync(async () => await events.CountAsync(endpointId) == held + 1 &&
                         Position(pipeline, SecurityEventChannels.System) == log.Extent(SecurityEventChannels.System).Newest,
                     "A held batch was not delivered after a restart.");
