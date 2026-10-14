@@ -321,9 +321,16 @@ internal static class SecurityEventNativeAcceptance
             writer.WriteEntry(message, EventLogEntryType.Information, TestEventId);
             await WaitForAsync(() => TryDescribe(access, log)?.NewestRecordId is { } id && id != anchorId,
                 "The write after the clear did not reach the test log.", Latency);
+            // Windows either restarts the numbering (a reset the pipeline detects) or continues it past the
+            // anchor (observed for classic logs): then every remaining record is above the read position, and
+            // unread cleared records fall below the new oldest record, an exact overwritten gap. Both keep the
+            // pipeline's continuity; the clear itself arrives as System 104 (step h).
             var reset = DetectReset(access, log, anchorId, anchor.TimeCreatedUtc);
-            Ensure(reset is not null, "The clear of the test-only log is not detectable as a reset.");
-            Console.WriteLine($"Native event reset detection: {reset}");
+            var afterClear = access.Describe(log);
+            Ensure(reset is not null || afterClear.OldestRecordId > anchorId,
+                "The clear of the test-only log is neither a detectable reset nor numbered past the anchor.");
+            Console.WriteLine("Native event reset detection: " + (reset ??
+                $"numbering continued after the clear (oldest {afterClear.OldestRecordId} > anchor {anchorId})"));
 
             // h) The clear produced System 104, which the running Agent delivers.
             await WaitForAsync(async () => await ClearRowAsync(events, endpointId, log, systemNewest) is not null,

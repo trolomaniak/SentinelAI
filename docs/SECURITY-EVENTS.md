@@ -143,8 +143,8 @@ Positions are kept in `<Agent:DataDirectory>/event-checkpoints` (installed: `%Pr
 
 | Reason | Range | Meaning |
 | --- | --- | --- |
-| `overwritten` | `firstRecordId`–`lastRecordId` | Records after the position were overwritten by Windows before they were read. |
-| `logReset` | From `firstRecordId` (position + 1), open-ended | The log was cleared or reset: it shrank below the position, became empty, or the record at the position is missing or has a different creation time. Unread records of the old generation from `firstRecordId` on are lost. |
+| `overwritten` | `firstRecordId`–`lastRecordId` | Records after the position were overwritten by Windows before they were read, or removed by a clear that continued the record numbering (observed for classic logs; the clear itself is collected as System 104 or Security 1102). |
+| `logReset` | From `firstRecordId` (position + 1), open-ended | The log was cleared or reset with its numbering restarted: it shrank below the position, became empty, or the record at the position is missing or has a different creation time. Unread records of the old generation from `firstRecordId` on are lost. |
 | `coverageStarted` | From `firstRecordId` (newest record + 1), open-ended | Collection started at the log's newest record. Earlier records were not collected. `cause` is `noCheckpoint`, `checkpointInvalid` or `endpointChanged`. |
 | `dropped` | One record | A catalog record that could not be sent: it had no creation time or could not be normalized. A record over 4 KiB serialized would also be dropped; the largest valid observation measures 2,823 bytes. A record without a record number cannot carry a gap and is only counted in `droppedUnparsed`. |
 | `rejected` | One record | Recorded by Core for an observation item it rejected as invalid. A `rejected` gap sent by an Agent is ignored. |
