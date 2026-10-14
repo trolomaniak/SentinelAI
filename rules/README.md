@@ -33,3 +33,14 @@ have no rules until explicit supporting observations exist.
 
 Snapshots are evaluated on demand; results are not an incident history, and
 repeat evaluation of one snapshot returns the same serialized alerts.
+
+## Runtime event rules
+
+`EventRuleEngine.CreateDefault()` holds twelve `SA-EVT-*` rules over the Windows
+security event observations that the Agent collects. Core evaluates each batch's
+newly stored observations in its ingest transaction; windowed rules read bounded
+per-endpoint history ordered by event time clamped to receipt. Rules fire only on
+positive evidence, have no clock, I/O, randomness or model input, and return at
+most one finding per rule per batch (the latest evidence). Rule IDs, prerequisites,
+evidence, reasons, recommended actions and false-positive considerations are in
+[docs/EVENT-RULES.md](../docs/EVENT-RULES.md).
