@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SentinelAI.Agent;
 using SentinelAI.Contracts.SecurityEvents;
@@ -65,6 +68,15 @@ internal sealed class SyntheticEventLog : IEventLogAccess
     public void AppendNoise(string channel, int count)
     {
         for (var index = 0; index < count; index++) Append(channel, NoiseProvider, 1000 + index % 7);
+    }
+
+    /// <summary>Runs several appends as one change, so no Describe observes part of the burst.</summary>
+    public void Atomically(Action appends)
+    {
+        lock (_gate)
+        {
+            appends();
+        }
     }
 
     /// <summary>Overwrites every record up to and including <paramref name="throughId"/>.</summary>
@@ -634,6 +646,46 @@ internal static class SecurityEventFixtures
 
     public sealed record Fixture(string Channel, string Provider, int EventId, int Level, int Version,
         Dictionary<string, object?> Fields);
+}
+
+internal static class SecurityEventTestHost
+{
+    /// <summary>
+    /// The production Agent composition over a synthetic event log, a test transport and a fixed secure
+    /// posture. Heartbeats are five minutes apart, so event traffic is explained by the pipeline alone.
+    /// </summary>
+    public static IHost BuildEventAgent(string dataDirectory, string coreUrl, HttpClient httpClient,
+        IEventLogAccess source, string? enrollmentToken = null, CapturingEventLoggerProvider? logs = null)
+    {
+        var builder = AgentHost.CreateBuilder([]);
+        builder.Configuration["Agent:CoreUrl"] = coreUrl;
+        builder.Configuration["Agent:DataDirectory"] = dataDirectory;
+        builder.Configuration["Agent:HeartbeatInterval"] = "00:05:00";
+        builder.Configuration["Agent:RetryDelay"] = "00:00:00.050";
+        builder.Configuration["Agent:MaxRetryDelay"] = "00:00:00.200";
+        builder.Configuration["Agent:EventPollInterval"] = "00:00:00.100";
+        // Without change notifications, verification every second delivers a posture change promptly.
+        builder.Configuration["Agent:PostureCheckInterval"] = "00:00:01";
+        builder.Configuration["Agent:PostureSettleDelay"] = "00:00:00.100";
+        builder.Configuration["Agent:PostureDeliveryInterval"] = "00:00:01";
+        builder.Configuration["Agent:EnrollmentToken"] = enrollmentToken;
+        builder.Configuration["Agent:CoreCertificateSha256"] = null;
+        builder.Services.RemoveAll<HttpClient>();
+        builder.Services.AddSingleton(httpClient);
+        builder.Services.RemoveAll<IEventLogAccess>();
+        builder.Services.AddSingleton(source);
+        builder.Services.RemoveAll<ISecurityPostureReader>();
+        builder.Services.AddSingleton<ISecurityPostureReader>(new MutablePostureReader(PostureMonitorTests.Secure));
+        builder.Services.RemoveAll<IPostureChangeSource>();
+        builder.Services.AddSingleton<IPostureChangeSource>(new NoPostureChangeSource());
+        if (logs is not null)
+        {
+            builder.Logging.AddProvider(logs);
+            builder.Logging.AddFilter<CapturingEventLoggerProvider>(null, LogLevel.Debug);
+        }
+
+        return builder.Build();
+    }
 }
 
 /// <summary>Captures rendered log text, including any exception text, for privacy assertions.</summary>
