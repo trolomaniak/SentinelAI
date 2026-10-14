@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.Eventing.Reader;
 using System.Net;
 using System.Net.Http.Json;
@@ -8,14 +9,18 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SentinelAI.Agent;
 using SentinelAI.Contracts.SecurityEvents;
+using SentinelAI.Core.Persistence;
 
 /// <summary>
 /// TASK-027 deterministic tier (D1-D23): the pipeline driven step by step with a synthetic event log,
-/// a manual clock and scripted or in-memory Core uploaders; plus the read-only native tier N1 on Windows.
+/// a manual clock and scripted or in-memory Core uploaders; the integration tier (I1-I8): the production
+/// Agent host and a real Core over the synthetic log; plus the read-only native tier N1 on Windows.
 /// </summary>
 internal static class SecurityEventPipelineTests
 {
@@ -51,6 +56,7 @@ internal static class SecurityEventPipelineTests
         await VerifyAgentLinkAsync();
         await VerifyInvariantAsync(Path.Combine(root, "d22"));
         VerifyForbiddenApis();
+        await VerifyIntegrationAsync(Path.Combine(root, "integration"));
         if (OperatingSystem.IsWindows()) VerifyNativeConformance();
         Console.WriteLine($"Security event pipeline tests passed ({assertions} assertions).");
     }
@@ -1649,6 +1655,499 @@ internal static class SecurityEventPipelineTests
                 Check(!text.Contains(forbidden, StringComparison.Ordinal), $"{Path.GetFileName(file)} uses {forbidden}.");
         }
     }
+
+    // Tier I (I1-I8): the production Agent host and a real Core over the synthetic event log. Each scenario
+    // group has its own Core, because Core allows 60 event requests per minute per address. Heartbeats are
+    // five minutes apart, so assertions count batches, rows and gaps, never heartbeats.
+    private static async Task VerifyIntegrationAsync(string root)
+    {
+        await VerifyAgentDeliveryAsync(Path.Combine(root, "fixture-a"));
+        await VerifyOutageAsync(Path.Combine(root, "fixture-b"));
+        await VerifyDegradationAsync(Path.Combine(root, "fixture-c"));
+    }
+
+    // I1-I3 and I8 (fixture A): first start, continuous delivery, graceful restart, crash replay, deleted checkpoint.
+    private static async Task VerifyAgentDeliveryAsync(string directory)
+    {
+        await using var core = await PostureMonitorTests.CoreFixture.StartAsync(Path.Combine(directory, "core"));
+        var events = core.Services.GetRequiredService<SecurityEventStore>();
+        var agentDirectory = Path.Combine(directory, "agent");
+        var checkpointPath = Path.Combine(agentDirectory, "event-checkpoints");
+        var checkpointCopy = Path.Combine(directory, "event-checkpoints-copy");
+        var log = new SyntheticEventLog();
+        var logs = new CapturingEventLoggerProvider();
+        using var link = new CoreLinkHandler();
+        using var httpClient = new HttpClient(link, disposeHandler: false);
+        var service = SecurityEventFixtures.For(7045);
+        Seed(log, 100);
+        var token = await core.IssueEnrollmentTokenAsync();
+        IHost BuildAgent(string? enrollmentToken = null) =>
+            SecurityEventTestHost.BuildEventAgent(agentDirectory, core.Url, httpClient, log, enrollmentToken, logs);
+
+        // I1: coverage starts at each tail; every selection is then delivered promptly, typed and minimized.
+        Guid endpointId;
+        long scriptBlockId;
+        using (var agent = BuildAgent(token))
+        {
+            await agent.StartAsync();
+            try
+            {
+                endpointId = await WaitForIdentityFileAsync(Path.Combine(agentDirectory, "endpoint-id"), "The Agent did not enroll.");
+                var pipeline = agent.Services.GetRequiredService<SecurityEventPipeline>();
+                await WaitForAsync(() => CoveredAsync(events, endpointId, SecurityEventChannels.All),
+                    "First start did not establish coverage on every channel.");
+                Check(await events.CountAsync(endpointId) == 0, "History from before coverage was delivered.");
+
+                var stopwatch = Stopwatch.StartNew();
+                var appended = SecurityEventFixtures.Positive
+                    .Select(fixture => (Fixture: fixture, Id: SecurityEventFixtures.Append(log, fixture))).ToArray();
+                await WaitForAsync(async () => await events.CountAsync(endpointId) == appended.Length,
+                    "One event per selection was not delivered.");
+                Console.WriteLine($"Synthetic event pipeline latency: {stopwatch.ElapsedMilliseconds} ms");
+                var stored = await events.ListRecentAsync(endpointId, 1000);
+                foreach (var (fixture, id) in appended)
+                {
+                    var expected = Normalize(fixture).Observation! with
+                    {
+                        RecordId = id, TimeCreatedUtc = SyntheticEventLog.TimeOf(0, id)
+                    };
+                    var row = stored.SingleOrDefault(item =>
+                        item.Observation.Channel == fixture.Channel && item.Observation.RecordId == id)?.Observation;
+                    Check(row == expected && row.TimeCreatedUtc.UtcTicks == expected.TimeCreatedUtc.UtcTicks &&
+                          row.TimeCreatedUtc.Offset == TimeSpan.Zero,
+                        $"Core did not store the expected typed observation for event {fixture.EventId}.");
+                }
+
+                // A burst larger than one batch is split at the event cap and arrives complete, without duplicates.
+                var rows = stored.Count;
+                log.Atomically(() => AppendMany(log, SecurityEventFixtures.For(4625), 300));
+                await WaitForAsync(async () => await events.CountAsync(endpointId) == rows + 300,
+                    "A 300-event burst was not delivered.", seconds: 20);
+                stored = await events.ListRecentAsync(endpointId, 1000);
+                Check(link.MaxEventsInBatch == SecurityEventContract.MaxEventsPerBatch &&
+                      link.MaxEventBodyBytes <= SecurityEventContract.MaxRequestBytes,
+                    $"Batches exceeded their bounds ({link.MaxEventsInBatch} events, {link.MaxEventBodyBytes} bytes).");
+                Check(stored.Count == rows + 300 &&
+                      stored.Select(item => (item.Observation.Channel, item.Observation.RecordId)).Distinct().Count() == stored.Count &&
+                      link.EventDuplicates == 0 && link.EventsInAcceptedBatches == stored.Count,
+                    "Continuous delivery stored or sent an event more than once.");
+
+                // I2, before the stop: an acknowledged event is persisted at once, a later scan-only advance is deferred.
+                scriptBlockId = SecurityEventFixtures.Append(log, SecurityEventFixtures.For(4104));
+                await WaitForAsync(() => Position(pipeline, SecurityEventChannels.PowerShell) == scriptBlockId,
+                    "The acknowledged script block event did not move the position.");
+                log.AppendNoise(SecurityEventChannels.PowerShell, 3);
+                var noise = log.Extent(SecurityEventChannels.PowerShell).Newest;
+                await WaitForAsync(() => Position(pipeline, SecurityEventChannels.PowerShell) == noise,
+                    "Records outside the catalog did not advance the position.");
+                Check(ReadCheckpoint(checkpointPath)[SecurityEventChannels.PowerShell] == scriptBlockId,
+                    "A scan-only advance was persisted before the deferral interval.");
+            }
+            finally
+            {
+                await StopHostAsync(agent);
+            }
+        }
+
+        // I2: the graceful stop flushed the deferred position; the persisted positions cover every delivered event.
+        var persisted = ReadCheckpoint(checkpointPath);
+        Check(SecurityEventChannels.All.All(channel => persisted[channel] == log.Extent(channel).Newest) &&
+              persisted[SecurityEventChannels.PowerShell] > scriptBlockId,
+            "The graceful stop did not persist every acknowledged and scanned position.");
+        VerifyStoppedAgentFiles(agentDirectory);
+
+        // I2: events written while stopped are delivered after the restart, and nothing is resent.
+        var count = await events.CountAsync(endpointId);
+        var sent = link.EventsInAcceptedBatches;
+        AppendMany(log, service, 50);
+        await RunAgentAsync(BuildAgent(), async pipeline => await WaitForAsync(async () =>
+                await events.CountAsync(endpointId) == count + 50 &&
+                Position(pipeline, SecurityEventChannels.System) == log.Extent(SecurityEventChannels.System).Newest,
+            "Events written while the Agent was stopped were not delivered after a restart."));
+        Check(await events.CountAsync(endpointId) == count + 50 && link.EventsInAcceptedBatches - sent == 50,
+            $"A graceful restart resent events ({link.EventsInAcceptedBatches - sent} sent for 50).");
+        VerifyStoppedAgentFiles(agentDirectory);
+
+        // I3: losing the last persisted positions (a crash) replays one batch, which Core absorbs.
+        File.Copy(checkpointPath, checkpointCopy);
+        var gaps = (await events.ListGapsAsync(endpointId, 500)).Count;
+        count = await events.CountAsync(endpointId);
+        AppendMany(log, service, 20);
+        await RunAgentAsync(BuildAgent(), async pipeline => await WaitForAsync(async () =>
+                await events.CountAsync(endpointId) == count + 20 &&
+                Position(pipeline, SecurityEventChannels.System) == log.Extent(SecurityEventChannels.System).Newest,
+            "Twenty events were not delivered."));
+        File.Copy(checkpointCopy, checkpointPath, overwrite: true);
+        var (resent, duplicates) = (link.EventsInAcceptedBatches, link.EventDuplicates);
+        await RunAgentAsync(BuildAgent(), async pipeline => await WaitForAsync(() =>
+                link.EventDuplicates - duplicates >= 20 &&
+                Position(pipeline, SecurityEventChannels.System) == log.Extent(SecurityEventChannels.System).Newest,
+            "The replayed batch was not acknowledged."));
+        Check(link.EventsInAcceptedBatches - resent == 20 && link.EventDuplicates - duplicates == 20 &&
+              await events.CountAsync(endpointId) == count + 20 && (await events.ListGapsAsync(endpointId, 500)).Count == gaps,
+            "A replay after restoring older positions was not absorbed as exactly 20 duplicates.");
+
+        // I8: a deleted checkpoint restarts coverage at each tail. Core flags the restart, and the records written
+        // while the Agent was stopped stay undelivered (the documented loss, now reported). Every channel received
+        // records since I1, so each restart gap has a new key.
+        File.Delete(checkpointPath);
+        count = await events.CountAsync(endpointId);
+        AppendMany(log, service, 5);
+        var tails = SecurityEventChannels.All.ToDictionary(channel => channel, channel => log.Extent(channel).Newest!.Value);
+        await RunAgentAsync(BuildAgent(), async pipeline =>
+        {
+            await WaitForAsync(async () => (await events.ListGapsAsync(endpointId, 500)).Count(gap =>
+                    gap.Reason == SecurityEventGapReasons.CoverageStarted && gap.FirstRecordId == tails[gap.Channel] + 1) == 4,
+                "A deleted checkpoint did not restart coverage on every channel.");
+            await WaitForAsync(() => SecurityEventChannels.All.All(channel => Position(pipeline, channel) == tails[channel]),
+                "The restarted coverage was not acknowledged.");
+        });
+        var restarts = (await events.ListGapsAsync(endpointId, 500)).Where(gap =>
+            gap.Reason == SecurityEventGapReasons.CoverageStarted && gap.FirstRecordId == tails[gap.Channel] + 1).ToArray();
+        Check(restarts.Length == 4 && restarts.All(gap =>
+                  gap is { Cause: SecurityEventCoverageCauses.NoCheckpoint, LastRecordId: null, CoverageRestart: true }),
+            "Core did not flag the coverage restart after a deleted checkpoint.");
+        Check(await events.CountAsync(endpointId) == count, "Records written before the restarted coverage were delivered.");
+
+        // Excluded values never reach Core's database, the Agent's files or the Agent's logs.
+        Check(!ContainsMarker(ReadShared(core.Services.GetRequiredService<AdminStore>().DatabasePath)) &&
+              Directory.EnumerateFiles(agentDirectory).All(path => !ContainsMarker(ReadShared(path))),
+            "An excluded value was persisted.");
+        Check(logs.Entries.Count > 0 && !logs.Text.Contains(SecurityEventFixtures.Marker, StringComparison.Ordinal),
+            "An excluded value reached the Agent logs.");
+    }
+
+    // I4-I5 (fixture B): a Core outage with bounded memory, overflow and drain; a lost acknowledgement; held batches.
+    private static async Task VerifyOutageAsync(string directory)
+    {
+        await using var core = await PostureMonitorTests.CoreFixture.StartAsync(Path.Combine(directory, "core"));
+        var events = core.Services.GetRequiredService<SecurityEventStore>();
+        var agentDirectory = Path.Combine(directory, "agent");
+        var log = new SyntheticEventLog();
+        using var link = new CoreLinkHandler();
+        using var httpClient = new HttpClient(link, disposeHandler: false);
+        var service = SecurityEventFixtures.For(7045);
+        var token = await core.IssueEnrollmentTokenAsync();
+        Guid endpointId;
+        using (var agent = SecurityEventTestHost.BuildEventAgent(agentDirectory, core.Url, httpClient, log, token))
+        {
+            await agent.StartAsync();
+            try
+            {
+                endpointId = await WaitForIdentityFileAsync(Path.Combine(agentDirectory, "endpoint-id"), "The Agent did not enroll.");
+                var pipeline = agent.Services.GetRequiredService<SecurityEventPipeline>();
+                var lifetime = agent.Services.GetRequiredService<IHostApplicationLifetime>();
+                await WaitForAsync(() => CoveredAsync(events, endpointId, SecurityEventChannels.All),
+                    "First start did not establish coverage on every channel.");
+
+                // I4: during an outage exactly one batch is prepared, nothing more is read and retries back off.
+                var (accepted, duplicates) = (link.EventsInAcceptedBatches, link.EventDuplicates);
+                link.Outage = true;
+                var outage = Stopwatch.StartNew();
+                var attempts = link.EventAttempts;
+                // The logs were empty at coverage, so System holds records 1..600.
+                log.Atomically(() => AppendMany(log, service, 600));
+                await WaitForAsync(() => pipeline.Snapshot.PreparedEvents == SecurityEventContract.MaxEventsPerBatch,
+                    "The outage batch was not prepared.");
+                var (describes, opens, writes) = (log.DescribeCalls, log.OpenCalls, pipeline.Snapshot.CheckpointWrites);
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                var outageAttempts = link.EventAttempts - attempts;
+                Check(log.DescribeCalls == describes && log.OpenCalls == opens && pipeline.Snapshot.CheckpointWrites == writes &&
+                      pipeline.Snapshot.PreparedEvents == SecurityEventContract.MaxEventsPerBatch,
+                    "The Agent read events or wrote positions while a batch was pending.");
+                // Backoff from 50 ms doubling to the 200 ms maximum bounds the attempts by elapsed time.
+                Check(outageAttempts >= 2 && outageAttempts <= (int)(outage.Elapsed.TotalMilliseconds / 200) + 6,
+                    $"Outage retries were not bounded by backoff ({outageAttempts}).");
+                Check(await events.CountAsync(endpointId) == 0 && !lifetime.ApplicationStopping.IsCancellationRequested &&
+                      pipeline.ExecuteTask is { IsCompleted: false }, "A Core outage stopped the pipeline or reached Core.");
+
+                // Windows overwrites 257..400 while Core is down; the drain reports exactly that range.
+                log.Trim(SecurityEventChannels.System, 400);
+                link.Outage = false;
+                // Gaps counts the acknowledged coverage start as well as the overwrite.
+                await WaitForAsync(async () => await events.CountAsync(endpointId) == 456 &&
+                        (await SourcesAsync(events, endpointId))[SecurityEventChannels.System] is { Gaps: 2, SkippedRecords: 144 },
+                    "The outage did not drain with an exact overwrite gap.", seconds: 20);
+                var stored = await events.ListRecentAsync(endpointId, 1000);
+                Check(stored.Select(item => item.Observation.RecordId).Order().SequenceEqual(Range(1, 256).Concat(Range(401, 600))),
+                    "The drained rows are not the records read before and after the overwrite.");
+                Check((await events.ListGapsAsync(endpointId, 500)).Where(gap => gap.Reason == SecurityEventGapReasons.Overwritten)
+                      .ToArray() is [{ Channel: SecurityEventChannels.System, FirstRecordId: 257, LastRecordId: 400 }],
+                    "Core did not store exactly the overwritten range.");
+                Check(link.EventsInAcceptedBatches - accepted == 456 && link.EventDuplicates == duplicates,
+                    "Draining the outage resent events.");
+
+                // I5: Core commits a batch whose acknowledgement is lost; the resend is absorbed as duplicates.
+                var count = await events.CountAsync(endpointId);
+                (accepted, duplicates, attempts) = (link.EventsInAcceptedBatches, link.EventDuplicates, link.EventAttempts);
+                link.LoseNextEventAcknowledgement = true;
+                log.Atomically(() => AppendMany(log, service, 10));
+                await WaitForAsync(async () => await events.CountAsync(endpointId) == count + 10 &&
+                        link.EventDuplicates - duplicates >= 10, "A batch with a lost acknowledgement was not resent.");
+                Check(link.EventDuplicates - duplicates == 10 && link.EventsInAcceptedBatches - accepted == 20 &&
+                      link.EventAttempts - attempts >= 2 && !link.LoseNextEventAcknowledgement,
+                    "A lost acknowledgement was not absorbed as exactly one resent batch.");
+
+                // A failing Core keeps the one batch and backs off; recovery delivers it.
+                count = await events.CountAsync(endpointId);
+                attempts = link.EventAttempts;
+                link.FailEvents = true;
+                SecurityEventFixtures.Append(log, service);
+                await WaitForAsync(() => link.EventAttempts - attempts >= 3 && pipeline.Snapshot.PreparedEvents == 1,
+                    "A failing Core was not retried.");
+                Check(await events.CountAsync(endpointId) == count, "A failed attempt reached Core.");
+                link.FailEvents = false;
+                await WaitForAsync(async () => await events.CountAsync(endpointId) == count + 1,
+                    "The batch was not delivered after Core recovered.");
+
+                // An incompatible Core holds the batch for the long retry instead of dropping it or spinning.
+                attempts = link.EventAttempts;
+                link.IncompatibleEvents = HttpStatusCode.NotFound;
+                SecurityEventFixtures.Append(log, service);
+                await WaitForAsync(() => link.EventAttempts > attempts && pipeline.Snapshot.PreparedEvents == 1 &&
+                        pipeline.Snapshot.NextDeliveryUtc > DateTimeOffset.UtcNow.AddSeconds(10),
+                    "An incompatible answer did not hold the batch.");
+                attempts = link.EventAttempts;
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                Check(link.EventAttempts == attempts && pipeline.Snapshot.PreparedEvents == 1,
+                    "A held batch was retried before the incompatible retry delay.");
+                link.IncompatibleEvents = null;
+            }
+            finally
+            {
+                await StopHostAsync(agent);
+            }
+        }
+
+        // The held batch was never acknowledged, so the restarted Agent delivers it from the log.
+        var held = await events.CountAsync(endpointId);
+        var heldDuplicates = link.EventDuplicates;
+        await RunAgentAsync(SecurityEventTestHost.BuildEventAgent(agentDirectory, core.Url, httpClient, log), async pipeline =>
+            await WaitForAsync(async () => await events.CountAsync(endpointId) == held + 1 &&
+                    Position(pipeline, SecurityEventChannels.System) == log.Extent(SecurityEventChannels.System).Newest,
+                "A held batch was not delivered after a restart."));
+        Check(link.EventDuplicates == heldDuplicates, "Delivering the held batch resent acknowledged events.");
+    }
+
+    // I6-I7 (fixture C): per-channel degradation is contained and reported; an unenrolled Agent stays dormant.
+    private static async Task VerifyDegradationAsync(string directory)
+    {
+        const int AccessDenied = unchecked((int)0x80070005);
+        const int NotFound = unchecked((int)0x80070002);
+        await using var core = await PostureMonitorTests.CoreFixture.StartAsync(Path.Combine(directory, "core"));
+        var events = core.Services.GetRequiredService<SecurityEventStore>();
+        var agentDirectory = Path.Combine(directory, "agent");
+        var log = new SyntheticEventLog();
+        var logs = new CapturingEventLoggerProvider();
+        using var link = new CoreLinkHandler();
+        using var httpClient = new HttpClient(link, disposeHandler: false);
+        log.SetUnavailable(SecurityEventChannels.Security, SecurityEventSourceStates.AccessDenied, AccessDenied);
+        log.SetUnavailable(SecurityEventChannels.Defender, SecurityEventSourceStates.NotFound, NotFound);
+        // Coverage reads only the tail; the first read of new PowerShell records fails with a message carrying a marker.
+        var openFailure = new InvalidOperationException(SecurityEventFixtures.Marker);
+        log.ThrowOnOpen(SecurityEventChannels.PowerShell, openFailure);
+        var token = await core.IssueEnrollmentTokenAsync();
+        using (var agent = SecurityEventTestHost.BuildEventAgent(agentDirectory, core.Url, httpClient, log, token, logs))
+        {
+            await agent.StartAsync();
+            try
+            {
+                var endpointId = await WaitForIdentityFileAsync(Path.Combine(agentDirectory, "endpoint-id"), "The Agent did not enroll.");
+                var pipeline = agent.Services.GetRequiredService<SecurityEventPipeline>();
+                var lifetime = agent.Services.GetRequiredService<IHostApplicationLifetime>();
+                await WaitForAsync(async () => await CoveredAsync(events, endpointId,
+                        [SecurityEventChannels.System, SecurityEventChannels.PowerShell]) &&
+                        (await SourcesAsync(events, endpointId)) is var sources &&
+                        sources.GetValueOrDefault(SecurityEventChannels.Security) is { State: SecurityEventSourceStates.AccessDenied } &&
+                        sources.GetValueOrDefault(SecurityEventChannels.Defender) is { State: SecurityEventSourceStates.NotFound },
+                    "Unavailable channels were not reported next to the covered ones.");
+
+                // I6: records written while Security is denied are never delivered.
+                AppendMany(log, SecurityEventFixtures.For(4625), 3);
+                SecurityEventFixtures.Append(log, SecurityEventFixtures.For(4104));
+                var serviceId = SecurityEventFixtures.Append(log, SecurityEventFixtures.For(7045));
+                await WaitForAsync(async () => (await SourcesAsync(events, endpointId)) is var sources &&
+                        sources[SecurityEventChannels.PowerShell].State == SecurityEventSourceStates.Error &&
+                        sources[SecurityEventChannels.System].StoredObservations == 1,
+                    "A failing channel was not reported or blocked another channel.");
+                var view = await core.EventSourcesAsync(endpointId);
+                var reported = view.Sources.ToDictionary(source => source.Channel, StringComparer.Ordinal);
+                Check(view.EndpointId == endpointId && reported.Count == 4 &&
+                      reported[SecurityEventChannels.Security] is
+                          { State: SecurityEventSourceStates.AccessDenied, LastErrorCode: AccessDenied, CheckpointRecordId: null } &&
+                      reported[SecurityEventChannels.Defender] is { State: SecurityEventSourceStates.NotFound, LastErrorCode: NotFound } &&
+                      reported[SecurityEventChannels.PowerShell].State == SecurityEventSourceStates.Error &&
+                      reported[SecurityEventChannels.PowerShell].LastErrorCode == openFailure.HResult &&
+                      reported[SecurityEventChannels.System] is
+                          { State: SecurityEventSourceStates.Collecting, LastErrorCode: null, StoredObservations: 1 },
+                    "The status route did not show each channel's state.");
+                Check((await events.ListRecentAsync(endpointId, 10)).Select(item => item.Observation.RecordId).SequenceEqual([serviceId]),
+                    "The healthy channel's event was not the only one delivered.");
+
+                // Event degradation leaves posture monitoring and inventory delivery intact.
+                await WaitForAsync(() => link.InventoryAccepted >= 1, "The initial inventory was not delivered.");
+                var inventories = link.InventoryAccepted;
+                var reader = (MutablePostureReader)agent.Services.GetRequiredService<ISecurityPostureReader>();
+                var changed = PostureMonitorTests.Secure with { PublicFirewallEnabled = false };
+                reader.Current = changed;
+                await WaitForAsync(async () => link.InventoryAccepted > inventories &&
+                        (await core.Services.GetRequiredService<InventoryStore>().FindLatestAsync(endpointId))?.SecurityPosture == changed,
+                    "A posture change was not uploaded while event channels were degraded.");
+                Check(link.InventoryAccepted == inventories + 1 && !lifetime.ApplicationStopping.IsCancellationRequested &&
+                      pipeline.ExecuteTask is { IsCompleted: false }, "Event channel failures affected the Agent.");
+
+                // "Grant" Security: within the channel retry it collects from its tail, and the coverage start is
+                // not a restart because Security was never covered before.
+                var tail = log.Extent(SecurityEventChannels.Security).Newest!.Value;
+                log.SetUnavailable(SecurityEventChannels.Security, null);
+                await WaitForAsync(() => CoveredAsync(events, endpointId, [SecurityEventChannels.Security]),
+                    "Security did not start collecting after access was granted.");
+                var logonId = SecurityEventFixtures.Append(log, SecurityEventFixtures.For(4624));
+                await WaitForAsync(async () =>
+                        (await SourcesAsync(events, endpointId))[SecurityEventChannels.Security].StoredObservations == 1,
+                    "A Security event after the grant was not delivered.");
+                Check((await events.ListRecentAsync(endpointId, 10))
+                      .Where(item => item.Observation.Channel == SecurityEventChannels.Security)
+                      .Select(item => item.Observation.RecordId).SequenceEqual([logonId]),
+                    "Security events from before the grant were delivered.");
+                Check((await events.ListGapsAsync(endpointId, 500)).Where(gap =>
+                          gap.Channel == SecurityEventChannels.Security && gap.Reason == SecurityEventGapReasons.CoverageStarted)
+                      .ToArray() is [{ Cause: SecurityEventCoverageCauses.NoCheckpoint, CoverageRestart: false } grant] &&
+                      grant.FirstRecordId == tail + 1,
+                    "The first Security coverage was not reported at its tail without a restart flag.");
+            }
+            finally
+            {
+                await StopHostAsync(agent);
+            }
+        }
+
+        Check(!logs.Text.Contains(SecurityEventFixtures.Marker, StringComparison.Ordinal) &&
+              logs.Text.Contains($"0x{openFailure.HResult:X8}", StringComparison.Ordinal),
+            "A channel failure was not logged by type and HResult only.");
+
+        // I7: an unenrolled Agent, whose loopback heartbeats Core acknowledges, never reads, sends or writes events.
+        var idleDirectory = Path.Combine(directory, "unenrolled");
+        var idle = new SyntheticEventLog();
+        Seed(idle, 10);
+        using var idleLink = new CoreLinkHandler();
+        using var idleClient = new HttpClient(idleLink, disposeHandler: false);
+        await RunAgentAsync(SecurityEventTestHost.BuildEventAgent(idleDirectory, core.Url, idleClient, idle), async pipeline =>
+        {
+            var installationId = await WaitForIdentityFileAsync(Path.Combine(idleDirectory, "installation-id"),
+                "The unenrolled Agent did not start.");
+            var devices = core.Services.GetRequiredService<DeviceStore>();
+            await WaitForAsync(async () => await devices.FindByInstallationIdAsync(installationId) is not null,
+                "Core did not acknowledge the unenrolled heartbeat.");
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            Check(idle.DescribeCalls == 0 && idle.ReadNewestCalls == 0 && idle.OpenCalls == 0 && idleLink.EventAttempts == 0 &&
+                  !pipeline.Snapshot.Active && !File.Exists(Path.Combine(idleDirectory, "event-checkpoints")),
+                "An unenrolled Agent read events, sent batches or wrote positions.");
+        });
+    }
+
+    /// <summary>Starts the host, runs the scenario against its pipeline and always stops it.</summary>
+    private static async Task RunAgentAsync(IHost host, Func<SecurityEventPipeline, Task> scenario)
+    {
+        using (host)
+        {
+            await host.StartAsync();
+            try
+            {
+                await scenario(host.Services.GetRequiredService<SecurityEventPipeline>());
+            }
+            finally
+            {
+                await StopHostAsync(host);
+            }
+        }
+    }
+
+    private static async Task StopHostAsync(IHost host)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        await host.StopAsync(timeout.Token).WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    // Polls every 100 ms: often enough for latency, rarely enough not to contend with Core's writes.
+    private static async Task WaitForAsync(Func<Task<bool>> condition, string message, int seconds = 10)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        while (!await condition())
+        {
+            if (DateTime.UtcNow >= deadline) throw new Exception(message);
+            await Task.Delay(100);
+        }
+
+        assertions++;
+    }
+
+    private static Task WaitForAsync(Func<bool> condition, string message, int seconds = 10) =>
+        WaitForAsync(() => Task.FromResult(condition()), message, seconds);
+
+    private static async Task<Guid> WaitForIdentityFileAsync(string path, string message)
+    {
+        var value = Guid.Empty;
+        await WaitForAsync(() =>
+        {
+            try
+            {
+                return File.Exists(path) && Guid.TryParse(File.ReadAllText(path), out value);
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        }, message);
+        return value;
+    }
+
+    private static async Task<Dictionary<string, SecurityEventSourceView>> SourcesAsync(SecurityEventStore events, Guid endpointId) =>
+        (await events.ListSourcesAsync(endpointId)).ToDictionary(source => source.Channel, StringComparer.Ordinal);
+
+    // Core's latest status shows each channel collecting from an acknowledged position.
+    private static async Task<bool> CoveredAsync(SecurityEventStore events, Guid endpointId, IEnumerable<string> channels)
+    {
+        var sources = await SourcesAsync(events, endpointId);
+        return channels.All(channel => sources.GetValueOrDefault(channel) is
+            { State: SecurityEventSourceStates.Collecting, CheckpointRecordId: not null });
+    }
+
+    private static long? Position(SecurityEventPipeline pipeline, string channel) =>
+        pipeline.Snapshot.Sources.Single(source => source.Channel == channel).CheckpointRecordId;
+
+    private static Dictionary<string, long> ReadCheckpoint(string path)
+    {
+        using var document = JsonDocument.Parse(ReadShared(path));
+        return document.RootElement.GetProperty("channels").EnumerateArray().ToDictionary(
+            entry => entry.GetProperty("channel").GetString()!, entry => entry.GetProperty("recordId").GetInt64(),
+            StringComparer.Ordinal);
+    }
+
+    // A stopped Agent keeps only its identity, enrollment and positions: no event payload and no temporary file.
+    private static void VerifyStoppedAgentFiles(string agentDirectory)
+    {
+        var names = Directory.EnumerateFileSystemEntries(agentDirectory).Select(path => Path.GetFileName(path))
+            .Order(StringComparer.Ordinal).ToArray();
+        Check(names.SequenceEqual(["endpoint-id", "enrollment-state", "event-checkpoints", "installation-id"]),
+            $"The Agent data directory holds unexpected entries: {string.Join(", ", names)}.");
+        var checkpoint = File.ReadAllBytes(Path.Combine(agentDirectory, "event-checkpoints"));
+        Check(checkpoint.Length <= EventCheckpointStore.MaxBytes &&
+              Regex.IsMatch(Encoding.UTF8.GetString(checkpoint), "^[\\x20-\\x7e]*$"),
+            "The checkpoint file is oversized or not plain ASCII.");
+    }
+
+    // Shared read: Core and the running Agent may hold or replace these files at any time.
+    private static byte[] ReadShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return copy.ToArray();
+    }
+
+    private static bool ContainsMarker(byte[] bytes) =>
+        bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(SecurityEventFixtures.Marker)) >= 0;
 
     // N1: read-only native conformance; no event content is read.
     [SupportedOSPlatform("windows")]
