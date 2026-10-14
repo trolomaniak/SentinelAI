@@ -183,24 +183,20 @@ internal static class SecurityEventPipelineTests
 
         // Documentation sync: the published allowlist table must list every selection and exclusion.
         var documentation = Path.Combine(RepositoryRoot(), "docs", "SECURITY-EVENTS.md");
-        if (File.Exists(documentation))
+        Check(File.Exists(documentation), "docs/SECURITY-EVENTS.md is missing.");
+        var lines = File.ReadAllLines(documentation);
+        foreach (var selection in SecurityEventContract.Catalog)
         {
-            var lines = File.ReadAllLines(documentation);
-            foreach (var selection in SecurityEventContract.Catalog)
-            {
-                var prefix = $"| {selection.Channel} | {selection.Provider} | {selection.EventId} | {selection.Kind} |";
-                Check(lines.Any(line => line.StartsWith(prefix, StringComparison.Ordinal)),
-                    $"docs/SECURITY-EVENTS.md does not document {selection.EventId} on {selection.Channel}.");
-            }
+            var prefix = $"| {selection.Channel} | {selection.Provider} | {selection.EventId} | {selection.Kind} |";
+            Check(lines.Any(line => line.StartsWith(prefix, StringComparison.Ordinal)),
+                $"docs/SECURITY-EVENTS.md does not document {selection.EventId} on {selection.Channel}.");
+        }
 
-            var text = string.Join("\n", lines);
-            foreach (var excluded in SecurityEventFixtures.ExcludedFields)
-                Check(text.Contains(excluded, StringComparison.Ordinal), $"docs/SECURITY-EVENTS.md does not list {excluded}.");
-        }
-        else
-        {
-            Console.WriteLine("Security event documentation sync skipped: docs/SECURITY-EVENTS.md is not present yet.");
-        }
+        var text = string.Join("\n", lines);
+        foreach (var excluded in SecurityEventFixtures.ExcludedFields)
+            Check(text.Contains(excluded, StringComparison.Ordinal), $"docs/SECURITY-EVENTS.md does not list {excluded}.");
+        Console.WriteLine($"Security event documentation sync: {SecurityEventContract.Catalog.Count} selections and " +
+                          $"{SecurityEventFixtures.ExcludedFields.Count} excluded fields documented.");
     }
 
     // D3: the normalizer per kind with typed and string inputs, plus edge variants.
