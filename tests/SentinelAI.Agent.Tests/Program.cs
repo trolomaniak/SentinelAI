@@ -41,6 +41,26 @@ if (args is ["--native-posture-acceptance"])
     return;
 }
 
+if (args is ["--native-event-acceptance"])
+{
+    try
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new Exception("Native event acceptance requires Windows.");
+        }
+
+        await SecurityEventNativeAcceptance.RunAsync(testDirectory);
+    }
+    finally
+    {
+        SqliteConnection.ClearAllPools();
+        Directory.Delete(testDirectory, recursive: true);
+    }
+
+    return;
+}
+
 try
 {
     VerifyInventoryCollection();

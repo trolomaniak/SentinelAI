@@ -73,6 +73,23 @@ jobs:
             Write-Output "::notice title=Windows posture monitoring acceptance::$($latency -join ' ')"
           }
           exit $testExitCode
+      - name: Verify native Windows security event collection
+        shell: pwsh
+        run: |
+          # Elevated: reads channel SDDLs, creates/deletes a test-only classic log and never-started marker services.
+          # Never changes audit policy, channel access or any real log other than the test-only log.
+          dotnet run --project tests/SentinelAI.Agent.Tests/SentinelAI.Agent.Tests.csproj --configuration Release --no-build -- --native-event-acceptance *> "$env:RUNNER_TEMP\sentinelai-event-acceptance.log"
+          $testExitCode = $LASTEXITCODE
+          $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-event-acceptance.log" | Where-Object { $_ -notlike '{*' } | Select-Object -Last 25
+          $tail
+          if ($testExitCode -ne 0) {
+            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows security event acceptance::$message"
+          } else {
+            $lines = Get-Content "$env:RUNNER_TEMP\sentinelai-event-acceptance.log" | Where-Object { $_ -like 'Native event*' }
+            Write-Output "::notice title=Windows security event acceptance::$($lines -join ' ')"
+          }
+          exit $testExitCode
       - name: Publish standalone Agent EXE
         shell: bash
         run: ./scripts/publish-agent-windows.sh

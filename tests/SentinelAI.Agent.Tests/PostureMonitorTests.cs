@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
@@ -16,12 +17,13 @@ using Microsoft.Win32;
 using SentinelAI.Agent;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Inventory;
+using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 
 internal static class PostureMonitorTests
 {
-    private static readonly SecurityPostureInventory Secure = new(true, true, true,
+    internal static readonly SecurityPostureInventory Secure = new(true, true, true,
         new WindowsSecurityConfiguration(UacEnabled: true, AdminConsentPromptBehavior: 5, RdpEnabled: false,
             Smb1ServerEnabled: false, SmbInsecureGuestLogonsAllowed: false, AutomaticAdminLogonEnabled: false,
             LsaProtectionEnabled: true, AutomaticUpdatesDisabled: false));
@@ -837,7 +839,7 @@ internal static class PostureMonitorTests
         }
     }
 
-    private sealed class CoreFixture : IAsyncDisposable
+    internal sealed class CoreFixture : IAsyncDisposable
     {
         private readonly WebApplication _core;
         private readonly HttpClient _client;
@@ -915,6 +917,18 @@ internal static class PostureMonitorTests
             var page = await Services.GetRequiredService<AlertStore>()
                 .ListAsync(null, null, 0, 100, endpointId: endpointId);
             return page.Alerts.SingleOrDefault(alert => alert.RuleId == ruleId);
+        }
+
+        /// <summary>Event source status through the administrator route: states, counters and gap metadata only.</summary>
+        public async Task<SecurityEventSourcesView> EventSourcesAsync(Guid endpointId)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/admin/devices/{endpointId:D}/event-sources");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
+            using var response = await _client.SendAsync(request);
+            Ensure(response.StatusCode == HttpStatusCode.OK && response.Headers.CacheControl?.NoStore == true,
+                "Core did not return the event source status.");
+            return await response.Content.ReadFromJsonAsync<SecurityEventSourcesView>()
+                ?? throw new Exception("Core returned no event source status.");
         }
 
         public async ValueTask DisposeAsync()
@@ -1010,11 +1024,22 @@ internal sealed class RedirectedRegistryPostureReader(string root) : ISecurityPo
 /// <summary>Real Core transport with switchable outage/rejection and request counts.</summary>
 internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandler { UseProxy = false })
 {
+    private const string SecurityEventsPath = "/api/agent/security-events";
+    private readonly ConcurrentDictionary<(string Channel, long RecordId), int> _acceptedSends = new();
     private int _heartbeats;
     private int _inventoryAttempts;
     private int _inventoryAccepted;
+    private int _eventAttempts;
+    private int _eventBatchesAccepted;
+    private int _eventsInAcceptedBatches;
+    private int _eventDuplicates;
+    private int _maxEventsInBatch;
+    private int _maxEventBodyBytes;
+    private int _incompatibleEvents;
+    private int _loseNextEventAcknowledgement;
     private volatile bool _outage;
     private volatile bool _rejectInventory;
+    private volatile bool _failEvents;
 
     public bool Outage { get => _outage; set => _outage = value; }
     public bool RejectInventory { get => _rejectInventory; set => _rejectInventory = value; }
@@ -1022,11 +1047,45 @@ internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandle
     public int InventoryAttempts => Volatile.Read(ref _inventoryAttempts);
     public int InventoryAccepted => Volatile.Read(ref _inventoryAccepted);
 
+    /// <summary>Security event batches are answered 503 without reaching Core.</summary>
+    public bool FailEvents { get => _failEvents; set => _failEvents = value; }
+
+    /// <summary>Security event batches are answered with this status without reaching Core.</summary>
+    public HttpStatusCode? IncompatibleEvents
+    {
+        get
+        {
+            var status = Volatile.Read(ref _incompatibleEvents);
+            return status == 0 ? null : (HttpStatusCode)status;
+        }
+        set => Volatile.Write(ref _incompatibleEvents, (int?)value ?? 0);
+    }
+
+    /// <summary>The next batch carrying events that Core commits has its acknowledgement lost in transport.</summary>
+    public bool LoseNextEventAcknowledgement
+    {
+        get => Volatile.Read(ref _loseNextEventAcknowledgement) != 0;
+        set => Volatile.Write(ref _loseNextEventAcknowledgement, value ? 1 : 0);
+    }
+
+    public int EventAttempts => Volatile.Read(ref _eventAttempts);
+    // Batches and their events that Core answered with success, whether or not the Agent saw the answer.
+    public int EventBatchesAccepted => Volatile.Read(ref _eventBatchesAccepted);
+    public int EventsInAcceptedBatches => Volatile.Read(ref _eventsInAcceptedBatches);
+    // Sum of the duplicates counts in Core's success answers.
+    public int EventDuplicates => Volatile.Read(ref _eventDuplicates);
+    public int MaxEventsInBatch => Volatile.Read(ref _maxEventsInBatch);
+    public int MaxEventBodyBytes => Volatile.Read(ref _maxEventBodyBytes);
+
+    /// <summary>How many batches that Core answered with success carried this event.</summary>
+    public int AcceptedSends(string channel, long recordId) => _acceptedSends.GetValueOrDefault((channel, recordId));
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var path = request.RequestUri?.AbsolutePath;
         var inventory = path == "/api/agent/inventory";
+        var events = path == SecurityEventsPath;
         if (path == "/api/agent/heartbeat")
         {
             Interlocked.Increment(ref _heartbeats);
@@ -1035,6 +1094,11 @@ internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandle
         if (inventory)
         {
             Interlocked.Increment(ref _inventoryAttempts);
+        }
+
+        if (events)
+        {
+            Interlocked.Increment(ref _eventAttempts);
         }
 
         if (Outage)
@@ -1056,12 +1120,82 @@ internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandle
             request.Content = JsonContent.Create(report with { OsName = "Windows 11 Pro" });
         }
 
+        var eventCount = 0;
+        SecurityEventBatch? batch = null;
+        if (events)
+        {
+            // Measure the exact body, then send the same bytes with the original content headers.
+            var original = request.Content!;
+            var body = await original.ReadAsByteArrayAsync(cancellationToken);
+            var buffered = new ByteArrayContent(body);
+            foreach (var header in original.Headers)
+            {
+                if (!string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase))
+                {
+                    buffered.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+            }
+
+            request.Content = buffered;
+            original.Dispose();
+            batch = JsonSerializer.Deserialize<SecurityEventBatch>(body, SecurityEventContract.Json)
+                ?? throw new Exception("The Agent sent an empty security event batch.");
+            eventCount = batch.Events.Count;
+            Raise(ref _maxEventsInBatch, eventCount);
+            Raise(ref _maxEventBodyBytes, body.Length);
+            if (FailEvents)
+            {
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            }
+
+            if (IncompatibleEvents is { } status)
+            {
+                return new HttpResponseMessage(status);
+            }
+        }
+
         var response = await base.SendAsync(request, cancellationToken);
         if (inventory && response.IsSuccessStatusCode)
         {
             Interlocked.Increment(ref _inventoryAccepted);
         }
 
+        if (events && response.IsSuccessStatusCode)
+        {
+            // Buffered, so the Agent still reads the same answer.
+            var result = JsonSerializer.Deserialize<SecurityEventBatchResult>(
+                await response.Content.ReadAsByteArrayAsync(cancellationToken), SecurityEventContract.Json);
+            Interlocked.Increment(ref _eventBatchesAccepted);
+            Interlocked.Add(ref _eventsInAcceptedBatches, eventCount);
+            Interlocked.Add(ref _eventDuplicates, result?.Duplicates ?? 0);
+            foreach (var item in batch!.Events)
+            {
+                _acceptedSends.AddOrUpdate((item.Channel, item.RecordId), 1, (_, sends) => sends + 1);
+            }
+        }
+
+        if (events && eventCount > 0 && response.IsSuccessStatusCode &&
+            Interlocked.Exchange(ref _loseNextEventAcknowledgement, 0) != 0)
+        {
+            response.Dispose();
+            throw new HttpRequestException("Simulated lost acknowledgement.");
+        }
+
         return response;
+    }
+
+    private static void Raise(ref int maximum, int value)
+    {
+        var current = Volatile.Read(ref maximum);
+        while (value > current)
+        {
+            var seen = Interlocked.CompareExchange(ref maximum, value, current);
+            if (seen == current)
+            {
+                return;
+            }
+
+            current = seen;
+        }
     }
 }
