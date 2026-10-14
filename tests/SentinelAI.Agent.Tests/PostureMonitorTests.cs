@@ -1059,7 +1059,7 @@ internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandle
         set => Volatile.Write(ref _incompatibleEvents, (int?)value ?? 0);
     }
 
-    /// <summary>The next batch carrying events is committed by Core, but its acknowledgement is lost in transport.</summary>
+    /// <summary>The next batch carrying events that Core commits has its acknowledgement lost in transport.</summary>
     public bool LoseNextEventAcknowledgement
     {
         get => Volatile.Read(ref _loseNextEventAcknowledgement) != 0;
@@ -1163,7 +1163,8 @@ internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandle
             Interlocked.Add(ref _eventDuplicates, result?.Duplicates ?? 0);
         }
 
-        if (events && eventCount > 0 && Interlocked.Exchange(ref _loseNextEventAcknowledgement, 0) != 0)
+        if (events && eventCount > 0 && response.IsSuccessStatusCode &&
+            Interlocked.Exchange(ref _loseNextEventAcknowledgement, 0) != 0)
         {
             response.Dispose();
             throw new HttpRequestException("Simulated lost acknowledgement.");
