@@ -575,15 +575,22 @@ internal static class SecurityEventNativeAcceptance
         catch (Exception)
         {
             // A log the service cannot clear keeps its registration; remove it directly.
-            using var root = Registry.LocalMachine.OpenSubKey(EventLogKey, writable: true);
-            root?.DeleteSubKeyTree(log, throwOnMissingSubKey: false);
+            try
+            {
+                using var root = Registry.LocalMachine.OpenSubKey(EventLogKey, writable: true);
+                root?.DeleteSubKeyTree(log, throwOnMissingSubKey: false);
+            }
+            catch (Exception)
+            {
+                // Reported by the existence check below.
+            }
         }
 
         try
         {
             if (source is not null && EventLog.SourceExists(source)) EventLog.DeleteEventSource(source);
         }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        catch (Exception)
         {
             failures.Add("test-only event source");
         }
