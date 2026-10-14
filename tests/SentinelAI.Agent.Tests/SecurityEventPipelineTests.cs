@@ -1242,7 +1242,8 @@ internal static class SecurityEventPipelineTests
         var all = new List<Generated>();
         var clearedAt = SecurityEventChannels.All.ToDictionary(channel => channel, _ => new List<DateTimeOffset>());
         var pendingClear = new Dictionary<string, (DateTimeOffset At, long FirstId, bool Restart)>();
-        byte[]? savedCheckpoint = null;
+        byte[]? previousCheckpoint = null;
+        int clears = 0, trims = 0, restarts = 0, rollbacks = 0, coveredByGap = 0;
 
         void Append(string channel, SecurityEventFixtures.Fixture? fixture, Dictionary<string, object?>? overrides, bool selected)
         {
@@ -1268,14 +1269,18 @@ internal static class SecurityEventPipelineTests
         for (var operation = 0; operation < operations; operation++)
         {
             rig.Time.Advance(TimeSpan.FromMilliseconds(1));
-            foreach (var (channel, clear) in pendingClear.ToArray())
+            var persisted = File.Exists(rig.CheckpointPath) ? await File.ReadAllBytesAsync(rig.CheckpointPath) : null;
+            if (persisted is not null)
             {
-                // A clear is observed once Core holds a reset or coverage start detected after it, or the
-                // position moved into the new generation.
-                if (sink.ReceivedGaps.Any(gap => gap.Channel == channel && gap.DetectedUtc > clear.At &&
-                                                 gap.Reason is SecurityEventGapReasons.LogReset or SecurityEventGapReasons.CoverageStarted) ||
-                    !clear.Restart && rig.Source(channel).CheckpointRecordId >= clear.FirstId)
-                    pendingClear.Remove(channel);
+                foreach (var (channel, clear) in pendingClear.ToArray())
+                {
+                    // A clear is observed once a position anchored in the new generation is persisted, so a
+                    // crash rollback (one save behind) can no longer return to the old generation.
+                    var saved = await rig.Store.LoadAsync(rig.Enrollment.EndpointId);
+                    if (saved.Checkpoints.TryGetValue(channel, out var checkpoint) && checkpoint.AnchorUtcTicks is { } anchor &&
+                        anchor >= SyntheticEventLog.TimeOf(rig.Log.Generation(channel), 0).UtcTicks)
+                        pendingClear.Remove(channel);
+                }
             }
 
             var channelPick = SecurityEventChannels.All[random.Next(4)];
@@ -1304,7 +1309,10 @@ internal static class SecurityEventPipelineTests
                 // Overwrite never empties a log; a cleared channel is not overwritten until the clear is observed.
                 var (oldest, newest) = rig.Log.Extent(channelPick);
                 if (!pendingClear.ContainsKey(channelPick) && oldest is { } low && newest is { } high && high > low)
+                {
                     rig.Log.Trim(channelPick, low + random.NextInt64(high - low));
+                    trims++;
+                }
             }
             else if (roll < 43)
             {
@@ -1319,6 +1327,7 @@ internal static class SecurityEventPipelineTests
                     rig.Log.Clear(channelPick, restart);
                     clearedAt[channelPick].Add(rig.Time.GetUtcNow());
                     pendingClear[channelPick] = (rig.Time.GetUtcNow(), restart ? 1 : firstId, restart);
+                    clears++;
                 }
             }
             else if (roll < 46)
@@ -1333,26 +1342,32 @@ internal static class SecurityEventPipelineTests
             {
                 sink.LoseNextAcknowledgements = 1;
             }
-            else if (roll < 51)
+            else if (roll < 52)
             {
                 await rig.Pipeline.FlushAsync(CancellationToken.None);
                 rig.Restart();
+                restarts++;
             }
-            else if (roll < 53)
+            else if (roll < 54)
             {
-                if (random.Next(2) == 0 && savedCheckpoint is not null) await File.WriteAllBytesAsync(rig.CheckpointPath, savedCheckpoint);
+                // A crash between an acknowledgement and its write: positions one save behind, or none at all.
+                if (random.Next(2) == 0 && previousCheckpoint is not null)
+                    await File.WriteAllBytesAsync(rig.CheckpointPath, previousCheckpoint);
                 else File.Delete(rig.CheckpointPath);
+                previousCheckpoint = null;
                 rig.Restart();
-            }
-            else if (roll < 55)
-            {
-                if (File.Exists(rig.CheckpointPath)) savedCheckpoint = await File.ReadAllBytesAsync(rig.CheckpointPath);
+                rollbacks++;
+                continue;
             }
             else
             {
                 rig.Time.Advance(TimeSpan.FromMilliseconds(random.Next(0, 20_000)));
                 await rig.StepAsync();
             }
+
+            var written = File.Exists(rig.CheckpointPath) ? await File.ReadAllBytesAsync(rig.CheckpointPath) : null;
+            if (written is not null && (persisted is null || !written.AsSpan().SequenceEqual(persisted)))
+                previousCheckpoint = persisted;
         }
 
         // Quiesce: Core healthy, everything read and acknowledged.
@@ -1397,13 +1412,16 @@ internal static class SecurityEventPipelineTests
                     record.Generation < GenerationAt(clearedAt[record.Channel], gap.DetectedUtc) || record.Id < gap.FirstRecordId,
                 _ => false
             });
-            if (!covered) uncovered++;
+            if (covered) coveredByGap++;
+            else uncovered++;
         }
 
         Check(uncovered == 0, $"Seed {seed}: {uncovered} selected records were neither delivered nor covered by a gap.");
-        Check(sink.Rejected == 0 && sink.Rows.Count > 100, $"Seed {seed}: Core rejected items or too few rows were delivered.");
-        Console.WriteLine($"Security event invariant seed {seed}: {sink.Rows.Count} rows, {sink.Gaps.Count} gap rows, " +
-                          $"{sink.Duplicates} duplicates absorbed, {sink.Attempts} attempts.");
+        Check(sink.Rejected == 0 && sink.Rows.Count > 100 && coveredByGap > 0 && clears > 0 && trims > 0 && rollbacks > 0 &&
+              restarts > 0 && sink.Duplicates > 0, $"Seed {seed}: the run did not exercise losses, resets, restarts and replays.");
+        Console.WriteLine($"Security event invariant seed {seed}: {sink.Rows.Count} rows, {coveredByGap} covered by gaps, " +
+                          $"{sink.Gaps.Count} gap rows, {sink.Duplicates} duplicates absorbed, {sink.Attempts} attempts, " +
+                          $"{clears} clears, {trims} overwrites, {restarts} restarts, {rollbacks} crash rollbacks.");
 
         static int GenerationAt(List<DateTimeOffset> clears, DateTimeOffset at) => clears.Count(clear => clear < at);
     }
@@ -1609,9 +1627,15 @@ internal static class SecurityEventPipelineTests
 
     private static string RepositoryRoot()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SentinelAI.sln"))) directory = directory.Parent;
-        return directory?.FullName ?? throw new Exception("The repository root was not found.");
+        foreach (var start in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
+        {
+            var directory = new DirectoryInfo(start);
+            while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "SentinelAI.sln")))
+                directory = directory.Parent;
+            if (directory is not null) return directory.FullName;
+        }
+
+        throw new Exception("The repository root was not found.");
     }
 
     private static void Check(bool condition, string message)
