@@ -7,6 +7,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SentinelAI.Agent;
@@ -199,10 +200,7 @@ internal static class PilotHostConfigurationTests
                 var logs = new CapturingLoggerProvider();
                 Guid installationId;
                 EnrollmentState state;
-                var builder = AgentHost.CreateBuilder(["--config", agentConfig]);
-                builder.Logging.ClearProviders();
-                builder.Logging.AddProvider(logs);
-                using (var agent = builder.Build())
+                using (var agent = BuildPilotAgent(agentConfig, logs))
                 {
                     var verificationStartedUtc = DateTimeOffset.UtcNow;
                     await agent.StartAsync();
@@ -241,7 +239,7 @@ internal static class PilotHostConfigurationTests
                 File.Delete(receiptPath);
                 // Recover the crash window after DPAPI state saved but before handoff removal.
                 WritePrivateToken(tokenPath, token.Token);
-                using (var restarted = AgentHost.Build(["--config", agentConfig]))
+                using (var restarted = BuildPilotAgent(agentConfig))
                 {
                     await restarted.StartAsync();
                     try
@@ -254,7 +252,7 @@ internal static class PilotHostConfigurationTests
                     finally { await restarted.StopAsync(); }
                 }
                 lastSeen = (await core.Services.GetRequiredService<DeviceStore>().FindByInstallationIdAsync(installationId))!.LastSeenUtc;
-                using (var withoutHandoff = AgentHost.Build(["--config", agentConfig]))
+                using (var withoutHandoff = BuildPilotAgent(agentConfig))
                 {
                     await withoutHandoff.StartAsync();
                     try
@@ -378,6 +376,21 @@ internal static class PilotHostConfigurationTests
         }
         throw new Exception(message);
     }
+    // The pilot composition without real event channels: tests use synthetic events only.
+    private static IHost BuildPilotAgent(string config, ILoggerProvider? logs = null)
+    {
+        var builder = AgentHost.CreateBuilder(["--config", config]);
+        if (logs is not null)
+        {
+            builder.Logging.ClearProviders();
+            builder.Logging.AddProvider(logs);
+        }
+
+        builder.Services.RemoveAll<IEventLogAccess>();
+        builder.Services.AddSingleton<IEventLogAccess>(new NoEventLogAccess());
+        return builder.Build();
+    }
+
     private static async Task RejectAsync(Func<Task> action, string message)
     {
         try { await action(); }

@@ -30,7 +30,7 @@ Distribution is at the **development/pilot stage**: Setup, a self-contained Desk
 ## Architecture
 
 - **Core** (`core/`) owns the local ASP.NET Core API, administrator authentication, SQLite state, rule evaluation, risk scoring, incidents and reporting. It supports console development hosting and the `SentinelAICore` Windows Service.
-- **Agent** (`agent/`) collects bounded Windows inventory/configuration and sends authenticated heartbeats and inventory. It watches the monitored security settings and re-sends inventory within seconds of a change; the six-hour inventory remains reconciliation. The pilot installs `SentinelAIAgent` under LocalService and protects its enrollment credential with Windows DPAPI.
+- **Agent** (`agent/`) collects bounded Windows inventory/configuration and sends authenticated heartbeats and inventory. It watches the monitored security settings and re-sends inventory within seconds of a change; the six-hour inventory remains reconciliation. It also continuously collects a fixed allowlist of minimized Windows security events and reports overwritten, cleared or dropped records as explicit gaps; Core stores both for later detection rules. The pilot installs `SentinelAIAgent` under LocalService and protects its enrollment credential with Windows DPAPI.
 - **Desktop** (`desktop/`) is the native operator workspace. Closing it clears its in-memory authentication session and exits the GUI; Core and Agent continue. Reopening requires a fresh sign-in. Desktop does not start, stop or configure either service.
 - **Optional services** (`cloud/`) contain a separate development License API and AI Gateway. Core keeps their configured destinations and credentials; provider keys stay in the gateway. AI receives minimized evidence and does not determine detections or risk scores.
 
@@ -81,6 +81,7 @@ Current limits:
 
 - Detection covers the documented configuration rules. Malware scanning, live antivirus health, patch compliance and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
 - Monitored security settings are delivered within seconds of a reachable change, but other inventory can be stale, and posture is current state rather than an event history. Core does not retain complete inventory/heartbeat history or historical risk scores; reports distinguish current risk from retained incident activity.
+- Selected Windows security events are collected and stored but not yet evaluated by rules or shown in Desktop, reports or AI (TASK-028). The installed LocalService Agent cannot read the Security channel (logons, scheduled tasks, Security log clears) until a read grant is approved; it reports that channel as access denied.
 - Setup's fresh Agent enrollment/DPAPI/heartbeat/inventory/restart and complete maintenance lifecycle acceptance passed. The original TASK-015 console pilot's full uninstall/reinstall scenario remains unexecuted.
 - Interactive UAC approval and physical multi-monitor DPI checks remain manual. Tray delivery and auto-start also depend on Windows shell/startup policy.
 - Pilot packages use development manifest signatures. Authenticode signing, production trust provisioning, automatic upgrades and state/account migrations remain outstanding. Unverified ownership is refused; failed transaction recovery requires explicit action.
@@ -92,6 +93,6 @@ Current limits:
 - [Development status and verification](.agent/STATUS.md) · [Architectural decisions](.agent/DECISIONS.md)
 - [Single-EXE Windows setup](docs/SETUP.md) · [Manual pilot installation](docs/PILOT.md) · [Core Windows Service](docs/CORE-SERVICE.md) · [Desktop setup/sign-in](docs/DESKTOP-AUTH.md)
 - [Desktop operation, tray and auto-start](docs/DESKTOP-OPERATION.md) · [Devices](docs/DESKTOP-DEVICES.md) · [Alerts](docs/DESKTOP-ALERTS.md)
-- [Native Risk/Reports](docs/DESKTOP-RISK-REPORTS.md) · [Scoring policy](scoring/README.md) · [Rule catalog](rules/README.md) · [Posture monitoring](docs/POSTURE-MONITOR.md) · [Report semantics](docs/REPORTING.md)
+- [Native Risk/Reports](docs/DESKTOP-RISK-REPORTS.md) · [Scoring policy](scoring/README.md) · [Rule catalog](rules/README.md) · [Posture monitoring](docs/POSTURE-MONITOR.md) · [Security event collection](docs/SECURITY-EVENTS.md) · [Report semantics](docs/REPORTING.md)
 - [Native AI/licensing](docs/DESKTOP-AI-LICENSING.md) · [AI Gateway/configuration](docs/AI.md) · [Licensing](docs/LICENSING.md) · [Development issuer](cloud/license-api/README.md)
 - [Signed update verification and rollback](docs/UPDATES.md) · [Desktop structure and Windows validation](desktop/README.md)

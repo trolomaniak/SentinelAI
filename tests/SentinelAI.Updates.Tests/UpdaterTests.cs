@@ -77,7 +77,9 @@ internal static class UpdaterTests
                      [(TransactionalUpdater.ReceiptFileName, "forged receipt", 0)],
                      [("data/sentinelai.db", "synthetic persisted data", 0)],
                      [("data/enrollment-state", "synthetic persisted state", 0)],
-                     [("data/installation-id", "synthetic identity", 0)]
+                     [("data/installation-id", "synthetic identity", 0)],
+                     [("data/event-checkpoints", "synthetic event checkpoints", 0)],
+                     [("data/.event-checkpoints.x.tmp", "synthetic temporary event checkpoints", 0)]
                  })
         {
             using var fixture = new Fixture();

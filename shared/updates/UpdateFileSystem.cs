@@ -106,8 +106,10 @@ internal static class UpdateFileSystem
             component.Equals("endpoint-id", StringComparison.OrdinalIgnoreCase) ||
             component.Equals("pilot-enrollment-token", StringComparison.OrdinalIgnoreCase) ||
             component.Equals("pilot-config.json", StringComparison.OrdinalIgnoreCase) ||
+            component.Equals("event-checkpoints", StringComparison.OrdinalIgnoreCase) ||
             component.StartsWith(".enrollment-state.", StringComparison.OrdinalIgnoreCase) ||
-            component.StartsWith(".installation-id.", StringComparison.OrdinalIgnoreCase))
+            component.StartsWith(".installation-id.", StringComparison.OrdinalIgnoreCase) ||
+            component.StartsWith(".event-checkpoints.", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Persistent SentinelAI state must be outside the update code directory.");
     }
 }

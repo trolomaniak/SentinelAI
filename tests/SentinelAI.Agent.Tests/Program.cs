@@ -41,6 +41,26 @@ if (args is ["--native-posture-acceptance"])
     return;
 }
 
+if (args is ["--native-event-acceptance"])
+{
+    try
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new Exception("Native event acceptance requires Windows.");
+        }
+
+        await SecurityEventNativeAcceptance.RunAsync(testDirectory);
+    }
+    finally
+    {
+        SqliteConnection.ClearAllPools();
+        Directory.Delete(testDirectory, recursive: true);
+    }
+
+    return;
+}
+
 try
 {
     VerifyInventoryCollection();
@@ -52,7 +72,8 @@ try
     await VerifyAgentToCoreAsync(Path.Combine(testDirectory, "end-to-end"));
     await VerifyAgentEnrollmentAsync(Path.Combine(testDirectory, "enrollment"));
     await PostureMonitorTests.RunAsync(Path.Combine(testDirectory, "posture"));
-    Console.WriteLine("Agent heartbeat and posture monitoring tests passed.");
+    await SecurityEventPipelineTests.RunAsync(Path.Combine(testDirectory, "security-events"));
+    Console.WriteLine("Agent heartbeat, posture monitoring and security event tests passed.");
 }
 finally
 {
@@ -426,6 +447,9 @@ static IHost BuildAgent(string dataDirectory, string coreUrl,
         builder.Services.AddSingleton(new HttpClient(handler));
     }
 
+    // Production composition without real event channels: tests use synthetic events only.
+    builder.Services.RemoveAll<IEventLogAccess>();
+    builder.Services.AddSingleton<IEventLogAccess>(new NoEventLogAccess());
     return builder.Build();
 }
 

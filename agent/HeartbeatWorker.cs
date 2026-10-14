@@ -15,6 +15,7 @@ public sealed class HeartbeatWorker(
     AgentEnrollmentClient enrollmentClient,
     InventoryCollector inventoryCollector,
     PostureMonitor postureMonitor,
+    AgentLink link,
     HttpClient httpClient,
     ILogger<HeartbeatWorker> logger) : BackgroundService
 {
@@ -94,6 +95,8 @@ public sealed class HeartbeatWorker(
                 logger.LogWarning(exception, "Heartbeat response was invalid JSON");
                 acknowledged = false;
             }
+
+            link.Publish(acknowledged ? enrollment : null);
 
             var reconciliationDue = DateTimeOffset.UtcNow >= nextInventoryUtc;
             var postureChangeDue = postureMonitor.IsDeliveryDue(DateTimeOffset.UtcNow);

@@ -429,7 +429,7 @@ internal static class DeploymentUpdaterTests
             if (OperatingSystem.IsWindows()) Directory.CreateDirectory(Root);
             else Directory.CreateDirectory(Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             WriteCode(Target, "previous");
-            foreach (var path in new[] { "Core/sentinelai.db", "installation-id", "Agent/endpoint-id", "Agent/enrollment-state", "protected-config.json", "license-state.json" })
+            foreach (var path in new[] { "Core/sentinelai.db", "installation-id", "Agent/endpoint-id", "Agent/enrollment-state", "Agent/event-checkpoints", "protected-config.json", "license-state.json" })
             {
                 var file = Path.Combine(Data, path.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(file)!);

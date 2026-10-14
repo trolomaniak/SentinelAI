@@ -372,7 +372,16 @@ function Assert-ProtectedTree([string]$Root, [string[]]$AllowedWriters) {
         [Security.AccessControl.FileSystemRights]::TakeOwnership)
     foreach ($item in $items) {
         Assert-SetupAcceptance (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) 'An installed file or directory is a link.'
-        $acl = Get-Acl -LiteralPath $item.FullName
+        try {
+            $acl = Get-Acl -LiteralPath $item.FullName
+        } catch {
+            # The running Agent replaces its event checkpoint through a temporary file and a rename, so
+            # that file can vanish between enumeration and inspection. Only a path that no longer exists
+            # is skipped; every ownership, ACL or link violation on an existing path still fails.
+            if ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound -or
+                (Test-Path -LiteralPath $item.FullName)) { throw }
+            continue
+        }
         Assert-SetupAcceptance ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cin $AllowedWriters) 'An untrusted identity owns an installed path.'
         foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
             if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
@@ -442,6 +451,11 @@ function Wait-ExactEndpoint([Guid]$EndpointId, [DateTimeOffset]$SinceUtc) {
             [DateTimeOffset]::TryParse([string]$detail.inventoryCollectedUtc, [ref]$inventory) -and
             $heartbeat -ge $SinceUtc -and $inventory -ge $SinceUtc
     } 'The exact enrolled Agent did not deliver fresh authenticated heartbeat and inventory.' $script:TimeoutSeconds
+}
+function Get-AgentEventSources([Guid]$EndpointId) {
+    # Status only: channel states, counters and record numbers, never event content.
+    $view = Invoke-SetupCoreRequest ('/api/admin/devices/' + $EndpointId.ToString('D') + '/event-sources') 'GET' $null $script:accessToken | ConvertFrom-Json
+    return @($view.sources)
 }
 
 try {
@@ -592,6 +606,29 @@ try {
     Wait-ExactEndpoint $endpointId $restartSince
     Assert-SetupAcceptance ((Read-SetupStateDigest $statePath) -ceq $stateDigest -and
         (Read-SetupStateDigest (Join-Path $agentData 'installation-id')) -ceq $identityDigest) 'The Agent restart changed persistent enrollment or installation identity.'
+    # Under LocalService the Agent collects System end to end and is denied Security (the unchanged boundary);
+    # the real PowerShell and Defender readability is printed rather than assumed.
+    Wait-SetupAcceptance {
+        $sources = @(Get-AgentEventSources $endpointId)
+        $system = @($sources | Where-Object { [string]$_.channel -ceq 'System' })
+        $security = @($sources | Where-Object { [string]$_.channel -ceq 'Security' })
+        $system.Count -eq 1 -and [string]$system[0].state -ceq 'collecting' -and $null -ne $system[0].checkpointRecordId -and
+            $security.Count -eq 1 -and [string]$security[0].state -ceq 'accessDenied'
+    } 'The installed LocalService Agent did not report System collecting and Security access denied.' $script:TimeoutSeconds
+    $systemStoredBefore = [long]@(Get-AgentEventSources $endpointId | Where-Object { [string]$_.channel -ceq 'System' })[0].storedObservations
+    $eventProbe = 'SentinelAIEventProbe' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    try {
+        # Never started; its installation is logged as System 7045.
+        & sc.exe create $eventProbe binPath= 'C:\Windows\System32\cmd.exe /c exit 0' start= demand | Out-Null
+        Assert-SetupAcceptance ($LASTEXITCODE -eq 0) 'Could not create the event marker service.'
+    } finally { & sc.exe delete $eventProbe | Out-Null }
+    Assert-SetupAcceptance ($LASTEXITCODE -eq 0) 'Could not delete the event marker service.'
+    Wait-SetupAcceptance {
+        [long]@(Get-AgentEventSources $endpointId | Where-Object { [string]$_.channel -ceq 'System' })[0].storedObservations -ge $systemStoredBefore + 1
+    } 'The installed LocalService Agent did not deliver the marker service installation.' $script:TimeoutSeconds
+    $eventCheckpoint = Get-Item -LiteralPath (Join-Path $agentData 'event-checkpoints')
+    Assert-SetupAcceptance ($eventCheckpoint.Length -gt 0 -and $eventCheckpoint.Length -le 4096 -and -not $eventCheckpoint.LinkType) 'The Agent event checkpoint is invalid.'
+    Write-Output ('Installed Agent event channels: ' + ((@(Get-AgentEventSources $endpointId) | ForEach-Object { [string]$_.channel + '=' + [string]$_.state }) -join ', '))
 
     Use-SetupWindow $setup
     Show-SetupControl 'SetupOpenDesktopButton'
