@@ -250,7 +250,7 @@ internal static class SecurityEventNativeAcceptance
 
             using var writer = new EventLog(log) { Source = source };
             foreach (var id in new[] { OtherEventId, OtherEventId, OtherEventId, TestEventId, TestEventId, OtherEventId, OtherEventId, OtherEventId })
-                writer.WriteEntry(message, EventLogEntryType.Information, id);
+                await WriteAsync(writer, message, id);
             // Every probe was written before the plan, so the plan's records are the newest eight: r+1..r+8.
             var written = await SettleAsync(access, log);
             var r = written.NewestRecordId!.Value - 8;
@@ -276,7 +276,7 @@ internal static class SecurityEventNativeAcceptance
             Console.WriteLine("Native event adapter: the bookmark seek positioned on a non-catalog anchor without the fallback.");
 
             // e) A long catalog run is read contiguously after its anchor.
-            for (var index = 0; index < 300; index++) writer.WriteEntry(message, EventLogEntryType.Information, TestEventId);
+            for (var index = 0; index < 300; index++) await WriteAsync(writer, message, TestEventId);
             await WaitForAsync(() => TryDescribe(access, log)?.NewestRecordId == r + 308,
                 "The test-only log did not hold the 300 catalog records.", Latency);
             var headersOnly = MeasureRead(access, log, r + 8, r + 308, source, null);
@@ -296,7 +296,7 @@ internal static class SecurityEventNativeAcceptance
             var writes = 0;
             while (writes < 50_000 && !(TryDescribe(access, log)?.OldestRecordId > p + 1))
             {
-                for (var index = 0; index < 50; index++) writer.WriteEntry(filler, EventLogEntryType.Information, TestEventId);
+                for (var index = 0; index < 50; index++) await WriteAsync(writer, filler, TestEventId);
                 writes += 50;
             }
 
@@ -318,7 +318,7 @@ internal static class SecurityEventNativeAcceptance
             var systemNewest = system.Describe(SecurityEventChannels.System).NewestRecordId ?? 0;
             var clearWatch = Stopwatch.StartNew();
             writer.Clear();
-            writer.WriteEntry(message, EventLogEntryType.Information, TestEventId);
+            await WriteAsync(writer, message, TestEventId);
             await WaitForAsync(() => TryDescribe(access, log)?.NewestRecordId is { } id && id != anchorId,
                 "The write after the clear did not reach the test log.", Latency);
             // Windows either restarts the numbering (a reset the pipeline detects) or continues it past the
@@ -387,6 +387,26 @@ internal static class SecurityEventNativeAcceptance
             (ace.SecurityIdentifier.IsWellKnown(WellKnownSidType.ServiceSid) ||
              ace.SecurityIdentifier.IsWellKnown(WellKnownSidType.LocalServiceSid)) &&
             (ace.AccessMask & (ChannelRead | GenericAll | GenericRead)) != 0) == true;
+    }
+
+    /// <summary>
+    /// Writes to the test-only log, retrying briefly when the event log service rejects a write while it
+    /// applies a configuration change (size or overflow policy) or reopens the log after a clear.
+    /// </summary>
+    private static async Task WriteAsync(EventLog writer, string message, int eventId)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                writer.WriteEntry(message, EventLogEntryType.Information, eventId);
+                return;
+            }
+            catch (Win32Exception) when (attempt < 50)
+            {
+                await Task.Delay(100);
+            }
+        }
     }
 
     private static string? DetectReset(IEventLogAccess access, string log, long anchorId, DateTimeOffset? anchorTime)
