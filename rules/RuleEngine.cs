@@ -33,6 +33,12 @@ public sealed record RuleEvidence(string Field, JsonElement Value)
 
     public static RuleEvidence Integer(string field, int value) =>
         new(field, JsonSerializer.SerializeToElement(value));
+
+    public static RuleEvidence Integer(string field, long value) =>
+        new(field, JsonSerializer.SerializeToElement(value));
+
+    public static RuleEvidence Text(string field, string value) =>
+        new(field, JsonSerializer.SerializeToElement(value));
 }
 
 public sealed record SecurityAlert(

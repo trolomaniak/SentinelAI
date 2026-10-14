@@ -102,6 +102,8 @@ VerifyMultipleAlerts();
 VerifyInventoryNormalization();
 VerifyCustomRules();
 Console.WriteLine($"Rules tests passed ({cases.Length} rules, normal/unknown/platform guards, typed alerts, determinism).");
+var eventChecks = EventRuleTests.Run();
+Console.WriteLine($"Event rule tests passed ({EventRuleEngine.DefaultRuleIds.Count} rules, {eventChecks} checks: positives, thresholds, windows, unknown values, clamping, determinism).");
 
 void VerifyPrerequisites()
 {
