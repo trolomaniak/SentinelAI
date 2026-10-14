@@ -78,9 +78,9 @@ Granting the installed Agent read access to Security changes a security boundary
 2. Add the service SID to the Event Log Readers group.
 3. Add LocalService (`S-1-5-19`) to Event Log Readers, which grants every LocalService process read access, or change the Agent's service account, which orphans its DPAPI-protected enrollment state.
 
-Approval also covers the data: Security-derived SIDs and remote IP addresses (4624, 4625 and 4698) and log clears (1102) would then be stored in Core, available to SentinelAI administrators who need not be Windows administrators on the endpoint.
+Approval also covers the data: Security-derived SIDs (4624, 4625 and 4698), remote IP addresses (4624 and 4625) and log clears (1102) would then be stored in Core, available to SentinelAI administrators who need not be Windows administrators on the endpoint.
 
-The pipeline picks up a grant without a code or configuration change. At its next one-minute retry the channel becomes `collecting` and coverage starts at the log's newest record (`coverageStarted`/`noCheckpoint`, `coverageRestart` false). Events written before the grant are not backfilled.
+The pipeline picks up a grant without a code or configuration change. At its next one-minute retry the channel becomes `collecting` and coverage starts at the log's newest record with a `coverageStarted` gap (normally cause `noCheckpoint`, with `coverageRestart` false). Events written before the grant are not backfilled.
 
 Other degraded states follow the same rule. A missing channel is `notFound`, any other failure (including a read timeout) is `error` with its HResult in `lastErrorCode`, and each is retried every minute. A channel disabled in Windows is reported as `disabled` and is still read. One channel's failure never affects the other channels, heartbeats, inventory or posture monitoring.
 
@@ -88,20 +88,20 @@ Other degraded states follow the same rule. A missing channel is `notFound`, any
 
 1. **Dormant until linked.** The pipeline does nothing (no reads, no checkpoint file, no traffic) until the Agent is enrolled and Core has acknowledged its latest heartbeat. On a platform without the Windows event log it logs that collection is unavailable and stays idle.
 2. **Poll.** Every `Agent:EventPollInterval` (5 seconds by default) it makes one metadata call per channel for the oldest and newest record numbers, starting from a different channel on each poll for fairness. A channel with no new records costs nothing more.
-3. **Server filter plus anchor membership.** A channel with new records is read by one `EventLogReader` query generated from the catalog. Windows applies the provider, event ID and level filters, and the query also selects two records by number: the channel's current position (the anchor) and the newest record seen by the metadata call. For System at position 1234 with newest record 5678:
+3. **Server filter plus anchor membership.** A channel with new records is read by one `EventLogReader` query generated from the catalog. Windows applies the provider, event ID and level filters, and the query also selects up to two records by number: the newest record seen by the metadata call and, when the channel's position is still in the log, the position itself (the anchor). For System at position 1234 with newest record 5678:
 
    ```text
    *[System[(Provider[@Name='Service Control Manager'] and (EventID=7040 or EventID=7045)) or (Provider[@Name='Microsoft-Windows-Eventlog'] and EventID=104) or EventRecordID=1234 or EventRecordID=5678]]
    ```
 
-   The reader is positioned with `Seek(bookmark, 0)` on the anchor, which is in the result set by construction. The bookmark is generated from the channel name and record number. If the seek fails, the query is reopened with an `EventRecordID>=<position>` filter and no bookmark; this fallback is correct but slower and is counted in `seekFallbacks`. Only catalog records plus at most two numbered records cross from the event log service.
+   The reader is positioned with `Seek(bookmark, 0)` on the anchor, which is in the result set by construction. The bookmark is generated from the channel name and record number. If the seek fails, the query is reopened with an `EventRecordID>=<position>` filter and no bookmark; this fallback is correct but slower and is counted in `seekFallbacks`. Without an anchor (position 0, or a position no longer in the log) the query is read from the oldest record without a seek. Only catalog records plus at most two numbered records cross from the event log service.
 4. **Anchor verification.** On every pass that reads from a position still inside the log, the first record at or above the position must be the position's record with the stored creation time (exact ticks). This detects a log that was cleared and has grown past the position again; see [gaps and coverage](#gaps-and-coverage).
 5. **Selection.** For each returned record, the Agent finds its catalog selection, evaluates any data condition (4624 `LogonType`, 4104 `MessageNumber`, 7040 `param4`), renders only the named fields and normalizes them.
 6. **One batch.** Observations and gaps go into at most one prepared batch: at most 256 observations, 192 KiB of serialized observations and 32 gaps. The status of all four channels is added when it is sent. A record that does not fit is not consumed; it is read again for the next batch, and the Agent polls again as soon as the full batch is acknowledged.
-7. **Delivery.** The batch is posted to `POST /api/agent/security-events` with the Agent credential, one request at a time and at least 2 seconds apart.
-8. **Acknowledgement-only positions.** A channel's position is the record it has scanned through, plus that record's creation time. It advances only when Core returns success, and the checkpoint is then saved immediately. A pass that found only non-catalog records advances at once without a request, because it skipped nothing collectable, and is saved lazily.
+7. **Delivery.** The batch is posted to `POST /api/agent/security-events` with the Agent credential, one request at a time and at least 2 seconds apart by default.
+8. **Acknowledgement-only positions.** A channel's position is the record it has scanned through, plus that record's creation time. It advances only when Core returns success, and the checkpoint is then saved immediately. A pass that found nothing to collect (only other events, or catalog events whose data condition does not match) advances at once without a request, because it skipped nothing collectable, and is saved lazily.
 
-Status travels with every batch. When nothing is prepared, a status-only request is sent: immediately for the first report, when a channel changes state or gains or loses an acknowledged position, at most every 5 minutes when counters or record numbers changed, and every 60 minutes otherwise as a liveness report.
+Status travels with every batch. When nothing is prepared, a status-only request is sent at the next delivery slot: for the first report, when a channel changes state or gains or loses an acknowledged position, at most every 5 minutes when counters or record numbers changed, and every 60 minutes otherwise as a liveness report.
 
 ## Checkpoints, restart and duplicates
 
@@ -111,7 +111,7 @@ Positions are kept in `<Agent:DataDirectory>/event-checkpoints` (installed: `%Pr
 {"format":"sentinelai-event-checkpoints-v1","endpointId":"00000000-0000-0000-0000-000000000001","channels":[{"channel":"System","recordId":123456,"anchorUtcTicks":639000000001234567}]}
 ```
 
-- **Writes.** The file is replaced atomically: a uniquely named `.event-checkpoints.<guid>.tmp` is created, flushed to disk and renamed over it. Links are refused, and up to 16 orphaned temporary files are removed at load. It is written right after an acknowledgement that moved a position, at most every 5 minutes for positions advanced past non-catalog records only, and at graceful stop when something changed. An idle Agent never rewrites it.
+- **Writes.** The file is replaced atomically: a uniquely named `.event-checkpoints.<guid>.tmp` is created, flushed to disk and renamed over it. Links are refused, and up to 16 orphaned temporary files are removed at load. It is written right after an acknowledgement that moved a position, at most every 5 minutes for positions advanced past records with nothing to collect, and at graceful stop when something changed. An idle Agent never rewrites it.
 - **Loading** is strict (size, UTF-8, depth, duplicate and unknown properties, catalog channels, non-negative record numbers) and never stops the host.
 - **Updates** refuse packages containing `event-checkpoints` or `.event-checkpoints.*` files, so a code update cannot replace positions.
 
@@ -119,9 +119,9 @@ Positions are kept in `<Agent:DataDirectory>/event-checkpoints` (installed: `%Pr
 | --- | --- |
 | First start, or a channel without an entry | `coverageStarted`/`noCheckpoint` at the log's newest record; history before it is never delivered. |
 | Graceful restart | Collection resumes. Events written while the Agent was stopped are delivered, as far as the channel still holds them. Nothing is resent unless a request was in flight at stop (at most one batch, which Core deduplicates). |
-| Crash | At most the batch acknowledged just before the crash is resent and counted by Core as duplicates. Gaps not yet acknowledged are detected again with the same first record. |
+| Crash | At most one batch (the one in flight, or the one acknowledged just before the crash) is resent and counted by Core as duplicates. Gaps not yet acknowledged are detected again with the same first record. |
 | Overwritten while stopped | An exact `overwritten` gap. |
-| Cleared while stopped | A `logReset` gap; the new generation is read from its first record. |
+| Cleared while stopped | A `logReset` gap; the new generation is read from its oldest record, with an `overwritten` gap for any of its first records that were already lost. |
 | Checkpoint file deleted | `coverageStarted`/`noCheckpoint`; Core sets `coverageRestart` because it had already covered the channel. |
 | Checkpoint file corrupt, a link or unreadable | `coverageStarted`/`checkpointInvalid` on every channel, a warning and `coverageRestart` where Core had coverage. |
 | Checkpoint of another endpoint ID | `coverageStarted`/`endpointChanged` on every channel, so one enrollment's positions never replay into another. |
@@ -145,7 +145,7 @@ Positions are kept in `<Agent:DataDirectory>/event-checkpoints` (installed: `%Pr
 | `overwritten` | `firstRecordId`–`lastRecordId` | Records after the position were overwritten by Windows before they were read. |
 | `logReset` | From `firstRecordId` (position + 1), open-ended | The log was cleared or reset: it shrank below the position, became empty, or the record at the position is missing or has a different creation time. Unread records of the old generation from `firstRecordId` on are lost. |
 | `coverageStarted` | From `firstRecordId` (newest record + 1), open-ended | Collection started at the log's newest record. Earlier records were not collected. `cause` is `noCheckpoint`, `checkpointInvalid` or `endpointChanged`. |
-| `dropped` | One record | A catalog record that could not be sent: it had no creation time or could not be normalized. A record over 4 KiB serialized would also be dropped; the largest valid observation measures 2,823 bytes. |
+| `dropped` | One record | A catalog record that could not be sent: it had no creation time or could not be normalized. A record over 4 KiB serialized would also be dropped; the largest valid observation measures 2,823 bytes. A record without a record number cannot carry a gap and is only counted in `droppedUnparsed`. |
 | `rejected` | One record | Recorded by Core for an observation item it rejected as invalid. A `rejected` gap sent by an Agent is ignored. |
 
 Gaps are computed from the acknowledged scanned-through position, not from the last selected event, so non-catalog records never cause false gaps. Each gap is logged as a warning with the channel, reason, cause and record range.
@@ -153,7 +153,7 @@ Gaps are computed from the acknowledged scanned-through position, not from the l
 - **Reset, same pass.** When a reset is detected and the log has records again, the new generation is read in the same pass, so its position never rests at 0 while records exist. If the new generation's oldest record is above 1, records 1 to oldest − 1 were overwritten before they could be read, and an `overwritten` gap for that range is sent together with the `logReset` gap.
 - **Failed anchor check.** If the anchor is missing, the query is reopened without the bookmark once. If the anchor is still missing or has a different time, the channel is described again before deciding: an empty log is a `logReset` with position 0; a log that should contain the position but does not (shrunk, or the position is inside the log with another record or none) is a `logReset` followed by the new generation; an oldest record above position + 1 is an `overwritten` gap; and an oldest record equal to position + 1 means that only the anchor itself was overwritten and nothing was lost.
 - **Overwrite marker.** When an `overwritten` gap is recorded before any newer record is scanned (for example when the poll's scan budget is used up), the position becomes oldest − 1 with no time. If a later metadata call shows that record number inside the log again, the log must have been reset; the seek then finds a record with a time, or none, and reports it.
-- **Untimed anchors.** A record without a creation time can become the position (a dropped record, or a newest record without a time at coverage start), so no time is stored. It is still verified by seeking on it: a record without a time at that number confirms the generation, a record with a time is a reset, and a missing record is resolved as for a failed anchor check.
+- **Untimed anchors.** A record without a creation time can become the position (for example a dropped record, or a newest record without a time at coverage start), so no time is stored. It is still verified by seeking on it: a record without a time at that number confirms the generation, a record with a time is a reset, and a missing record is resolved as for a failed anchor check.
 - **Gap budget.** A batch carries at most 32 gaps. Coverage, reset and overwrite gaps are always recorded. A `dropped` gap is added only while room remains after reserving two continuity gaps for every channel not yet read in the same poll; otherwise the record is left for the next batch.
 - **Crash consistency.** Gaps travel inside the batch whose positions they explain, and positions advance only on acknowledgement. After a crash or failed delivery the same gap is detected again with the same first record, and Core merges it.
 - **Coverage restart.** Core sets `coveredSinceUtc` for a channel from the first status that carries an acknowledged position and never clears it. A later `coverageStarted` gap on a channel with `coveredSinceUtc` is stored with `coverageRestart` true, so a deleted, corrupt or replaced checkpoint is visible. A first start or a newly readable channel has `coverageRestart` false.
@@ -164,9 +164,9 @@ Gaps are computed from the acknowledged scanned-through position, not from the l
 
 | Resource | Agent | Core |
 | --- | --- | --- |
-| CPU | **Idle:** one metadata call per channel every 5 seconds, with the channel size and enablement cached for 5 minutes; an unavailable channel is touched once a minute. **New records:** one query, one seek and reads in batches of 64; only catalog records plus at most two numbered records are returned, and fields are rendered only for catalog records. **Backlog:** at most 1,024 records per channel and 2,048 per poll, re-polled after 1 second. **Pending batch:** no event log calls. | At most 60 requests per minute per remote IP. Each request: one credential check before the body is read, at most 256 KiB buffered, and one SQLite transaction with at most 256 observation inserts, 32 gap upserts, 8 status upserts, a per-endpoint cap and an age sweep of at most 500 observations and 100 gaps. |
+| CPU | **Idle:** one metadata call per channel every 5 seconds, with the channel size and enablement cached for 5 minutes; an unavailable channel is touched once a minute. **New records:** one query, one seek and reads in batches of 64; only catalog records plus at most two numbered records are returned, and fields are rendered only for catalog records. **Backlog:** at most 1,024 records per channel and 2,048 per poll, re-polled after 1 second. **Pending batch:** no event log calls. | At most 60 requests per minute per remote IP. Each request: one credential check before the body is read, at most 256 KiB buffered, and one SQLite transaction with at most 256 observation inserts, 32 gap upserts plus one `rejected` gap row per invalid observation, 4 status upserts, a per-endpoint cap and an age sweep of at most 500 observations and 100 gaps. |
 | Memory | One prepared batch (at most 256 observations, 192 KiB serialized and 32 gaps), four channel states, one cached property selector per catalog field list and one current record (plus the reader's internal batch of 64). | At most 256 KiB of buffer per request. |
-| Disk | One file of at most 4 KiB: up to 30 writes per minute under sustained backlog (one per acknowledgement), at most 12 per hour for positions advanced past non-catalog records, none when idle. | At most 10,000 observations and 1,000 gap rows per endpoint, 30 days by receipt, and at most four status rows per endpoint. |
+| Disk | One file of at most 4 KiB: up to 30 writes per minute under sustained backlog (one per acknowledgement), at most 12 per hour for positions advanced past records with nothing to collect, none when idle. | At most 10,000 observations and 1,000 gap rows per endpoint, 30 days by receipt, and at most four status rows per endpoint. |
 | Network | At most 30 requests per minute, each under the 256 KiB request limit (the worst case measures 207,253 bytes). Idle status reports at most every 5 minutes when counters change, plus one per hour. Transient retries back off from 5 seconds to 1 minute; an incompatible Core is retried every 15 minutes. | — |
 | Logs | State transitions, gaps, delivery failures (throttled) and recovery; never field values. | Endpoint ID plus status code or counts. |
 
@@ -180,7 +180,7 @@ Ordinary host configuration may tune collection; a value outside these bounds fa
 | --- | --- | --- |
 | `Agent:EventPollInterval` | `00:00:05` | 100 ms – 5 minutes |
 
-Every other event timing is derived from this poll interval (P):
+The other event intervals are derived from this poll interval (P):
 
 | Timing | Formula | Default |
 | --- | --- | --- |
@@ -190,7 +190,7 @@ Every other event timing is derived from this poll interval (P):
 | Incompatible Core retry | min(15 minutes, 180P) | 15 minutes |
 | Status report after counter changes | min(5 minutes, 60P) | 5 minutes |
 | Status liveness report | min(60 minutes, 720P) | 60 minutes |
-| Saving positions advanced past non-catalog records | min(5 minutes, 60P) | 5 minutes |
+| Saving positions advanced past records with nothing to collect | min(5 minutes, 60P) | 5 minutes |
 | Channel size and enablement refresh | min(5 minutes, 60P) | 5 minutes |
 
 Transient delivery retries use the existing `Agent:RetryDelay` (5 seconds) doubling to `Agent:MaxRetryDelay` (1 minute). Fixed in code: the 10-second read timeout, the scan caps, the batch and request limits, the checkpoint limits and Core retention. The catalog, channels and fields are compiled, so configuration can never widen collection.
@@ -203,7 +203,7 @@ Transient delivery retries use the existing `Agent:RetryDelay` (5 seconds) doubl
 
 | Status | Meaning |
 | --- | --- |
-| `200` | Every item was stored, was already present, was ignored as unknown, or was rejected and recorded. The body is `{accepted, duplicates, ignored, rejected}`. |
+| `200` | The batch was committed: every item was stored, was already present, was ignored as unknown or was rejected as invalid. The body is `{accepted, duplicates, ignored, rejected}`. |
 | `400` | Malformed JSON, a strictness violation (duplicate property, null for a non-nullable member, missing required member, number sent as a string, depth over 8) or an invalid envelope (for example the format, an item count over its limit, two statuses for one channel or a time that is not UTC). |
 | `401` | Missing or invalid Agent credential, checked before any body byte is read, or a body endpoint ID that differs from the credential's. |
 | `403` | Remote request without HTTPS. |
@@ -217,7 +217,7 @@ Each batch is one immediate SQLite transaction: gaps first (so a coverage restar
 
 Retention is measured by Core's receipt time, so an endpoint's clock cannot defeat it:
 
-- At most 10,000 observations per endpoint (the newest are kept), applied whenever a batch adds observations.
+- At most 10,000 observations per endpoint (the most recently stored are kept), applied whenever a batch adds observations.
 - At most 1,000 gap rows per endpoint, applied whenever a batch writes gaps.
 - 30 days: every ingest also deletes up to 500 observations and 100 gap rows received more than 30 days earlier, across all endpoints, and Core startup deletes up to 5,000 of each.
 - Status rows are not pruned (at most four per endpoint, without personal data).
@@ -233,7 +233,7 @@ Retention is fixed for installed Core. No API returns observation content; the o
 | `endpointId` | The device. |
 | `sources[]` | The latest accepted status of each reported channel, ordered by channel name. |
 | `channel`, `state` | `collecting`, `disabled`, `accessDenied`, `notFound` or `error`. |
-| `lastErrorCode` | HResult of the last failure (no message text). |
+| `lastErrorCode` | The HResult behind an `accessDenied`, `notFound` or `error` state, as a signed 32-bit number (no message text); null while the channel is readable. |
 | `oldestRecordId`, `newestRecordId` | The channel's record range at the Agent's last metadata call. |
 | `checkpointRecordId` | The acknowledged position; null until coverage is acknowledged. |
 | `logMaximumBytes`, `lastReadUtc` | Channel size (the buffer capacity) and the Agent time of the last successful metadata call. |
@@ -251,13 +251,13 @@ Reading it:
 - **Skew:** `reportedUtc − agentSentUtc`. A large value points to an Agent clock offset; event times use the Agent's clock, and Core does not reject them.
 - **Lossy:** an `overwritten`, `logReset`, `dropped` or `rejected` gap row for the channel, or a `coverageStarted` row with `coverageRestart` true. A channel's first `coverageStarted` row (`coverageRestart` false) only marks where collection began. `skippedRecords` bounds the records lost to overwrites.
 - **Lag:** `newestRecordId − checkpointRecordId`, together with `logMaximumBytes`, shows how close a backlog is to being overwritten.
-- **Errors:** `error` with `lastErrorCode`, for example `0x800705B4` (Win32 error 1460) for a read timeout; the channel is retried every minute. A growing `seekFallbacks` means the bookmark seek is not being used; collection stays correct but costs more.
+- **Errors:** `error` with `lastErrorCode`, for example `-2147023436` (`0x800705B4`, Win32 error 1460) for a read timeout; the channel is retried every minute. A growing `seekFallbacks` means the bookmark seek is not being used; collection stays correct but costs more.
 
 ## Limits
 
 - Collection is polled. A new event normally reaches Core within one poll interval plus the delivery spacing and request (up to about 7 seconds by default); a backlog or a failed delivery delays it further.
 - Channel retention bounds outage recovery: records overwritten before delivery resumes are lost and reported as `overwritten` gaps.
-- A backlog is scanned at up to 1,024 records per second per channel, and at most 128 observations per second are delivered per endpoint. Storms above that, such as many network (type 3) logons rejected by the 4624 condition on a busy server with a Security grant, build a backlog and eventually overwrite gaps.
+- A backlog is scanned at up to 1,024 records per second per channel, and at most 128 observations per second are delivered per endpoint. Storms above that, such as many network (type 3) logons rejected by the 4624 condition on a busy server with a Security grant, build a backlog that can end in `overwritten` gaps.
 - Windows audit policy decides whether 4624, 4625 and 4698 are logged at all. SentinelAI does not change audit policy.
 - Localized SCM text for 7045 `ServiceType`/`StartType` and 7040 `param3` maps to null (Unknown) on non-English systems; numeric start types still map.
 - Failed logons for accounts that do not exist carry no SID (`S-1-0-0` becomes null), because names are never collected; TASK-028 has to group them by source address and status.
@@ -278,6 +278,6 @@ Reading it:
 - **Deterministic (all platforms).** The real pipeline runs against an in-memory synthetic event log with a manual clock and scripted or in-memory Core semantics. The tests cover the option bounds and derived timings; catalog and contract conformance, the generated queries and this document's table and exclusions; normalization of every kind with excluded-field markers; image path derivation; the validator; the size proof (largest observation 2,823 bytes, worst-case request 207,253 bytes); checkpoint file hardening; dormancy, first start, steady delivery and idle cost; batch and gap caps; backpressure and the retry schedule; incompatible holds; continuity (overwrites, resets, clears while stopped, a clear after a reset, new generations with overwritten starts, untimed records, seek fallbacks, races and crash consistency); availability and containment; status cadence; scan caps and fairness; corrupt and foreign checkpoints; log privacy; uploader classification; and link signalling. A randomized invariant run (3 seeds × 1,500 operations of appends, overwrites, clears, failures, lost acknowledgements, restarts and crash rollbacks) checks that every selected record reaches the in-memory Core exactly once or is covered by a reported gap. A source scan forbids message rendering, XML and log-clearing APIs.
 - **Integration.** A real Agent host and a real Core with a synthetic event source cover first start, continuous delivery and latency, graceful restart without resend, crash replay absorbed as duplicates, an outage with bounded memory followed by overflow and drain, lost acknowledgements, degraded channels and a later grant, an unenrolled Agent and a deleted checkpoint becoming a visible coverage restart.
 - **Core.** Ingest of every kind, replay and record-number reuse, unknown and invalid items, the status guard and coverage restart, gap merging, retention, the ordering and strictness matrix (including proof that unauthenticated bodies are refused without being read), the rate limit, the status route's exact shape and concurrent ingest. License tests cover ingest in Safe Mode, and update tests cover the checkpoint denylist.
-- **Windows CI (default run, read-only).** Provider manifests must contain every catalog event and named field with a supported type (an absent Defender provider is a notice), every production query must parse, and the adapter's metadata, channel refusal and value conversion are checked. No event content is read.
+- **Windows CI (default run, read-only).** Provider manifests must contain every catalog event and named field with a supported type (an absent Defender provider is a notice), every production query must parse on each channel the account can open (Security `accessDenied` and an absent Defender channel are notices), and the adapter's metadata, channel refusal and value conversion are checked. No event content is read.
 - **Elevated Windows acceptance** (`--native-event-acceptance`) uses the production adapter with Core: a never-started test service installation must reach Core, the seek design is proven on a test-only classic log (including overwrite, clear and the resulting System 104), a restart must not resend, and secret markers must be absent from Core's database, Agent files and logs.
 - **Setup acceptance** checks that the installed LocalService Agent reports System `collecting` and Security `accessDenied`, delivers a test service installation and keeps a valid checkpoint, and prints the observed state of every channel.
