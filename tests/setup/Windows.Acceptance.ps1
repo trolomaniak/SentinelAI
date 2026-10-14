@@ -372,7 +372,16 @@ function Assert-ProtectedTree([string]$Root, [string[]]$AllowedWriters) {
         [Security.AccessControl.FileSystemRights]::TakeOwnership)
     foreach ($item in $items) {
         Assert-SetupAcceptance (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) 'An installed file or directory is a link.'
-        $acl = Get-Acl -LiteralPath $item.FullName
+        try {
+            $acl = Get-Acl -LiteralPath $item.FullName
+        } catch {
+            # The running Agent replaces its event checkpoint through a temporary file and a rename, so
+            # that file can vanish between enumeration and inspection. Only a path that no longer exists
+            # is skipped; every ownership, ACL or link violation on an existing path still fails.
+            if ($_.CategoryInfo.Category -ne [Management.Automation.ErrorCategory]::ObjectNotFound -or
+                (Test-Path -LiteralPath $item.FullName)) { throw }
+            continue
+        }
         Assert-SetupAcceptance ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cin $AllowedWriters) 'An untrusted identity owns an installed path.'
         foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
             if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
