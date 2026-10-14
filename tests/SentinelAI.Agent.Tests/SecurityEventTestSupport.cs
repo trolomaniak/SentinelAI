@@ -653,9 +653,11 @@ internal static class SecurityEventTestHost
     /// <summary>
     /// The production Agent composition over a synthetic event log, a test transport and a fixed secure
     /// posture. Heartbeats are five minutes apart, so event traffic is explained by the pipeline alone.
+    /// The native tier passes the real adapter and the default five-second poll.
     /// </summary>
     public static IHost BuildEventAgent(string dataDirectory, string coreUrl, HttpClient httpClient,
-        IEventLogAccess source, string? enrollmentToken = null, CapturingEventLoggerProvider? logs = null)
+        IEventLogAccess source, string? enrollmentToken = null, CapturingEventLoggerProvider? logs = null,
+        string eventPollInterval = "00:00:00.100")
     {
         var builder = AgentHost.CreateBuilder([]);
         builder.Configuration["Agent:CoreUrl"] = coreUrl;
@@ -663,7 +665,7 @@ internal static class SecurityEventTestHost
         builder.Configuration["Agent:HeartbeatInterval"] = "00:05:00";
         builder.Configuration["Agent:RetryDelay"] = "00:00:00.050";
         builder.Configuration["Agent:MaxRetryDelay"] = "00:00:00.200";
-        builder.Configuration["Agent:EventPollInterval"] = "00:00:00.100";
+        builder.Configuration["Agent:EventPollInterval"] = eventPollInterval;
         // Without change notifications, verification every second delivers a posture change promptly.
         builder.Configuration["Agent:PostureCheckInterval"] = "00:00:01";
         builder.Configuration["Agent:PostureSettleDelay"] = "00:00:00.100";

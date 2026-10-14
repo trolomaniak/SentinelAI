@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
@@ -1024,6 +1025,7 @@ internal sealed class RedirectedRegistryPostureReader(string root) : ISecurityPo
 internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandler { UseProxy = false })
 {
     private const string SecurityEventsPath = "/api/agent/security-events";
+    private readonly ConcurrentDictionary<(string Channel, long RecordId), int> _acceptedSends = new();
     private int _heartbeats;
     private int _inventoryAttempts;
     private int _inventoryAccepted;
@@ -1075,6 +1077,9 @@ internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandle
     public int MaxEventsInBatch => Volatile.Read(ref _maxEventsInBatch);
     public int MaxEventBodyBytes => Volatile.Read(ref _maxEventBodyBytes);
 
+    /// <summary>How many batches that Core answered with success carried this event.</summary>
+    public int AcceptedSends(string channel, long recordId) => _acceptedSends.GetValueOrDefault((channel, recordId));
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -1116,6 +1121,7 @@ internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandle
         }
 
         var eventCount = 0;
+        SecurityEventBatch? batch = null;
         if (events)
         {
             // Measure the exact body, then send the same bytes with the original content headers.
@@ -1132,8 +1138,9 @@ internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandle
 
             request.Content = buffered;
             original.Dispose();
-            eventCount = JsonSerializer.Deserialize<SecurityEventBatch>(body, SecurityEventContract.Json)?.Events.Count
+            batch = JsonSerializer.Deserialize<SecurityEventBatch>(body, SecurityEventContract.Json)
                 ?? throw new Exception("The Agent sent an empty security event batch.");
+            eventCount = batch.Events.Count;
             Raise(ref _maxEventsInBatch, eventCount);
             Raise(ref _maxEventBodyBytes, body.Length);
             if (FailEvents)
@@ -1161,6 +1168,10 @@ internal sealed class CoreLinkHandler() : DelegatingHandler(new HttpClientHandle
             Interlocked.Increment(ref _eventBatchesAccepted);
             Interlocked.Add(ref _eventsInAcceptedBatches, eventCount);
             Interlocked.Add(ref _eventDuplicates, result?.Duplicates ?? 0);
+            foreach (var item in batch!.Events)
+            {
+                _acceptedSends.AddOrUpdate((item.Channel, item.RecordId), 1, (_, sends) => sends + 1);
+            }
         }
 
         if (events && eventCount > 0 && response.IsSuccessStatusCode &&
