@@ -293,6 +293,9 @@ internal static class SecurityEventApiTests
         };
         var valid = JsonSerializer.Serialize(probe, SecurityEventContract.Json);
         var oversized = valid.Insert(1, $"\"testOnlyPadding\":\"{new string('x', 300 * 1024)}\",");
+        // An unknown member (skipped by Core) keeps bodies that must stay unread above the 1 KiB that
+        // SocketsHttpHandler still sends after an early error response to Expect: 100-continue.
+        var padded = valid.Insert(1, $"\"testOnlyPadding\":\"{new string('x', 4 * 1024)}\",");
         string Mutate(Action<JsonObject> change)
         {
             var node = JsonSerializer.SerializeToNode(probe, SecurityEventContract.Json)!.AsObject();
@@ -301,16 +304,25 @@ internal static class SecurityEventApiTests
         }
 
         var wrongCredential = a with { Credential = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)) };
-        // Oversized bodies that Core must refuse unread are offered with Expect: 100-continue, so they are
-        // never transmitted unless Core starts reading. A body Core cannot drain closes that connection, so
-        // every request here uses its own connection.
-        var unread = new HashSet<string>(StringComparer.Ordinal) { "anonymous oversized body", "Content-Length over the cap" };
+        // Bodies that Core must refuse unread are offered with Expect: 100-continue and no continue timeout that
+        // a slow host could reach. Kestrel sends 100 Continue only when the route starts reading, so such a body
+        // is transmitted only if Core reads it. A body Core cannot drain closes that connection, so every request
+        // here uses its own connection.
+        using var unreadClient = new HttpClient(new SocketsHttpHandler
+        {
+            UseProxy = false, Expect100ContinueTimeout = TimeSpan.FromSeconds(30)
+        }) { BaseAddress = client.BaseAddress, Timeout = TimeSpan.FromSeconds(30) };
+        var unread = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "anonymous valid body", "anonymous malformed body", "anonymous oversized body", "wrong credential",
+            "Content-Length over the cap"
+        };
         var cases = new (string Name, HttpStatusCode Expected, Agent? Agent, Func<HttpContent> Content)[]
         {
-            ("anonymous valid body", HttpStatusCode.Unauthorized, null, () => Raw(valid)),
-            ("anonymous malformed body", HttpStatusCode.Unauthorized, null, () => Raw("{\"endpointId\":")),
+            ("anonymous valid body", HttpStatusCode.Unauthorized, null, () => Raw(padded)),
+            ("anonymous malformed body", HttpStatusCode.Unauthorized, null, () => Raw(padded[..^2])),
             ("anonymous oversized body", HttpStatusCode.Unauthorized, null, () => Raw(oversized)),
-            ("wrong credential", HttpStatusCode.Unauthorized, wrongCredential, () => Raw(valid)),
+            ("wrong credential", HttpStatusCode.Unauthorized, wrongCredential, () => Raw(padded)),
             ("header and body endpoint differ", HttpStatusCode.Unauthorized, a,
                 () => Raw(Mutate(node => node["endpointId"] = Guid.NewGuid()))),
             ("another endpoint's credential", HttpStatusCode.Unauthorized, b, () => Raw(valid)),
@@ -355,13 +367,14 @@ internal static class SecurityEventApiTests
         var baseline = await SnapshotAsync(store, a, b);
         foreach (var (name, expected, agent, content) in cases)
         {
+            var tracked = unread.Contains(name) ? new TrackedContent(content()) : null;
             HttpResponseMessage response;
             try
             {
-                response = await PostAsync(client, agent, content(), headers =>
+                response = await PostAsync(tracked is null ? client : unreadClient, agent, tracked ?? content(), headers =>
                 {
                     headers.ConnectionClose = true;
-                    if (unread.Contains(name)) headers.ExpectContinue = true;
+                    headers.ExpectContinue = tracked is not null;
                 });
             }
             catch (HttpRequestException exception)
@@ -372,6 +385,7 @@ internal static class SecurityEventApiTests
             {
                 Check(response.StatusCode == expected,
                     $"Security event ingest returned HTTP {(int)response.StatusCode} instead of {(int)expected} for: {name}.");
+                Check(tracked is not { Sent: true }, $"Core read a request body it must refuse unread: {name}.");
             }
         }
         Check(await SnapshotAsync(store, a, b) == baseline, "A rejected security event request changed Core state.");
@@ -798,6 +812,39 @@ internal static class SecurityEventApiTests
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    // Records whether the client transmitted the body; with Expect: 100-continue that happens only once Core reads.
+    private sealed class TrackedContent : HttpContent
+    {
+        private readonly HttpContent _inner;
+
+        public TrackedContent(HttpContent inner)
+        {
+            Check(inner.Headers.ContentLength > 1024, "A body that must stay unread would be sent after an error response.");
+            _inner = inner;
+            Headers.ContentType = inner.Headers.ContentType;
+        }
+
+        public bool Sent { get; private set; }
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            Sent = true;
+            await _inner.CopyToAsync(stream);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = _inner.Headers.ContentLength ?? -1;
+            return length >= 0;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _inner.Dispose();
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class ManualTime(DateTimeOffset utcNow) : TimeProvider
