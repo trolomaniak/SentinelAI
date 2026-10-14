@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
 using SentinelAI.Hosting;
@@ -59,7 +60,18 @@ public static class AgentHost
             return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
         });
         builder.Services.AddSingleton<AgentEnrollmentClient>();
+        builder.Services.TryAddSingleton(TimeProvider.System);
+        builder.Services.AddSingleton<AgentLink>();
+        builder.Services.AddSingleton<IEventLogAccess>(provider => OperatingSystem.IsWindows()
+            ? new WindowsEventLogAccess(SecurityEventCatalog.Production,
+                SecurityEventTimings.From(provider.GetRequiredService<AgentOptions>()).ConfigurationRefresh)
+            : new NoEventLogAccess());
+        builder.Services.AddSingleton<EventCheckpointStore>();
+        builder.Services.AddSingleton<ISecurityEventUploader, HttpSecurityEventUploader>();
+        builder.Services.AddSingleton<SecurityEventPipeline>();
         builder.Services.AddHostedService(provider => provider.GetRequiredService<PostureMonitor>());
+        // Stops after the heartbeat worker: cancels any read, cancels an in-flight POST and flushes positions.
+        builder.Services.AddHostedService(provider => provider.GetRequiredService<SecurityEventPipeline>());
         builder.Services.AddHostedService<HeartbeatWorker>();
 
         return builder;
