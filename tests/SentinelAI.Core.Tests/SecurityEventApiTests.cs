@@ -48,6 +48,7 @@ internal static class SecurityEventApiTests
         // Private synthetic installations keep these scenarios within their own per-IP rate windows.
         var directory = Path.Combine(Path.GetTempPath(), $"sentinelai-security-event-tests-{Guid.NewGuid():N}");
         var retentionDirectory = directory + "-retention";
+        var rulesDirectory = directory + "-rules";
         var logs = new CapturingLoggerProvider();
         try
         {
@@ -55,6 +56,7 @@ internal static class SecurityEventApiTests
             await VerifyConcurrencyAsync(directory, username, password, logs);
             await VerifyRateLimitAsync(directory, logs);
             await VerifyRetentionAsync(retentionDirectory, logs);
+            await VerifyRuntimeRulesAsync(rulesDirectory, logs);
             Check(logs.Entries.Count > 0 && logs.Entries.All(entry => !ContainsSynthetic(entry.Message)),
                 "Core logged security event content, an identity or a request body.");
         }
@@ -63,10 +65,97 @@ internal static class SecurityEventApiTests
             SqliteConnection.ClearAllPools();
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
             if (Directory.Exists(retentionDirectory)) Directory.Delete(retentionDirectory, recursive: true);
+            if (Directory.Exists(rulesDirectory)) Directory.Delete(rulesDirectory, recursive: true);
         }
 
         Console.WriteLine("Security event API tests passed (ingest, per-item validation, deduplication, gaps, " +
-                          "status guard, retention, strictness, rate limit, status route, concurrency).");
+                          "status guard, retention, strictness, rate limit, status route, concurrency, runtime rules).");
+    }
+
+    // C12: runtime rules raise tracked alerts in the ingest transaction, per endpoint, once per new evidence;
+    // Risk scores and correlates them, and its coverage names the event channels that are not collected.
+    private static async Task VerifyRuntimeRulesAsync(string directory, CapturingLoggerProvider logs)
+    {
+        await using var app = Build(directory, logs);
+        using var client = await StartAsync(app);
+        var a = await EnrollAsync(app);
+        var b = await EnrollAsync(app);
+        var c = await EnrollAsync(app);
+        var risk = app.Services.GetRequiredService<RiskReadStore>();
+        var failed = Selection(4625);
+        var start = DateTimeOffset.UtcNow.AddMinutes(-20);
+
+        SecurityEventObservation Failure(long record) => Observation(failed, record, start.AddSeconds(record * 10));
+        async Task<List<string[]>> AlertsAsync(Agent agent) => await QueryAsync(app,
+            "SELECT RuleId, Status, LastObservedUtcTicks, EvidenceJson, EndpointName, Version FROM TrackedAlerts " +
+            "WHERE EndpointId = $e ORDER BY RuleId;", agent.EndpointId);
+
+        // Nine failures each on two endpoints: neither reaches the threshold, because history is per endpoint.
+        await RecordAsync(client, a, Batch(a, [.. Enumerable.Range(1, 9).Select(record => Failure(record))]));
+        await RecordAsync(client, b, Batch(b, [.. Enumerable.Range(1, 9).Select(record => Failure(record))]));
+        Check((await AlertsAsync(a)).Count == 0 && (await AlertsAsync(b)).Count == 0,
+            "Failed logons below the threshold, or on another endpoint, raised an alert.");
+
+        // The tenth failure arrives in a later batch, together with a Defender detection.
+        var tenth = Failure(10);
+        var detection = Observation(Selection(1116), 200, start.AddMinutes(5));
+        var second = Batch(a, [tenth, detection], sources:
+        [
+            Status(SecurityEventChannels.Security), Status(SecurityEventChannels.System),
+            Status(SecurityEventChannels.PowerShell, SecurityEventSourceStates.AccessDenied, null),
+            Status(SecurityEventChannels.Defender)
+        ]);
+        Check(await RecordAsync(client, a, second) == new SecurityEventBatchResult(2, 0, 0, 0), "The rule batch was not stored.");
+        var raised = await AlertsAsync(a);
+        Check(raised.Select(row => row[0]).SequenceEqual(["SA-EVT-DEF-001", "SA-EVT-LOGON-001"]) &&
+              raised.All(row => row[1] == "open" && row[5] == "1" && row[4] == $"Endpoint {a.EndpointId.ToString("N")[..8]}"),
+            "Runtime rules did not raise exactly the expected open alerts.");
+        var logon = raised[1];
+        using (var evidence = JsonDocument.Parse(logon[3]))
+        {
+            var fields = evidence.RootElement.EnumerateArray()
+                .ToDictionary(item => item.GetProperty("Field").GetString()!, item => item.GetProperty("Value"));
+            Check(logon[2] == Invariant(tenth.TimeCreatedUtc.UtcTicks) && fields["logon.failedLogons"].GetInt32() == 10 &&
+                  fields["event.recordId"].GetInt64() == 10 && fields["event.channel"].GetString() == SecurityEventChannels.Security,
+                "The failed-logon alert does not carry its typed evidence and event time.");
+        }
+
+        // A replayed batch is a duplicate and changes no alert.
+        Check(await RecordAsync(client, a, second) == new SecurityEventBatchResult(0, 2, 0, 0) &&
+              JsonSerializer.Serialize(await AlertsAsync(a)) == JsonSerializer.Serialize(raised),
+            "A replayed batch changed a runtime alert.");
+
+        // Risk scores both alerts with their groups and confidence, correlates the two fresh groups,
+        // and its coverage names the channel that is not collected.
+        var detail = await risk.FindAsync(a.EndpointId) ?? throw new InvalidOperationException("No risk detail.");
+        var logonRisk = detail.Risk.Contributions.Single(item => item.RuleId == "SA-EVT-LOGON-001");
+        var malwareRisk = detail.Risk.Contributions.Single(item => item.RuleId == "SA-EVT-DEF-001");
+        Check(logonRisk is { CorrelationGroup: "EVT-AUTH", DetectionConfidence: 0.5m, CorrelationEligible: true, LatestSnapshotConfirmed: false } &&
+              malwareRisk is { CorrelationGroup: "EVT-MALWARE", DetectionConfidence: 1m, CorrelationEligible: true } &&
+              detail.Risk.CorrelatedGroups.SequenceEqual(["EVT-AUTH", "EVT-MALWARE"]) && detail.Risk.Score > 0,
+            "Risk did not score and correlate fresh runtime alerts.");
+        Check(detail.Coverage.Caution.Contains("11 of 12 event rules can fire", StringComparison.Ordinal) &&
+              detail.Coverage.Caution.Contains($"{SecurityEventChannels.PowerShell} (accessDenied)", StringComparison.Ordinal) &&
+              detail.Coverage.Caution.Contains("unknown, not absent", StringComparison.Ordinal),
+            "Risk coverage did not report the uncollected event channel.");
+        var unreported = await risk.FindAsync(c.EndpointId) ?? throw new InvalidOperationException("No risk detail.");
+        Check(unreported.Coverage.Caution.Contains("0 of 12 event rules can fire", StringComparison.Ordinal) &&
+              unreported.Coverage.Caution.Contains($"{SecurityEventChannels.Security} (not reported)", StringComparison.Ordinal) &&
+              unreported.Risk.Score == 0, "An endpoint without event telemetry was not reported as uncovered.");
+
+        // A resolved alert reopens on new evidence; older evidence never replaces newer.
+        var alerts = app.Services.GetRequiredService<AlertStore>();
+        var alertId = Guid.Parse((await QueryAsync(app,
+            "SELECT AlertId FROM TrackedAlerts WHERE EndpointId = $e AND RuleId = 'SA-EVT-LOGON-001';", a.EndpointId))[0][0]);
+        Check((await alerts.UpdateStatusAsync(alertId, "resolved", 1, "test-admin")).Outcome == AlertStatusUpdateOutcome.Updated,
+            "The runtime alert could not be resolved.");
+        await RecordAsync(client, a, Batch(a, [Failure(11)]));
+        var reopened = (await AlertsAsync(a))[1];
+        Check(reopened[1] == "open" && reopened[2] == Invariant(Failure(11).TimeCreatedUtc.UtcTicks),
+            "New evidence did not reopen the resolved runtime alert.");
+        // Record 12 is new and completes a burst, but its event time precedes the reopened alert's evidence.
+        await RecordAsync(client, a, Batch(a, [Observation(failed, 12, start.AddSeconds(105))]));
+        Check((await AlertsAsync(a))[1][2] == reopened[2], "Older evidence replaced the alert's newer observation.");
     }
 
     private static async Task VerifyIngestAsync(string directory, string username, string password,

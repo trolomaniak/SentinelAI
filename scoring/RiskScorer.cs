@@ -93,7 +93,7 @@ public sealed class RiskScorer
         var contribution = beforeMitigation * remaining;
         Policy.CorrelationGroupsByRule.TryGetValue(alert.RuleId, out var group);
         var latest = context.LatestInventoryUtc.HasValue && alert.LastObservedUtc == context.LatestInventoryUtc.Value;
-        var eligible = contribution > 0m && remaining > 0m && fresh && latest && group is not null;
+        var eligible = contribution > 0m && remaining > 0m && fresh && (latest || alert.EventDetection) && group is not null;
         return new AlertRiskContribution(alert.AlertId, alert.RuleId, severity, status, alert.LastObservedUtc,
             age, fresh ? "fresh" : aging ? "aging" : "old", future, points, confidence,
             confidenceOverride ? "rulePolicyOverride" : "policyDefault", asset, exposure, ageMultiplier, remaining,

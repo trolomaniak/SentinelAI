@@ -11,7 +11,11 @@ public sealed class ScoringPolicy
         ["info"] = 1m, ["low"] = 5m, ["medium"] = 15m, ["high"] = 25m, ["critical"] = 50m
     };
     public decimal DefaultConfidence { get; set; } = 1m;
-    public Dictionary<string, decimal> ConfidenceByRule { get; set; } = new(StringComparer.Ordinal);
+    // Event rules that also match common benign activity carry less than full confidence.
+    public Dictionary<string, decimal> ConfidenceByRule { get; set; } = new(StringComparer.Ordinal)
+    {
+        ["SA-EVT-LOGON-001"] = 0.5m, ["SA-EVT-PS-001"] = 0.5m, ["SA-EVT-PERSIST-003"] = 0.5m, ["SA-EVT-PROT-003"] = 0.75m
+    };
     public Dictionary<string, decimal> AssetMultipliers { get; set; } = new(StringComparer.Ordinal)
     {
         ["low"] = 0.75m, ["standard"] = 1m, ["high"] = 1.5m, ["critical"] = 2m
@@ -36,7 +40,13 @@ public sealed class ScoringPolicy
         ["SA-UAC-001"] = "UAC", ["SA-UAC-002"] = "UAC",
         ["SA-RDP-001"] = "RDP", ["SA-RDP-002"] = "RDP", ["SA-RDP-003"] = "RDP",
         ["SA-SMB-001"] = "SMB", ["SA-SMB-002"] = "SMB",
-        ["SA-LOGON-001"] = "LOGON", ["SA-LSA-001"] = "LSA", ["SA-UPDATE-001"] = "UPDATE"
+        ["SA-LOGON-001"] = "LOGON", ["SA-LSA-001"] = "LSA", ["SA-UPDATE-001"] = "UPDATE",
+        ["SA-EVT-LOGON-001"] = "EVT-AUTH", ["SA-EVT-RDP-001"] = "EVT-AUTH",
+        ["SA-EVT-DEF-001"] = "EVT-MALWARE", ["SA-EVT-DEF-002"] = "EVT-MALWARE",
+        ["SA-EVT-PROT-001"] = "EVT-DEFENSE", ["SA-EVT-PROT-002"] = "EVT-DEFENSE", ["SA-EVT-PROT-003"] = "EVT-DEFENSE",
+        ["SA-EVT-LOG-001"] = "EVT-DEFENSE", ["SA-EVT-PS-001"] = "EVT-EXECUTION",
+        ["SA-EVT-PERSIST-001"] = "EVT-PERSISTENCE", ["SA-EVT-PERSIST-002"] = "EVT-PERSISTENCE",
+        ["SA-EVT-PERSIST-003"] = "EVT-PERSISTENCE"
     };
 
     internal ScoringPolicySnapshot Snapshot()

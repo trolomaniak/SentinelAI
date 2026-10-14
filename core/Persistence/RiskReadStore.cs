@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SentinelAI.Contracts.Inventory;
+using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Rules;
 using SentinelAI.Scoring;
 
@@ -9,6 +10,10 @@ namespace SentinelAI.Core.Persistence;
 /// <summary>Scores enrollment, inventory and lifecycle state from one SQLite read snapshot.</summary>
 public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options, TimeProvider timeProvider)
 {
+    // The Agent reports channel status at least hourly; an older report no longer describes collection.
+    private static readonly TimeSpan EventStatusFreshFor = TimeSpan.FromHours(2);
+    private static readonly EventRuleEngine EventRules = EventRuleEngine.CreateDefault();
+
     public async Task<RiskPage> ListAsync(int offset, int limit, CancellationToken cancellationToken = default)
     {
         if (offset < 0 || limit is < 1 or > 200)
@@ -55,19 +60,20 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
 
     private EndpointRiskDetail Score(SnapshotEndpoint endpoint, DateTimeOffset now) =>
         ScoreSnapshot(endpoint.EndpointId, endpoint.EndpointName, endpoint.InventoryCollectedUtc,
-            endpoint.Inventory, endpoint.Alerts, now);
+            endpoint.Inventory, endpoint.Alerts, now, endpoint.EventChannels);
 
+    /// <summary><paramref name="eventChannels"/> is null when the caller did not read event channel status.</summary>
     internal EndpointRiskDetail ScoreSnapshot(Guid endpointId, string endpointName,
         DateTimeOffset? inventoryCollectedUtc, InventoryReport? inventory,
-        IReadOnlyList<RiskAlertView> alerts, DateTimeOffset now) => new(
+        IReadOnlyList<RiskAlertView> alerts, DateTimeOffset now, IReadOnlyList<EventChannelState>? eventChannels = null) => new(
         endpointId,
         endpointName,
         inventoryCollectedUtc,
         options.Scorer.ScoreEndpoint(endpointId,
             alerts.Select(alert => new ScoringAlert(alert.AlertId, alert.RuleId, alert.Severity,
-                alert.Status, alert.LastObservedUtc)),
+                alert.Status, alert.LastObservedUtc, EventRuleEngine.DefaultRuleIds.Contains(alert.RuleId))),
             options.ContextFor(endpointId, inventoryCollectedUtc), now),
-        AssessCoverage(inventory, now),
+        AssessCoverage(inventory, eventChannels, now),
         alerts,
         options.Scorer.Policy,
         options.InventoryFreshForHours);
@@ -85,10 +91,12 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
             endpoint.Alerts.Count(alert => alert.Status != "resolved"), reason, endpoint.Risk.CalculatedUtc);
     }
 
-    private RiskCoverage AssessCoverage(InventoryReport? inventory, DateTimeOffset now)
+    private RiskCoverage AssessCoverage(InventoryReport? inventory, IReadOnlyList<EventChannelState>? eventChannels,
+        DateTimeOffset now)
     {
-        const string caution = "Coverage counts only the 13 supported Windows configuration rules. " +
-            "Missing or unknown observations have no score; a zero score is not a security assurance.";
+        var caution = "Coverage counts only the 13 supported Windows configuration rules. " +
+            "Missing or unknown observations have no score; a zero score is not a security assurance. " +
+            EventCaution(eventChannels, now);
         if (inventory is null)
         {
             return new RiskCoverage("missing", "unknown", 0, 13, caution);
@@ -99,6 +107,27 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         var known = EndpointState.FromInventory(inventory).IsWindows ? CountKnownSignals(inventory.SecurityPosture) : 0;
         return new RiskCoverage(inventoryState, known == 0 ? "unknown" : known == 13 ? "complete" : "partial",
             known, 13, caution);
+    }
+
+    /// <summary>
+    /// Event rules fire only on collected events. A channel counts as collecting only while its latest status is
+    /// collecting and was reported within the Agent's liveness bound; anything else leaves its rules unable to fire.
+    /// </summary>
+    private static string EventCaution(IReadOnlyList<EventChannelState>? channels, DateTimeOffset now)
+    {
+        const string unknown = "Events that were not collected are unknown, not absent.";
+        var rules = EventRules.Rules;
+        if (channels is null) return $"Event rules ({rules.Count}) fire only on collected events. {unknown}";
+        var byChannel = channels.ToDictionary(channel => channel.Channel, StringComparer.Ordinal);
+        string StateOf(string channel) => !byChannel.TryGetValue(channel, out var status) ? "not reported"
+            : now - status.ReportedUtc > EventStatusFreshFor ? status.State + ", stale" : status.State;
+        var collecting = SecurityEventChannels.All.Where(channel => StateOf(channel) == SecurityEventSourceStates.Collecting)
+            .ToHashSet(StringComparer.Ordinal);
+        var able = rules.Count(rule => rule.Channels.Any(collecting.Contains));
+        if (able == rules.Count) return $"All {rules.Count} event rules have a collecting channel. {unknown}";
+        var missing = SecurityEventChannels.All.Where(channel => !collecting.Contains(channel))
+            .Select(channel => $"{channel} ({StateOf(channel)})");
+        return $"{able} of {rules.Count} event rules can fire; channels not collecting: {string.Join(", ", missing)}. {unknown}";
     }
 
     private static int CountKnownSignals(SecurityPostureInventory posture)
@@ -157,7 +186,25 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
                     : JsonSerializer.Deserialize<InventoryReport>(reader.GetString(2));
                 endpoints.Add(id, new SnapshotEndpoint(id,
                     inventory?.Hostname ?? $"Endpoint {id.ToString("N")[..8]}",
-                    reader.IsDBNull(1) ? null : new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero), inventory, []));
+                    reader.IsDBNull(1) ? null : new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero), inventory, [], []));
+            }
+        }
+
+        await using (var query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
+            query.CommandText = """
+                SELECT s.EndpointId, s.Channel, s.State, s.ReceivedUtcTicks
+                FROM SecurityEventSources AS s
+                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = s.EndpointId
+                WHERE ($endpointId IS NULL OR s.EndpointId = $endpointId);
+                """;
+            query.Parameters.AddWithValue("$endpointId", endpointId?.ToString("D") ?? (object)DBNull.Value);
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                endpoints[Guid.Parse(reader.GetString(0))].EventChannels.Add(new EventChannelState(reader.GetString(1),
+                    reader.GetString(2), new DateTimeOffset(reader.GetInt64(3), TimeSpan.Zero)));
             }
         }
 
@@ -188,5 +235,9 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
     }
 
     private sealed record SnapshotEndpoint(Guid EndpointId, string EndpointName,
-        DateTimeOffset? InventoryCollectedUtc, InventoryReport? Inventory, List<RiskAlertView> Alerts);
+        DateTimeOffset? InventoryCollectedUtc, InventoryReport? Inventory, List<RiskAlertView> Alerts,
+        List<EventChannelState> EventChannels);
 }
+
+/// <summary>The latest reported state of one event channel and Core's receipt time of that report.</summary>
+internal sealed record EventChannelState(string Channel, string State, DateTimeOffset ReportedUtc);

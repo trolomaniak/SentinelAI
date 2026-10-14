@@ -153,6 +153,24 @@ Throws<ArgumentException>(() => engine.ValidateContext(context with { Exposure =
 Throws<ArgumentException>(() => engine.ValidateContext(context with { AssetCriticalitySource = "inferred" }), "Context source cannot falsely claim protection inference.");
 Throws<ArgumentException>(() => engine.ScoreOrganization([open, open]), "A duplicated endpoint cannot inflate fleet counts.");
 
+// Event detections correlate on freshness alone: their evidence is the event, not the latest inventory snapshot.
+var eventEarlier = now.AddHours(-3);
+var eventScore = engine.ScoreEndpoint(endpoint,
+[
+    new ScoringAlert(Guid.NewGuid(), "SA-EVT-LOGON-001", "medium", "open", eventEarlier, EventDetection: true),
+    new ScoringAlert(Guid.NewGuid(), "SA-EVT-DEF-001", "high", "open", eventEarlier, EventDetection: true),
+    new ScoringAlert(Guid.NewGuid(), "SA-EVT-PERSIST-003", "low", "open", now.AddDays(-8), EventDetection: true)
+], context, now);
+var byRule = eventScore.Contributions.ToDictionary(item => item.RuleId);
+Ensure(byRule["SA-EVT-LOGON-001"] is { CorrelationEligible: true, LatestSnapshotConfirmed: false, CorrelationGroup: "EVT-AUTH", DetectionConfidence: 0.5m } &&
+       byRule["SA-EVT-DEF-001"] is { CorrelationEligible: true, CorrelationGroup: "EVT-MALWARE", DetectionConfidence: 1m } &&
+       !byRule["SA-EVT-PERSIST-003"].CorrelationEligible && eventScore.CorrelatedGroups.SequenceEqual(["EVT-AUTH", "EVT-MALWARE"]),
+    "Fresh event detections correlate by policy group and confidence; stale ones do not.");
+var snapshotOnly = engine.ScoreEndpoint(endpoint,
+    [new ScoringAlert(Guid.NewGuid(), "SA-EVT-DEF-001", "high", "open", eventEarlier)], context, now);
+Ensure(!snapshotOnly.Contributions.Single().CorrelationEligible,
+    "Without the event flag an alert still needs the latest inventory snapshot to correlate.");
+
 Console.WriteLine($"Scoring tests passed ({assertions} assertions).");
 
 void Ensure(bool condition, string message)
