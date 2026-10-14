@@ -2323,7 +2323,9 @@ internal static class SecurityEventPipelineTests
 
             foreach (var definition in catalog.Channels.SelectMany(channel => channel.Definitions).Where(d => d.Provider == provider))
             {
-                var versions = events.Where(metadata => metadata.Id == definition.EventId).ToList();
+                // EventMetadata.Id is the full descriptor value: legacy-style providers such as Service Control
+                // Manager carry qualifiers in the high 16 bits (7045 is 0x40001B85); records match the low 16.
+                var versions = events.Where(metadata => (metadata.Id & 0xFFFF) == definition.EventId).ToList();
                 Check(versions.Count > 0, $"The {provider} manifest has no event {definition.EventId}.");
                 foreach (var field in (definition.Predicate?.Fields ?? []).Concat(definition.Fields.Fields))
                 {
