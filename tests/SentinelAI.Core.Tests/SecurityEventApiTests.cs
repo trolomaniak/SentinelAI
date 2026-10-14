@@ -189,8 +189,20 @@ internal static class SecurityEventApiTests
               warnings[0].Keys.Order(StringComparer.Ordinal).SequenceEqual(["EndpointId", "Rejected", "{OriginalFormat}"]),
             "The rejection warning carried more than the endpoint ID and count.");
 
+        // Invalid gaps and statuses are rejected without being stored; an observation without a usable
+        // record number is rejected without a gap row (it has no position to record).
+        var gapsBefore = await store.ListGapsAsync(a.EndpointId, 500);
+        var invalidItems = await RecordAsync(client, a, Batch(a,
+            [Observation(Selection(4625), 0)],
+            [Gap(SecurityEventChannels.System, SecurityEventGapReasons.Overwritten, 900, null)],
+            [Status(SecurityEventChannels.System, SecurityEventSourceStates.Error) with { Scanned = -1 }]));
+        Check(invalidItems == new SecurityEventBatchResult(0, 0, 0, 3) &&
+              (await store.ListGapsAsync(a.EndpointId, 500)).SequenceEqual(gapsBefore) &&
+              (await store.ListSourcesAsync(a.EndpointId)).All(source => source.State == SecurityEventSourceStates.Collecting),
+            "An invalid gap, status or record number was stored instead of rejected.");
+
         await VerifyStatusGuardAndGapsAsync(client, store, c);
-        await VerifyStrictnessAsync(client, store, a, b);
+        await VerifyStrictnessAsync(client, store, a, b, logs);
         await VerifyStatusRouteAsync(app, client, store, a, username, password);
     }
 
@@ -269,7 +281,8 @@ internal static class SecurityEventApiTests
     }
 
     // C8: transport, authentication, media type, size, strict JSON and envelope ordering.
-    private static async Task VerifyStrictnessAsync(HttpClient client, SecurityEventStore store, Agent a, Agent b)
+    private static async Task VerifyStrictnessAsync(HttpClient client, SecurityEventStore store, Agent a, Agent b,
+        CapturingLoggerProvider logs)
     {
         var service = Selection(7045);
         var probe = Batch(a, [Observation(service, 9001)],
@@ -362,6 +375,16 @@ internal static class SecurityEventApiTests
             }
         }
         Check(await SnapshotAsync(store, a, b) == baseline, "A rejected security event request changed Core state.");
+        // Only authenticated refusals are logged, with the endpoint ID and status code alone (never parser text).
+        var refusals = logs.Entries.Where(entry => entry.Level == LogLevel.Warning &&
+            entry.Message.Contains("rejected with HTTP", StringComparison.Ordinal)).ToArray();
+        var expectedRefusals = cases.Where(item => item.Agent == a && item.Expected != HttpStatusCode.Unauthorized)
+            .Select(item => $"Security event batch from endpoint {a.EndpointId:D} rejected with HTTP {(int)item.Expected}")
+            .Order(StringComparer.Ordinal);
+        Check(refusals.Select(entry => entry.Message).Order(StringComparer.Ordinal).SequenceEqual(expectedRefusals) &&
+              refusals.All(entry => entry.Category == typeof(SecurityEventStore).FullName &&
+                  entry.Keys.Order(StringComparer.Ordinal).SequenceEqual(["EndpointId", "StatusCode", "{OriginalFormat}"])),
+            "Refused security event batches were not logged with only the endpoint ID and status code.");
 
         // Endpoint clocks are never compared with Core's clock; TASK-028 clamps by receipt time.
         Check(await RecordAsync(client, a, probe with { SentUtc = DateTimeOffset.UtcNow.AddYears(1) }) ==
@@ -423,6 +446,21 @@ internal static class SecurityEventApiTests
               emptyJson.RootElement.GetProperty("sources").GetArrayLength() == 0 &&
               emptyJson.RootElement.GetProperty("recentGaps").GetArrayLength() == 0,
             "An endpoint without event status did not return an explicit empty status view.");
+
+        // The route lists at most the 50 newest gaps.
+        var lossy = await EnrollAsync(app);
+        foreach (var start in new[] { 1, 33 })
+        {
+            await RecordAsync(client, lossy, Batch(lossy, gaps: Enumerable.Range(start, 32).Select(first =>
+                Gap(SecurityEventChannels.System, SecurityEventGapReasons.Dropped, first, first)).ToArray()));
+        }
+        using var bounded = await GetAsync(client, SourcesPath(lossy.EndpointId), "Bearer", token);
+        using var boundedJson = JsonDocument.Parse(await bounded.Content.ReadAsStringAsync());
+        Check(bounded.StatusCode == HttpStatusCode.OK &&
+              boundedJson.RootElement.GetProperty("recentGaps").EnumerateArray()
+                  .Select(gap => gap.GetProperty("firstRecordId").GetInt64())
+                  .SequenceEqual(Enumerable.Range(15, 50).Reverse().Select(first => (long)first)),
+            "The event-source status route did not list exactly the 50 newest gaps.");
     }
 
     // C11: concurrent IMMEDIATE writers and a concurrent status reader.
