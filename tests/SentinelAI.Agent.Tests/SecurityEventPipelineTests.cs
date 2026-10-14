@@ -880,17 +880,16 @@ internal static class SecurityEventPipelineTests
               rig.Source(System) is { SkippedRecords: 30, Gaps: 2, CheckpointRecordId: 100 },
             "An overwrite was not reported exactly.");
 
-        // (b) A shrunk log is a reset; the new generation is delivered from record 1.
+        // (b) A shrunk log is a reset; the new generation is delivered from record 1 in the same batch.
         rig.Log.Clear(System, restartIds: true);
         AppendMany(rig.Log, service, 10);
         await rig.AdvanceAsync(Poll);
-        Check(rig.Uploader.AcceptedBatches[^1].Gaps.SingleOrDefault() is
-                  { Reason: SecurityEventGapReasons.LogReset, FirstRecordId: 101, LastRecordId: null },
-            "A shrunk log was not reported as a reset.");
-        await rig.AdvanceAsync(Poll);
-        Check(rig.Uploader.AcceptedBatches[^1].Events.Select(o => (o.RecordId, o.TimeCreatedUtc))
-                  .SequenceEqual(Range(1, 10).Select(id => (id, SyntheticEventLog.TimeOf(1, id)))),
-            "The new generation was not delivered from record 1.");
+        var shrunk = rig.Uploader.AcceptedBatches[^1];
+        Check(shrunk.Gaps.SingleOrDefault() is { Reason: SecurityEventGapReasons.LogReset, FirstRecordId: 101, LastRecordId: null } &&
+              shrunk.Events.Select(o => (o.RecordId, o.TimeCreatedUtc))
+                  .SequenceEqual(Range(1, 10).Select(id => (id, SyntheticEventLog.TimeOf(1, id)))) &&
+              rig.Source(System).CheckpointRecordId == 10,
+            "A shrunk log was not reported as a reset with its new generation delivered from record 1.");
 
         // (c) An emptied log is a reset.
         rig.Log.Clear(System, restartIds: true);
@@ -916,12 +915,59 @@ internal static class SecurityEventPipelineTests
         AppendMany(rig.Log, service, 29);
         rig.Restart();
         await rig.AdvanceAsync(Poll);
-        Check(rig.Uploader.AcceptedBatches[^1].Gaps.SingleOrDefault() is { Reason: SecurityEventGapReasons.LogReset, FirstRecordId: 21 },
+        Check(rig.Uploader.AcceptedBatches[^1].Gaps.SingleOrDefault() is { Reason: SecurityEventGapReasons.LogReset, FirstRecordId: 21 } &&
+              rig.Source(System).SeekFallbacks == 0,
             "A clear regrown past the position was not detected by the anchor time.");
-        await rig.AdvanceAsync(Poll);
         var regrown = rig.Uploader.AcceptedBatches[^1].Events;
         Check(cleared == 1 && regrown.Count == 30 && regrown[0] is { RecordId: 1, Kind: SecurityEventKinds.LogCleared } &&
-              regrown[0].LogCleared == new LogClearedEvent("Application"), "The regrown generation was not fully delivered.");
+              regrown[0].LogCleared == new LogClearedEvent("Application") && rig.Source(System).CheckpointRecordId == 30,
+            "The regrown generation was not delivered with its reset.");
+
+        // A second clear right after a reset loses nothing unseen: the reset pass already read the new generation.
+        rig.Log.Clear(System, restartIds: true);
+        AppendMany(rig.Log, service, 3);
+        await rig.AdvanceAsync(Poll);
+        Check(rig.Uploader.AcceptedBatches[^1].Gaps.SingleOrDefault() is { Reason: SecurityEventGapReasons.LogReset, FirstRecordId: 31 } &&
+              rig.Uploader.AcceptedBatches[^1].Events.Select(o => (o.RecordId, o.TimeCreatedUtc))
+                  .SequenceEqual(Range(1, 3).Select(id => (id, SyntheticEventLog.TimeOf(2, id)))),
+            "A clear following a reset was not reported against the read generation.");
+
+        // A reset whose new generation already lost its first records reports both in one pass: shrunk
+        // below the position (20 < 30), then regrown past it (40 > 20, found by the anchor time).
+        AppendMany(rig.Log, service, 27);
+        await rig.AdvanceAsync(Poll);
+        foreach (var regrowth in new[] { 20, 40 })
+        {
+            var position = rig.Source(System).CheckpointRecordId!.Value;
+            var generation = rig.Log.Generation(System) + 1;
+            rig.Log.Clear(System, restartIds: true);
+            AppendMany(rig.Log, service, regrowth);
+            rig.Log.Trim(System, 5);
+            await rig.AdvanceAsync(Poll);
+            var lossy = rig.Uploader.AcceptedBatches[^1];
+            Check(lossy.Gaps.Count == 2 &&
+                  lossy.Gaps[0] is { Reason: SecurityEventGapReasons.LogReset, LastRecordId: null } reset &&
+                  reset.FirstRecordId == position + 1 &&
+                  lossy.Gaps[1] is { Reason: SecurityEventGapReasons.Overwritten, FirstRecordId: 1, LastRecordId: 5 } &&
+                  lossy.Events.Select(o => (o.RecordId, o.TimeCreatedUtc)).SequenceEqual(
+                      Range(6, regrowth).Select(id => (id, SyntheticEventLog.TimeOf(generation, id)))) &&
+                  rig.Source(System).CheckpointRecordId == regrowth,
+                $"A reset with an overwritten new generation (regrowth to {regrowth}) was not reported exactly.");
+        }
+
+        // A record without a creation time is dropped with a gap, and its position verifies later without a time.
+        var timed = SecurityEventFixtures.Append(rig.Log, service);
+        var untimed = rig.Log.Append(System, service.Provider, service.EventId, service.Fields, service.Level, withoutTime: true);
+        await rig.AdvanceAsync(Poll);
+        Check(rig.Uploader.AcceptedBatches[^1].Events.Single().RecordId == timed &&
+              rig.Uploader.AcceptedBatches[^1].Gaps.SingleOrDefault() is { Reason: SecurityEventGapReasons.Dropped } dropped &&
+              dropped.FirstRecordId == untimed && rig.Source(System).CheckpointRecordId == untimed,
+            "A record without a creation time was not dropped with a gap.");
+        var next = SecurityEventFixtures.Append(rig.Log, service);
+        await rig.AdvanceAsync(Poll);
+        Check(rig.Uploader.AcceptedBatches[^1].Events.Single().RecordId == next &&
+              rig.Uploader.AcceptedBatches[^1].Gaps.Count == 0 && rig.Source(System).SeekFallbacks == 0,
+            "A position on a record without a creation time was taken for a reset.");
 
         // (e) A below-oldest marker contradicted by the oldest record is a reset.
         var markerDirectory = Path.Combine(directory, "e");
@@ -930,8 +976,21 @@ internal static class SecurityEventPipelineTests
             SecurityEventChannels.All.Select(channel => (channel, new EventCheckpoint(channel == System ? 50 : 0, null))).ToArray());
         AppendMany(markerRig.Log, service, 60);
         await markerRig.StepAsync();
-        Check(markerRig.Uploader.AcceptedBatches[^1].Gaps.SingleOrDefault() is { Reason: SecurityEventGapReasons.LogReset, FirstRecordId: 51 },
+        Check(markerRig.Uploader.AcceptedBatches[^1].Gaps.SingleOrDefault() is { Reason: SecurityEventGapReasons.LogReset, FirstRecordId: 51 } &&
+              markerRig.Uploader.AcceptedBatches[^1].Events.Select(o => o.RecordId).SequenceEqual(Range(1, 60)),
             "A contradicted below-oldest marker was not reported as a reset.");
+
+        // Coverage that starts on a tail record without a creation time resumes there, without a reset or history.
+        var untimedTail = Rig.Create(Path.Combine(directory, "e-untimed"));
+        AppendMany(untimedTail.Log, service, 5);
+        var tail = untimedTail.Log.Append(System, service.Provider, service.EventId, service.Fields, service.Level, withoutTime: true);
+        await untimedTail.StepAsync();
+        var appended = SecurityEventFixtures.Append(untimedTail.Log, service);
+        await untimedTail.AdvanceAsync(Poll);
+        Check(untimedTail.Uploader.AcceptedBatches[0].Gaps.Single(gap => gap.Channel == System).FirstRecordId == tail + 1 &&
+              untimedTail.Uploader.AcceptedBatches[^1].Events.Select(o => o.RecordId).SequenceEqual([appended]) &&
+              untimedTail.Uploader.AcceptedBatches.Skip(1).All(batch => batch.Gaps.Count == 0),
+            "Coverage on a tail record without a creation time was taken for a reset.");
 
         // (f) and (g): a seek that misses the anchor, and a failing bookmark seek, both fall back exactly.
         foreach (var mode in new[] { "f", "g" })
@@ -1257,7 +1316,7 @@ internal static class SecurityEventPipelineTests
         var clearedAt = SecurityEventChannels.All.ToDictionary(channel => channel, _ => new List<DateTimeOffset>());
         var pendingClear = new Dictionary<string, (DateTimeOffset At, long FirstId, bool Restart)>();
         byte[]? previousCheckpoint = null;
-        int clears = 0, trims = 0, restarts = 0, rollbacks = 0, coveredByGap = 0;
+        int clears = 0, trims = 0, restarts = 0, rollbacks = 0, coveredByGap = 0, regrownRecords = 0;
 
         void Append(string channel, SecurityEventFixtures.Fixture? fixture, Dictionary<string, object?>? overrides, bool selected)
         {
@@ -1342,6 +1401,23 @@ internal static class SecurityEventPipelineTests
                     clearedAt[channelPick].Add(rig.Time.GetUtcNow());
                     pendingClear[channelPick] = (rig.Time.GetUtcNow(), restart ? 1 : firstId, restart);
                     clears++;
+
+                    // The new generation may regrow before the next poll: below, to or past the old position.
+                    var regrowth = random.Next(3) switch
+                    {
+                        0 => 0,
+                        1 => random.Next(1, 4),
+                        _ => (int)Math.Min(position + random.Next(-1, 3), 200)
+                    };
+                    var fixtures = SecurityEventFixtures.Positive.Where(fixture => fixture.Channel == channelPick).ToArray();
+                    for (var index = 0; index < regrowth; index++)
+                    {
+                        var fixture = fixtures[random.Next(fixtures.Length)];
+                        if (random.Next(3) == 0) Append(channelPick, fixture, null, true);
+                        else Append(channelPick, null, null, false);
+                    }
+
+                    regrownRecords += regrowth;
                 }
             }
             else if (roll < 46)
@@ -1431,11 +1507,14 @@ internal static class SecurityEventPipelineTests
         }
 
         Check(uncovered == 0, $"Seed {seed}: {uncovered} selected records were neither delivered nor covered by a gap.");
+        var resets = sink.Gaps.Keys.Count(key => key.Reason == SecurityEventGapReasons.LogReset);
         Check(sink.Rejected == 0 && sink.Rows.Count > 100 && coveredByGap > 0 && clears > 0 && trims > 0 && rollbacks > 0 &&
-              restarts > 0 && sink.Duplicates > 0, $"Seed {seed}: the run did not exercise losses, resets, restarts and replays.");
+              restarts > 0 && sink.Duplicates > 0 && resets > 0 && regrownRecords > 0,
+            $"Seed {seed}: the run did not exercise losses, resets, restarts and replays.");
         Console.WriteLine($"Security event invariant seed {seed}: {sink.Rows.Count} rows, {coveredByGap} covered by gaps, " +
-                          $"{sink.Gaps.Count} gap rows, {sink.Duplicates} duplicates absorbed, {sink.Attempts} attempts, " +
-                          $"{clears} clears, {trims} overwrites, {restarts} restarts, {rollbacks} crash rollbacks.");
+                          $"{sink.Gaps.Count} gap rows ({resets} resets), {sink.Duplicates} duplicates absorbed, " +
+                          $"{sink.Attempts} attempts, {clears} clears ({regrownRecords} records regrown before a poll), " +
+                          $"{trims} overwrites, {restarts} restarts, {rollbacks} crash rollbacks.");
 
         static int GenerationAt(List<DateTimeOffset> clears, DateTimeOffset at) => clears.Count(clear => clear < at);
     }

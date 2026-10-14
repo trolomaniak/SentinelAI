@@ -57,6 +57,8 @@ public sealed class SecurityEventPipeline : BackgroundService
 {
     public const int MaxScanPerChannel = 1024;
     public const int MaxScanPerPoll = 2048;
+    // A reset plus an overwrite at the start of the new generation, before any dropped record.
+    private const int MaxContinuityGapsPerChannel = 2;
     private static readonly TimeSpan FailureLogInterval = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan FlushTimeout = TimeSpan.FromSeconds(5);
     private static readonly string AgentVersion =
@@ -312,8 +314,8 @@ public sealed class SecurityEventPipeline : BackgroundService
         for (var offset = 0; offset < _channels.Length; offset++)
         {
             var state = _channels[(start + offset) % _channels.Length];
-            // Each channel not yet visited may still add one gap before its scan; reserve room for it.
-            var reserve = _channels.Length - offset - 1;
+            // Each channel not yet visited may still add its continuity gaps before its scan; reserve room for them.
+            var reserve = (_channels.Length - offset - 1) * MaxContinuityGapsPerChannel;
             if (state.IsUnavailable && now < state.RetryAtUtc) continue;
 
             var pass = new ChannelPass(state.Position ?? 0, state.AnchorTicks);
@@ -329,38 +331,43 @@ public sealed class SecurityEventPipeline : BackgroundService
                     var tail = newest?.RecordId ?? 0;
                     AddGap(draft, state, SecurityEventGapReasons.CoverageStarted, tail + 1, null,
                         state.CoverageCause ?? SecurityEventCoverageCauses.NoCheckpoint, now);
-                    draft.End[state.Channel] = (tail, newest?.TimeCreatedUtc?.UtcTicks);
+                    // Position 0 (an empty log) is the start of a generation and never carries an anchor.
+                    draft.End[state.Channel] = (tail, tail > 0 ? newest?.TimeCreatedUtc?.UtcTicks : null);
                     continue;
                 }
 
                 var anchor = state.AnchorTicks;
-                if (extent.NewestRecordId is not { } newestId || extent.OldestRecordId is not { } oldestId ||
-                    newestId < position || position > 0 && anchor is null && oldestId <= position)
+                if (extent.NewestRecordId is not { } newestId || extent.OldestRecordId is not { } oldestId)
                 {
-                    // Empty, shrunk, or a below-oldest marker contradicted: the log was reset. The new
-                    // generation is read from its first record by the next pass.
+                    // Emptied: the log was reset; its next generation is read from the start.
                     if (position > 0) ResetChannel(draft, state, position, now);
                     continue;
                 }
 
-                long? from;
-                if (oldestId > position + 1)
+                long? from = null;
+                if (newestId < position)
+                {
+                    // Shrunk: the log was reset; the new generation is read in this same pass.
+                    pass = StartGeneration(draft, state, position, oldestId, now);
+                }
+                else if (oldestId > position + 1)
                 {
                     // Records after the position were overwritten unread (including from a generation start).
                     AddGap(draft, state, SecurityEventGapReasons.Overwritten, position + 1, oldestId - 1, null, now);
                     pass = new ChannelPass(oldestId - 1, null);
-                    from = null;
                 }
                 else if (newestId == position)
                 {
                     // Nothing new; the anchor is verified again when the next record arrives.
                     continue;
                 }
-                else
+                else if (position > 0 && oldestId <= position)
                 {
-                    // A seek needs the anchor in the log; otherwise read from the start above the position.
-                    from = position > 0 && anchor is not null && oldestId <= position ? position : null;
+                    // The position is in the log: seek on it and prove the generation by its time. A
+                    // below-oldest marker (no time) verifies only against a record without a time.
+                    from = position;
                 }
+                // Otherwise (position 0, or only the anchor itself overwritten) read from the oldest record.
 
                 if (budgetFull || totalScanned >= MaxScanPerPoll)
                 {
@@ -491,8 +498,10 @@ public sealed class SecurityEventPipeline : BackgroundService
     }
 
     /// <summary>
-    /// The first returned record at or above the position must be the position with its stored time.
-    /// Returns false when the channel's pass ends because a reset was recorded.
+    /// The first returned record at or above the position must be the position with its stored time;
+    /// then the cursor continues after it. Otherwise the channel is described again and read from the
+    /// start of what the log holds now, with the reset or overwrite recorded. Returns false only when
+    /// the pass ends because the log is empty.
     /// </summary>
     private bool VerifyAnchor(Draft draft, ChannelState state, ref IEventRecordCursor? cursor, ref ChannelPass pass,
         long position, long? anchor, long newest, DateTimeOffset now)
@@ -508,32 +517,32 @@ public sealed class SecurityEventPipeline : BackgroundService
             first = FirstAtOrAbove(cursor, position);
         }
 
-        if (first?.RecordId == position)
-        {
-            if (first.Value.TimeCreatedUtc?.UtcTicks == anchor) return true;
-            // Same number, different time: the log was cleared and has regrown past the position.
-            ResetChannel(draft, state, position, now);
-            return false;
-        }
+        if (first?.RecordId == position && first.Value.TimeCreatedUtc?.UtcTicks == anchor) return true;
 
+        // Same number with a different time: the log was cleared and has regrown past the position.
+        var regrown = first?.RecordId == position;
         cursor!.Dispose();
         cursor = null;
         var extent = _access.Describe(state.Channel);
         SetDescribed(state, extent, now);
-        if (extent.NewestRecordId is not { } newestId || extent.OldestRecordId is not { } oldestId ||
-            newestId < position || oldestId <= position)
+        if (extent.NewestRecordId is not { } newestId || extent.OldestRecordId is not { } oldestId)
         {
-            // The record should exist but does not: a reset.
             ResetChannel(draft, state, position, now);
             return false;
         }
 
-        if (oldestId > position + 1)
+        if (regrown || newestId < position || oldestId <= position)
+        {
+            // A reset (the record should exist but does not, or is another record): read the new generation now.
+            pass = StartGeneration(draft, state, position, oldestId, now);
+        }
+        else if (oldestId > position + 1)
         {
             AddGap(draft, state, SecurityEventGapReasons.Overwritten, position + 1, oldestId - 1, null, now);
             pass = new ChannelPass(oldestId - 1, null);
         }
 
+        // Oldest == position + 1: only the anchor itself was overwritten and nothing was lost.
         cursor = _access.Open(state.Channel, null, newestId);
         return true;
     }
@@ -548,10 +557,24 @@ public sealed class SecurityEventPipeline : BackgroundService
         return null;
     }
 
+    /// <summary>An emptied log: the reset is recorded and the next generation is read from its first record.</summary>
     private void ResetChannel(Draft draft, ChannelState state, long position, DateTimeOffset now)
     {
         AddGap(draft, state, SecurityEventGapReasons.LogReset, position + 1, null, null, now);
         draft.End[state.Channel] = (0, null);
+    }
+
+    /// <summary>
+    /// A reset with records in the new generation, which is read in the same pass so its position never
+    /// rests at 0. Unread old records are inside the reset gap; the new generation is numbered from 1,
+    /// so records below its oldest were overwritten before they could be read.
+    /// </summary>
+    private ChannelPass StartGeneration(Draft draft, ChannelState state, long position, long oldest, DateTimeOffset now)
+    {
+        AddGap(draft, state, SecurityEventGapReasons.LogReset, position + 1, null, null, now);
+        if (oldest <= 1) return new ChannelPass(0, null);
+        AddGap(draft, state, SecurityEventGapReasons.Overwritten, 1, oldest - 1, null, now);
+        return new ChannelPass(oldest - 1, null);
     }
 
     private static void Advance(ChannelState state, ref ChannelPass pass, long id, EventRecordHeader header)
