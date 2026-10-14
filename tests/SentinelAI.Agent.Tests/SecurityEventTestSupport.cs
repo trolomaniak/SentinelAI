@@ -27,6 +27,7 @@ internal sealed class SyntheticEventLog : IEventLogAccess
     private int _openCalls;
     private int _readNewestCalls;
     private int _recordsYielded;
+    private int _cancelPendingCalls;
 
     public SyntheticEventLog(SecurityEventCatalog? catalog = null)
     {
@@ -40,6 +41,7 @@ internal sealed class SyntheticEventLog : IEventLogAccess
     public int OpenCalls => Volatile.Read(ref _openCalls);
     public int ReadNewestCalls => Volatile.Read(ref _readNewestCalls);
     public int RecordsYielded => Volatile.Read(ref _recordsYielded);
+    public int CancelPendingCalls => Volatile.Read(ref _cancelPendingCalls);
     public IReadOnlyCollection<string> RequestedFieldNames => _requestedFieldNames.Keys.ToArray();
 
     /// <summary>Runs after the seek precondition check and before the result set is taken (races).</summary>
@@ -264,9 +266,7 @@ internal sealed class SyntheticEventLog : IEventLogAccess
         }
     }
 
-    public void CancelPending()
-    {
-    }
+    public void CancelPending() => Interlocked.Increment(ref _cancelPendingCalls);
 
     public void Dispose()
     {

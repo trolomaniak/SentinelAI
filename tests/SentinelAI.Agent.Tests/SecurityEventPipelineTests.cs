@@ -1807,6 +1807,10 @@ internal static class SecurityEventPipelineTests
         Check(restarts.Length == 4 && restarts.All(gap =>
                   gap is { Cause: SecurityEventCoverageCauses.NoCheckpoint, LastRecordId: null, CoverageRestart: true }),
             "Core did not flag the coverage restart after a deleted checkpoint.");
+        Check((await core.EventSourcesAsync(endpointId)).RecentGaps.Count(gap => gap is
+                  { Reason: SecurityEventGapReasons.CoverageStarted, CoverageRestart: true } &&
+                  gap.FirstRecordId == tails[gap.Channel] + 1) == 4,
+            "The status route did not show the coverage restart.");
         Check(await events.CountAsync(endpointId) == count, "Records written before the restarted coverage were delivered.");
 
         // Excluded values never reach Core's database, the Agent's files or the Agent's logs.
@@ -1922,11 +1926,54 @@ internal static class SecurityEventPipelineTests
         // The held batch was never acknowledged, so the restarted Agent delivers it from the log.
         var held = await events.CountAsync(endpointId);
         var heldDuplicates = link.EventDuplicates;
-        await RunAgentAsync(SecurityEventTestHost.BuildEventAgent(agentDirectory, core.Url, httpClient, log), async pipeline =>
-            await WaitForAsync(async () => await events.CountAsync(endpointId) == held + 1 &&
-                    Position(pipeline, SecurityEventChannels.System) == log.Extent(SecurityEventChannels.System).Newest,
-                "A held batch was not delivered after a restart."));
-        Check(link.EventDuplicates == heldDuplicates, "Delivering the held batch resent acknowledged events.");
+        long? noise;
+        using (var agent = SecurityEventTestHost.BuildEventAgent(agentDirectory, core.Url, httpClient, log))
+        {
+            await agent.StartAsync();
+            var stopped = false;
+            try
+            {
+                var pipeline = agent.Services.GetRequiredService<SecurityEventPipeline>();
+                await WaitForAsync(async () => await events.CountAsync(endpointId) == held + 1 &&
+                        Position(pipeline, SecurityEventChannels.System) == log.Extent(SecurityEventChannels.System).Newest,
+                    "A held batch was not delivered after a restart.");
+                Check(link.EventDuplicates == heldDuplicates, "Delivering the held batch resent acknowledged events.");
+
+                // Stopping during a native read: the stop cancels the read at once instead of waiting for its
+                // timeout, the cancelled read is not a channel error, and a deferred position is still persisted.
+                log.AppendNoise(SecurityEventChannels.PowerShell, 2);
+                noise = log.Extent(SecurityEventChannels.PowerShell).Newest;
+                await WaitForAsync(() => Position(pipeline, SecurityEventChannels.PowerShell) == noise,
+                    "Records outside the catalog did not advance the position.");
+                var cancels = log.CancelPendingCalls;
+                var reading = 0;
+                log.BeforeOpen = channel =>
+                {
+                    // Blocks the loop as a native read does, until cancelled or for the 10 s read timeout.
+                    if (channel != SecurityEventChannels.System || Interlocked.Exchange(ref reading, 1) != 0) return;
+                    var deadline = DateTime.UtcNow.AddSeconds(10);
+                    while (log.CancelPendingCalls == cancels && DateTime.UtcNow < deadline) Thread.Sleep(10);
+                    throw new OperationCanceledException();
+                };
+                SecurityEventFixtures.Append(log, service);
+                await WaitForAsync(() => Volatile.Read(ref reading) != 0, "The Agent did not read the new record.");
+                await StopHostAsync(agent);
+                stopped = true;
+                Check(log.CancelPendingCalls == cancels + 1 && pipeline.ExecuteTask is { IsCompleted: true },
+                    "Stopping the Agent did not cancel the native read in progress.");
+                Check(pipeline.Snapshot.Sources.Single(source => source.Channel == SecurityEventChannels.System) is
+                        { State: SecurityEventSourceStates.Collecting, LastErrorCode: null },
+                    "A read cancelled by the stop was reported as a channel error.");
+            }
+            finally
+            {
+                log.BeforeOpen = null;
+                if (!stopped) await StopHostAsync(agent);
+            }
+        }
+
+        Check(ReadCheckpoint(Path.Combine(agentDirectory, "event-checkpoints"))[SecurityEventChannels.PowerShell] == noise,
+            "The stop flush did not run after a cancelled read.");
     }
 
     // I6-I7 (fixture C): per-channel degradation is contained and reported; an unenrolled Agent stays dormant.
