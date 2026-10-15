@@ -90,6 +90,23 @@ jobs:
             Write-Output "::notice title=Windows security event acceptance::$($lines -join ' ')"
           }
           exit $testExitCode
+      - name: Verify native endpoint security telemetry
+        shell: pwsh
+        run: |
+          # Elevated, read-only: compares collected telemetry with Get-Service, ADSI, CIM, the uninstall registry and the
+          # Windows Update Agent, then delivers it through the production Agent composition to a real Core.
+          dotnet run --project tests/SentinelAI.Agent.Tests/SentinelAI.Agent.Tests.csproj --configuration Release --no-build -- --native-telemetry-acceptance *> "$env:RUNNER_TEMP\sentinelai-telemetry-acceptance.log"
+          $testExitCode = $LASTEXITCODE
+          $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-telemetry-acceptance.log" | Where-Object { $_ -notlike '{*' } | Select-Object -Last 25
+          $tail
+          if ($testExitCode -ne 0) {
+            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows endpoint telemetry acceptance::$message"
+          } else {
+            $lines = Get-Content "$env:RUNNER_TEMP\sentinelai-telemetry-acceptance.log" | Where-Object { $_ -like 'Native*telemetry*' }
+            Write-Output "::notice title=Windows endpoint telemetry acceptance::$($lines -join ' ')"
+          }
+          exit $testExitCode
       - name: Publish standalone Agent EXE
         shell: bash
         run: ./scripts/publish-agent-windows.sh

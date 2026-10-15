@@ -28,6 +28,7 @@ public sealed record AgentOptions(
     public Uri EnrollmentUrl => new(CoreUrl, "/api/agent/enroll");
     public Uri InventoryUrl => new(CoreUrl, "/api/agent/inventory");
     public Uri SecurityEventsUrl => new(CoreUrl, "/api/agent/security-events");
+    public Uri SecurityTelemetryUrl => new(CoreUrl, "/api/agent/security-telemetry");
     public override string ToString() => nameof(AgentOptions);
 
     public static AgentOptions FromConfiguration(IConfiguration configuration)

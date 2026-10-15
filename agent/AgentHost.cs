@@ -69,9 +69,19 @@ public static class AgentHost
         builder.Services.AddSingleton<EventCheckpointStore>();
         builder.Services.AddSingleton<ISecurityEventUploader, HttpSecurityEventUploader>();
         builder.Services.AddSingleton<SecurityEventPipeline>();
+        builder.Services.AddSingleton<IEndpointTelemetrySource>(_ => OperatingSystem.IsWindows()
+            ? new WindowsEndpointTelemetrySource()
+            : new UnsupportedEndpointTelemetrySource());
+        builder.Services.AddSingleton(provider => new EndpointTelemetryCollector(
+            provider.GetRequiredService<IEndpointTelemetrySource>(), provider.GetRequiredService<TimeProvider>()));
+        builder.Services.AddSingleton<IEndpointTelemetryUploader, HttpEndpointTelemetryUploader>();
         builder.Services.AddHostedService(provider => provider.GetRequiredService<PostureMonitor>());
         // Stops after the heartbeat worker: cancels any read, cancels an in-flight POST and flushes positions.
         builder.Services.AddHostedService(provider => provider.GetRequiredService<SecurityEventPipeline>());
+        builder.Services.AddHostedService(provider => new EndpointTelemetryWorker(provider.GetRequiredService<AgentLink>(),
+            provider.GetRequiredService<EndpointTelemetryCollector>(), provider.GetRequiredService<IEndpointTelemetryUploader>(),
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<EndpointTelemetryWorker>>()));
         builder.Services.AddHostedService<HeartbeatWorker>();
 
         return builder;
