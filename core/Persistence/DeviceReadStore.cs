@@ -43,13 +43,36 @@ public sealed class DeviceReadStore(AdminStore admins)
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        await using var query = connection.CreateCommand();
-        query.CommandText = SelectDevices + " WHERE e.EndpointId = $endpointId LIMIT 1;";
-        query.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
-        await using var reader = await query.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken)
-            ? ReadDetail(reader, DateTimeOffset.UtcNow)
-            : null;
+        // One read snapshot for the device and its telemetry.
+        using var transaction = connection.BeginTransaction(deferred: true);
+        DeviceDetail? detail;
+        await using (var query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
+            query.CommandText = SelectDevices + " WHERE e.EndpointId = $endpointId LIMIT 1;";
+            query.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            detail = await reader.ReadAsync(cancellationToken) ? ReadDetail(reader, DateTimeOffset.UtcNow) : null;
+        }
+
+        if (detail is not null)
+        {
+            await using var query = connection.CreateCommand();
+            query.Transaction = transaction;
+            query.CommandText = """
+                SELECT ReportJson, ReceivedUtcTicks FROM EndpointSecurityTelemetry WHERE EndpointId = $endpointId;
+                """;
+            query.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken) &&
+                EndpointTelemetryStore.Parse(reader.GetString(0), reader.GetInt64(1)) is { } stored)
+            {
+                detail = detail with { SecurityTelemetry = EndpointTelemetryView.From(stored.Report, stored.ReceivedUtc) };
+            }
+        }
+
+        transaction.Commit();
+        return detail;
     }
 
     private static DeviceDetail ReadDetail(SqliteDataReader reader, DateTimeOffset now)

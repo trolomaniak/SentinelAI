@@ -115,7 +115,8 @@ test('endpoint risk exposes assumptions, every contribution factor, policy caps,
       'Eligible for correlation', 'Correlation base cap', '20 points before asset and exposure multipliers',
       '60 points after asset and exposure weighting', 'FW, UAC',
       'age is clamped to zero', 'Evaluated', 'Inventory observed', 'signals: partial; 3 of 13 known',
-      'Investigating and Accepted do not reduce', 'does not establish live protection']) {
+      'Investigating and Accepted do not reduce', 'does not establish live protection',
+      'endpoint telemetry findings confirmed by the latest telemetry report']) {
       assert.ok(content.textContent.includes(text), `detail displays ${text}`);
     }
     assert.equal(content.querySelectorAll('img, script').length, 0);

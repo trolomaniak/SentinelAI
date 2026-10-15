@@ -206,6 +206,15 @@
                                           AutomationProperties.AutomationId="DevicePostureFacts" />
                         </StackPanel>
                     </Border>
+                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,16,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Endpoint security telemetry" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <TextBlock Text="{Binding Detail.TelemetryStatusText}" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="0,0,0,16"
+                                       AutomationProperties.AutomationId="DeviceTelemetryStatus" />
+                            <ItemsControl ItemsSource="{Binding Detail.TelemetryFacts}" ItemTemplate="{StaticResource DeviceFactTemplate}"
+                                          AutomationProperties.AutomationId="DeviceTelemetryFacts" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </StackPanel>
         </StackPanel>

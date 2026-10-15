@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Automation;
 using System.Windows.Data;
+using SentinelAI.Contracts.EndpointTelemetry;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Desktop;
 using SentinelAI.Desktop.Foundation;
@@ -67,6 +68,13 @@ internal static partial class Program
             Ensure(devices.Detail?.PostureFacts.Any(fact => fact.Value == "Disabled") == true &&
                 devices.Detail.Device.Health == DeviceHealth.Healthy,
                 "Native detail inferred security posture from healthy connectivity.");
+            var telemetryFacts = (ItemsControl)Descendants<ItemsControl>(view)
+                .Single(control => AutomationProperties.GetAutomationId(control) == "DeviceTelemetryFacts");
+            Ensure(telemetryFacts.IsVisible && telemetryFacts.Items.Count == devices.Detail!.TelemetryFacts.Count &&
+                Descendants<TextBlock>(view).Any(text => text.Text == "Unknown (not readable by the Agent's service account)") &&
+                Descendants<TextBlock>(view).Any(text => text.Text == "Stopped · start disabled") &&
+                Descendants<TextBlock>(view).Any(text => text.Text == devices.Detail.TelemetryStatusText),
+                "Native endpoint telemetry was not rendered with its explicit Unknown reasons.");
             var readsBeforeValidation = client.ListCalls;
             var openDetail = devices.Detail;
             await auth.CheckSessionAsync();
@@ -85,8 +93,11 @@ internal static partial class Program
             await WaitForAsync(() => devices.DetailState == DeviceDetailState.Ready, "Inventory-free native detail did not open.");
             Ensure(devices.Detail!.Device.Health == DeviceHealth.Unknown &&
                 devices.Detail.InventoryStatusText.Contains("No inventory", StringComparison.OrdinalIgnoreCase) &&
-                devices.Detail.PostureFacts.All(fact => fact.Value == "Unknown"),
-                "Native missing inventory was inferred as known or protected.");
+                devices.Detail.PostureFacts.All(fact => fact.Value == "Unknown") &&
+                devices.Detail.SecurityTelemetryReported == false &&
+                devices.Detail.TelemetryFacts.Where(fact => !fact.Label.StartsWith("Telemetry ", StringComparison.Ordinal))
+                    .All(fact => fact.Value == "Unknown (no telemetry reported)"),
+                "Native missing inventory or telemetry was inferred as known or protected.");
             devices.CloseDetail();
             devices.SearchText = "";
             devices.HealthFilter = DeviceHealthFilter.Warning;
@@ -156,7 +167,18 @@ internal static partial class Program
             return Task.FromResult(new DeviceReadResult<EndpointDetail>(DeviceReadOutcome.Success,
                 new(summary, summary.InventoryCollectedUtc, absent ? null : "26H2 10.0.26200.0", absent ? null : "X64",
                     absent ? null : new CpuInventory("Synthetic CPU", 8), absent ? null : 8589934592L, [],
-                    absent ? null : new SecurityPostureInventory(true, false, null), absent ? null : "Windows 11")));
+                    absent ? null : new SecurityPostureInventory(true, false, null), absent ? null : "Windows 11",
+                    absent ? null : Telemetry())));
         }
+
+        // Synthetic telemetry: one section not readable by the Agent's account and a stopped firewall service.
+        private static EndpointTelemetryDetail Telemetry() => new(DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(-2),
+            new BitLockerTelemetry(TelemetryAvailability.AccessDenied), new AntivirusTelemetry(TelemetryAvailability.Collected, "good"),
+            new DefenderTelemetry(TelemetryAvailability.Collected, "normal", true, true, null, 1),
+            new LocalAdministratorsTelemetry(TelemetryAvailability.Collected, 1, [new("S-1-5-21-1000-1000-1000-500", "local", "user")]),
+            new WindowsUpdateTelemetry(TelemetryAvailability.Collected, TelemetryAvailability.Unavailable, "notConfigured", false),
+            new PendingRebootTelemetry(TelemetryAvailability.Collected, false, false, false),
+            new SecurityServicesTelemetry(TelemetryAvailability.Collected, [new("MpsSvc", "stopped", "disabled")]),
+            new InstalledSoftwareSummary(TelemetryAvailability.Collected, 12, 12, false, 0));
     }
 }

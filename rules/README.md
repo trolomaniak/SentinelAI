@@ -27,9 +27,10 @@ typed evidence values, endpoint ID, inventory observation timestamp, and a
 recommended action. Default ordering is fixed. Evaluation has no clock, I/O,
 randomness, remediation, or language model dependency. Alerts describe reported
 settings rather than effective protection, active services, installed patches,
-or Internet exposure. BitLocker, antivirus health, unexpected local
-administrators, and missing patches cannot be inferred from this telemetry and
-have no rules until explicit supporting observations exist.
+or Internet exposure. BitLocker, antivirus health and security service state
+come from separate endpoint telemetry with its own rules (below); unexpected
+local administrators and missing patches have no rules because that telemetry
+does not establish a weakness on its own.
 
 Snapshots are evaluated on demand; results are not an incident history, and
 repeat evaluation of one snapshot returns the same serialized alerts.
@@ -44,3 +45,21 @@ positive evidence, have no clock, I/O, randomness or model input, and return at
 most one finding per rule per batch (the latest evidence). Rule IDs, prerequisites,
 evidence, reasons, recommended actions and false-positive considerations are in
 [docs/EVENT-RULES.md](../docs/EVENT-RULES.md).
+
+## Endpoint telemetry rules
+
+`TelemetryRuleEngine.CreateDefault()` holds four rules over the hourly endpoint
+telemetry report. Core evaluates a newly stored report in its ingest transaction
+and records findings in the tracked-alert lifecycle. A rule reads only sections
+reported as collected and fires only on explicit values; Unknown or uncollected
+values never match.
+
+| Rule ID | Match condition | Severity |
+| --- | --- | --- |
+| SA-AV-001 | Windows Security Center reports antivirus health poor or snoozed | high |
+| SA-DISK-001 | BitLocker protection explicitly off on the operating system volume | medium |
+| SA-SVC-001 | Windows Defender Firewall service (MpsSvc) stopped or set to start disabled | high |
+| SA-SVC-002 | Windows Event Log service (EventLog) stopped or set to start disabled | high |
+
+Sources, evidence, false-positive considerations and the observations that
+deliberately have no rule are in [docs/ENDPOINT-TELEMETRY.md](../docs/ENDPOINT-TELEMETRY.md).

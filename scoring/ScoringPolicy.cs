@@ -41,6 +41,8 @@ public sealed class ScoringPolicy
         ["SA-RDP-001"] = "RDP", ["SA-RDP-002"] = "RDP", ["SA-RDP-003"] = "RDP",
         ["SA-SMB-001"] = "SMB", ["SA-SMB-002"] = "SMB",
         ["SA-LOGON-001"] = "LOGON", ["SA-LSA-001"] = "LSA", ["SA-UPDATE-001"] = "UPDATE",
+        // Endpoint telemetry: a stopped firewall service and a disabled firewall profile are one weakness.
+        ["SA-AV-001"] = "AV", ["SA-DISK-001"] = "DISK", ["SA-SVC-001"] = "FW", ["SA-SVC-002"] = "LOGGING",
         ["SA-EVT-LOGON-001"] = "EVT-AUTH", ["SA-EVT-RDP-001"] = "EVT-AUTH",
         ["SA-EVT-DEF-001"] = "EVT-MALWARE", ["SA-EVT-DEF-002"] = "EVT-MALWARE",
         ["SA-EVT-PROT-001"] = "EVT-DEFENSE", ["SA-EVT-PROT-002"] = "EVT-DEFENSE", ["SA-EVT-PROT-003"] = "EVT-DEFENSE",

@@ -90,6 +90,23 @@ jobs:
             Write-Output "::notice title=Windows security event acceptance::$($lines -join ' ')"
           }
           exit $testExitCode
+      - name: Verify native endpoint security telemetry
+        shell: pwsh
+        run: |
+          # Elevated, read-only: compares collected telemetry with Get-Service, ADSI, CIM, the uninstall registry and the
+          # Windows Update Agent, then delivers it through the production Agent composition to a real Core.
+          dotnet run --project tests/SentinelAI.Agent.Tests/SentinelAI.Agent.Tests.csproj --configuration Release --no-build -- --native-telemetry-acceptance *> "$env:RUNNER_TEMP\sentinelai-telemetry-acceptance.log"
+          $testExitCode = $LASTEXITCODE
+          $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-telemetry-acceptance.log" | Where-Object { $_ -notlike '{*' } | Select-Object -Last 25
+          $tail
+          if ($testExitCode -ne 0) {
+            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows endpoint telemetry acceptance::$message"
+          } else {
+            $lines = Get-Content "$env:RUNNER_TEMP\sentinelai-telemetry-acceptance.log" | Where-Object { $_ -like 'Native*telemetry*' }
+            Write-Output "::notice title=Windows endpoint telemetry acceptance::$($lines -join ' ')"
+          }
+          exit $testExitCode
       - name: Publish standalone Agent EXE
         shell: bash
         run: ./scripts/publish-agent-windows.sh
@@ -115,11 +132,20 @@ jobs:
           $serviceName = 'SentinelAIAgent'
           $exe = (Resolve-Path ./artifacts/agent/win-x64/SentinelAI.Agent.exe).Path
           New-Service -Name $serviceName -BinaryPathName "`"$exe`"" -StartupType Manual
+          $started = Get-Date
           try {
             Start-Service -Name $serviceName
             Start-Sleep -Seconds 5
             if ((Get-Service -Name $serviceName).Status -ne 'Running') {
-              throw 'Agent service stopped while Core was unavailable.'
+              # Fixed identifiers only (state, exit codes, event provider/ID/level, exception type names), never message text.
+              $cim = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'"
+              $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application', 'System'; StartTime = $started } -ErrorAction SilentlyContinue |
+                Where-Object { $_.ProviderName -in 'SentinelAI.Agent', '.NET Runtime', 'Application Error', 'Service Control Manager' } |
+                Select-Object -First 20 | ForEach-Object {
+                  $types = @([regex]::Matches([string]$_.Message, '\b[A-Z][A-Za-z0-9]*(\.[A-Z][A-Za-z0-9]*)*Exception\b') | ForEach-Object Value | Select-Object -Unique)
+                  "$($_.ProviderName)/$($_.Id)/$($_.LevelDisplayName)" + $(if ($types.Count -gt 0) { ' ' + ($types -join ',') } else { '' })
+                })
+              throw "Agent service stopped while Core was unavailable (state=$($cim.State), exit=$($cim.ExitCode), serviceExit=$($cim.ServiceSpecificExitCode); events: $($events -join '; '))."
             }
           } finally {
             $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue

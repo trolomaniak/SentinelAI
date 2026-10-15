@@ -8,13 +8,15 @@ Core alone classifies heartbeat health: at most two minutes is Healthy, over two
 
 Details show endpoint identity, connectivity, operating system name/release/build, Agent version, inventory time, architecture, CPU, RAM, disks and the public configured firewall/security observations already exposed by Core. A missing inventory is explicit; unavailable fields and nullable configuration observations remain Unknown. Configured firewall settings do not establish effective packet enforcement, Internet reachability or overall endpoint safety.
 
+The **Endpoint security telemetry** card shows Core's newest [endpoint telemetry](ENDPOINT-TELEMETRY.md) report: collection and receipt times, BitLocker, antivirus and Defender status, local Administrators members by SID with scope and type, Windows Update policy and results, pending restart indicators, each monitored security service and installed application counts. Every value that was not observed reads **Unknown** with its reason: no telemetry reported, not supported on this endpoint, not readable by the Agent's service account, or source unavailable. The application list itself is not shown.
+
 The list and details handle loading, no data, no matches, missing endpoint and Core-unavailable/untrusted/invalid-response states. Data is cleared on sign-out, expiry and window close; obsolete requests cannot repopulate it or invalidate a newer session. Reconnect follows the existing explicit [sign-in flow](DESKTOP-AUTH.md).
 
 ## Boundaries and limits
 
 Desktop calls only the existing read-only administrator device routes through the same private, short-lived session and verified local Core transport. It never reads SQLite, enrollment credentials, password hashes or raw configuration. There is no device edit, enrollment action, remediation, new dependency, schema migration or later native screen.
 
-List requests have a ten-second complete-response deadline, an 8 MiB JSON bound and a 10,000-endpoint limit. Details have the same deadline, a 256 KiB bound and at most 64 disk records. Oversized responses are rejected with an explicit message; the fleet is never silently truncated. Core's existing list API returns the full fleet, so server-side paging/background refresh is not introduced here.
+List requests have a ten-second complete-response deadline, an 8 MiB JSON bound and a 10,000-endpoint limit. Details have the same deadline, a 256 KiB bound, at most 64 disk records and at most 64 listed Administrators members. Oversized responses are rejected with an explicit message; the fleet is never silently truncated. Core's existing list API returns the full fleet, so server-side paging/background refresh is not introduced here.
 
 ## Verification
 

@@ -41,6 +41,21 @@ if (args is ["--native-posture-acceptance"])
     return;
 }
 
+if (args is ["--native-telemetry-acceptance"])
+{
+    try
+    {
+        await EndpointTelemetryTests.RunNativeAcceptanceAsync(testDirectory);
+    }
+    finally
+    {
+        SqliteConnection.ClearAllPools();
+        Directory.Delete(testDirectory, recursive: true);
+    }
+
+    return;
+}
+
 if (args is ["--native-event-acceptance"])
 {
     try
@@ -73,7 +88,10 @@ try
     await VerifyAgentEnrollmentAsync(Path.Combine(testDirectory, "enrollment"));
     await PostureMonitorTests.RunAsync(Path.Combine(testDirectory, "posture"));
     await SecurityEventPipelineTests.RunAsync(Path.Combine(testDirectory, "security-events"));
-    Console.WriteLine("Agent heartbeat, posture monitoring and security event tests passed.");
+    var telemetryChecks = await EndpointTelemetryTests.RunAsync(Path.Combine(testDirectory, "telemetry"));
+    Console.WriteLine($"Endpoint telemetry tests passed ({telemetryChecks} checks: contract, normalization, bounded " +
+                      "collection, delivery schedule and real Core delivery).");
+    Console.WriteLine("Agent heartbeat, posture monitoring, security event and endpoint telemetry tests passed.");
 }
 finally
 {
