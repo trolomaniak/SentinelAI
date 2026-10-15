@@ -312,6 +312,35 @@ function Get-SetupFailureSummary {
         (Test-Path -LiteralPath $script:agentCode -PathType Container), (Test-Path -LiteralPath $script:agentData -PathType Container),
         (Test-Path -LiteralPath $script:desktopCode -PathType Container), (Test-Path -LiteralPath $script:updaterCode -PathType Container))
 }
+function Get-SetupTimeoutSummary {
+    # Same disclosure rule as Get-SetupFailureSummary: fixed literals, service
+    # states, presence flags and counts only. Never native text, paths or secrets.
+    $states = foreach ($name in @('SentinelAICore', 'SentinelAIAgent')) {
+        try {
+            $service = Get-SetupService $name
+            if ($null -eq $service) { 'Absent' }
+            elseif ([string]$service.State -in @('Running', 'Stopped', 'Start Pending', 'Stop Pending', 'Paused')) { [string]$service.State }
+            else { 'Other' }
+        } catch { 'ProbeFailed' }
+    }
+    $enrollment = foreach ($file in @('endpoint-id', 'installation-id', 'enrollment-state', 'pilot-enrollment-token')) {
+        Test-Path -LiteralPath (Join-Path $script:agentData $file) -PathType Leaf
+    }
+    $updaters = @(Get-Process -Name 'SentinelAI.Updater' -ErrorAction SilentlyContinue).Count
+    $crashes = 'Unknown'; $productErrors = 'Unknown'; $serviceErrors = 'Unknown'
+    try {
+        $since = $script:installationSince.LocalDateTime
+        $application = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = @(1, 2); StartTime = $since } -ErrorAction SilentlyContinue)
+        $crashes = @($application | Where-Object { $_.ProviderName -in @('.NET Runtime', 'Application Error') }).Count
+        $productErrors = @($application | Where-Object { $_.ProviderName -like 'SentinelAI*' }).Count
+        $serviceErrors = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager';
+            Id = @(7000, 7009, 7011, 7022, 7023, 7024, 7031, 7034); StartTime = $since } -ErrorAction SilentlyContinue).Count
+    } catch { }
+    return ('{0} CoreService={1}; AgentService={2}; AgentEndpointId={3}; AgentInstallationId={4}; AgentEnrollmentState={5}; AgentEnrollmentTokenPending={6}; UpdaterProcesses={7}; ApplicationCrashEvents={8}; SentinelAIErrorEvents={9}; ServiceControlErrors={10}; ElapsedSeconds={11}.' -f
+        ((Get-SetupFailureSummary) -replace '\AThe actual Setup executable reported a safe installation failure\. ', 'The actual Setup executable did not complete installation. '),
+        $states[0], $states[1], $enrollment[0], $enrollment[1], $enrollment[2], $enrollment[3], $updaters, $crashes, $productErrors, $serviceErrors,
+        [int]([DateTimeOffset]::UtcNow - $script:installationSince).TotalSeconds)
+}
 function Get-HeldInstalledProcess([string]$Name, [string]$Executable, [string]$Account) {
     $service = Get-SetupService $Name
     $expectedImage = '"' + $Executable + '" --config "' + (Join-Path $(if ($Name -eq 'SentinelAICore') { $script:coreData } else { $script:agentData }) 'pilot-config.json') + '"'
@@ -491,14 +520,20 @@ try {
             -not [string]::IsNullOrWhiteSpace($progress.Current.Name) -and
             $progress.Current.Name -cne 'Ready to install a fresh local deployment. Existing installations are preserved and will be refused.'
     } 'Setup did not display native installation progress.'
-    Wait-SetupAcceptance {
+    $completion = [Diagnostics.Stopwatch]::StartNew()
+    $finished = $false
+    while (-not $finished -and $completion.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         Assert-SetupChildArguments
         if (Test-SetupControl 'SetupErrorText' $false) {
             $errorText = Find-SetupControl 'SetupErrorText'
             if (-not [string]::IsNullOrWhiteSpace($errorText.Current.Name)) { throw (Get-SetupFailureSummary) }
         }
-        return Test-SetupControl 'SetupFinishedText' $false
-    } 'The actual Setup executable did not complete installation.' $TimeoutSeconds
+        $finished = Test-SetupControl 'SetupFinishedText' $false
+        if (-not $finished) { Start-Sleep -Milliseconds 100 }
+    }
+    # A hang reports the visible stage and bounded service/enrollment state instead of a bare timeout.
+    if (-not $finished) { throw (Get-SetupTimeoutSummary) }
+    $assertionCount++
     Assert-SetupAcceptance (-not (Test-SetupControl 'SetupInstallButton')) 'Completed Setup unexpectedly allowed another installation.'
     Assert-NativeSetupRuntime $setup $setupOuter
     Assert-PoisonedCallerUntouched
