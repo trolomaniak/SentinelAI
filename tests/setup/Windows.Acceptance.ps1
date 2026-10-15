@@ -327,19 +327,37 @@ function Get-SetupTimeoutSummary {
         Test-Path -LiteralPath (Join-Path $script:agentData $file) -PathType Leaf
     }
     $updaters = @(Get-Process -Name 'SentinelAI.Updater' -ErrorAction SilentlyContinue).Count
-    $crashes = 'Unknown'; $productErrors = 'Unknown'; $serviceErrors = 'Unknown'
-    try {
-        $since = $script:installationSince.LocalDateTime
-        $application = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = @(1, 2); StartTime = $since } -ErrorAction SilentlyContinue)
-        $crashes = @($application | Where-Object { $_.ProviderName -in @('.NET Runtime', 'Application Error') }).Count
-        $productErrors = @($application | Where-Object { $_.ProviderName -like 'SentinelAI*' }).Count
-        $serviceErrors = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager';
-            Id = @(7000, 7009, 7011, 7022, 7023, 7024, 7031, 7034); StartTime = $since } -ErrorAction SilentlyContinue).Count
-    } catch { }
-    return ('{0} CoreService={1}; AgentService={2}; AgentEndpointId={3}; AgentInstallationId={4}; AgentEnrollmentState={5}; AgentEnrollmentTokenPending={6}; UpdaterProcesses={7}; ApplicationCrashEvents={8}; SentinelAIErrorEvents={9}; ServiceControlErrors={10}; ElapsedSeconds={11}.' -f
+    return ('{0} CoreService={1}; AgentService={2}; AgentEndpointId={3}; AgentInstallationId={4}; AgentEnrollmentState={5}; AgentEnrollmentTokenPending={6}; UpdaterProcesses={7}; ElapsedSeconds={8}; {9}.' -f
         ((Get-SetupFailureSummary) -replace '\AThe actual Setup executable reported a safe installation failure\. ', 'The actual Setup executable did not complete installation. '),
-        $states[0], $states[1], $enrollment[0], $enrollment[1], $enrollment[2], $enrollment[3], $updaters, $crashes, $productErrors, $serviceErrors,
-        [int]([DateTimeOffset]::UtcNow - $script:installationSince).TotalSeconds)
+        $states[0], $states[1], $enrollment[0], $enrollment[1], $enrollment[2], $enrollment[3], $updaters,
+        [int]([DateTimeOffset]::UtcNow - $script:installationSince).TotalSeconds, (Get-SetupProductEventSummary $script:installationSince))
+}
+function Get-SetupProductEventSummary([DateTimeOffset]$Since) {
+    # Fixed identifiers only: level, SentinelAI log source, logger category, event ID and
+    # exception type name of SentinelAI's own Application log entries. Never message text.
+    $signatures = [ordered]@{}
+    $crashes = 'Unknown'; $serviceErrors = 'Unknown'
+    try {
+        $start = $Since.LocalDateTime
+        $entries = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = @(1, 2, 3); StartTime = $start } -ErrorAction SilentlyContinue)
+        foreach ($entry in @($entries | Where-Object { $_.ProviderName -like 'SentinelAI*' } | Sort-Object TimeCreated)) {
+            $text = [string]$entry.Message
+            if ([string]::IsNullOrEmpty($text)) { $text = @($entry.Properties | ForEach-Object { [string]$_.Value }) -join "`n" }
+            $provider = 'SentinelAI-other'; $category = 'unknown'; $eventId = 'unknown'; $exception = 'none'
+            if ([string]$entry.ProviderName -cmatch '\ASentinelAI[A-Za-z0-9_.]{0,64}\z') { $provider = [string]$entry.ProviderName }
+            if ($text -cmatch '(?m)^Category: ([A-Za-z0-9_.]{1,128})\r?$') { $category = $Matches[1] }
+            if ($text -cmatch '(?m)^EventId: ([0-9]{1,9})\r?$') { $eventId = $Matches[1] }
+            if ($text -cmatch '(?m)^Exception:[ ]*\r?\n([A-Za-z0-9_.]{1,160})(?::|\r?$)') { $exception = $Matches[1] }
+            $level = switch ([int]$entry.Level) { 1 { 'C' } 2 { 'E' } 3 { 'W' } default { 'O' } }
+            $key = $level + '/' + $provider + '/' + $category + '/' + $eventId + '/' + $exception
+            if ($signatures.Contains($key)) { $signatures[$key] = [int]$signatures[$key] + 1 } else { $signatures[$key] = 1 }
+        }
+        $crashes = @($entries | Where-Object { $_.ProviderName -in @('.NET Runtime', 'Application Error') -and [string]$_.Message -like '*SentinelAI*' }).Count
+        $serviceErrors = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager';
+            Id = @(7000, 7009, 7011, 7022, 7023, 7024, 7031, 7034); StartTime = $start } -ErrorAction SilentlyContinue).Count
+    } catch { }
+    $listed = @($signatures.Keys | Select-Object -Last 12 | ForEach-Object { $_ + ' x' + $signatures[$_] })
+    return ('ProductEvents=[{0}]; SentinelAICrashEvents={1}; ServiceControlErrors={2}' -f ($listed -join ', '), $crashes, $serviceErrors)
 }
 function Get-HeldInstalledProcess([string]$Name, [string]$Executable, [string]$Account) {
     $service = Get-SetupService $Name

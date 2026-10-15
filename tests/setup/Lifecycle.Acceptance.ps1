@@ -272,9 +272,11 @@ function Get-LifecycleFailureDiagnostics($Observation, [double]$ElapsedSeconds, 
         }
     } catch { $metadataProbeSucceeded = $false }
     $elapsed = [int][Math]::Min(86400, [Math]::Max(0, [Math]::Floor($ElapsedSeconds)))
-    return ('FixtureReason={0}; FailurePhase={1}; ElapsedSeconds={2}; ObservedUnhealthyRunning={3}; UIErrorPresent={4}; UIErrorVisible={5}; UISupport={6}; MetadataProbeSucceeded={7}; ContextPresent={8}; JournalPresent={9}; JournalPhase={10}; DeadlineExpired={11}.' -f
+    $since = $script:installationSince
+    if ($null -eq $since) { $since = [DateTimeOffset]::UtcNow.AddHours(-2) }
+    return ('FixtureReason={0}; FailurePhase={1}; ElapsedSeconds={2}; ObservedUnhealthyRunning={3}; UIErrorPresent={4}; UIErrorVisible={5}; UISupport={6}; MetadataProbeSucceeded={7}; ContextPresent={8}; JournalPresent={9}; JournalPhase={10}; DeadlineExpired={11}; {12}.' -f
         $reason, $phase, $elapsed, [bool]$script:observedUnhealthyRunning, $uiErrorPresent, $uiErrorVisible, $uiSupport,
-        $metadataProbeSucceeded, $contextPresent, $journalPresent, $journalPhase, ($reason -ceq 'deadline'))
+        $metadataProbeSucceeded, $contextPresent, $journalPresent, $journalPhase, ($reason -ceq 'deadline'), (Get-SetupProductEventSummary $since))
 }
 function Invoke-LifecycleSetup([string]$Executable, [string]$Action, [bool]$ExpectFailure = $false, [bool]$RemoveData = $false) {
     $launch = Start-TestSetup $Executable; $script:lifecycleHosts.Add($launch)
