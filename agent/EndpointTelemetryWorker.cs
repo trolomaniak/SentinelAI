@@ -101,7 +101,20 @@ public sealed class EndpointTelemetryWorker(
                 var now = time.GetUtcNow();
                 if (now >= nextUtc)
                 {
-                    nextUtc = time.GetUtcNow() + await DeliverAsync(linked, stoppingToken);
+                    TimeSpan delay;
+                    try
+                    {
+                        delay = await DeliverAsync(linked, stoppingToken);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException ||
+                                                      !stoppingToken.IsCancellationRequested)
+                    {
+                        // Telemetry never stops the Agent host: an unexpected failure waits for the retry delay.
+                        logger.LogWarning(exception, "Endpoint telemetry delivery failed unexpectedly");
+                        delay = _timings.RetryDelay;
+                    }
+
+                    nextUtc = time.GetUtcNow() + delay;
                     continue;
                 }
 

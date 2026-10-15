@@ -132,11 +132,20 @@ jobs:
           $serviceName = 'SentinelAIAgent'
           $exe = (Resolve-Path ./artifacts/agent/win-x64/SentinelAI.Agent.exe).Path
           New-Service -Name $serviceName -BinaryPathName "`"$exe`"" -StartupType Manual
+          $started = Get-Date
           try {
             Start-Service -Name $serviceName
             Start-Sleep -Seconds 5
             if ((Get-Service -Name $serviceName).Status -ne 'Running') {
-              throw 'Agent service stopped while Core was unavailable.'
+              # Fixed identifiers only (state, exit codes, event provider/ID/level, exception type names), never message text.
+              $cim = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'"
+              $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application', 'System'; StartTime = $started } -ErrorAction SilentlyContinue |
+                Where-Object { $_.ProviderName -in 'SentinelAI.Agent', '.NET Runtime', 'Application Error', 'Service Control Manager' } |
+                Select-Object -First 20 | ForEach-Object {
+                  $types = @([regex]::Matches([string]$_.Message, '\b[A-Z][A-Za-z0-9]*(\.[A-Z][A-Za-z0-9]*)*Exception\b') | ForEach-Object Value | Select-Object -Unique)
+                  "$($_.ProviderName)/$($_.Id)/$($_.LevelDisplayName)" + $(if ($types.Count -gt 0) { ' ' + ($types -join ',') } else { '' })
+                })
+              throw "Agent service stopped while Core was unavailable (state=$($cim.State), exit=$($cim.ExitCode), serviceExit=$($cim.ServiceSpecificExitCode); events: $($events -join '; '))."
             }
           } finally {
             $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue

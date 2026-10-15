@@ -361,6 +361,16 @@ internal static class EndpointTelemetryTests
             sent = uploader.Sent.Count;
             await Task.Delay(400);
             Ensure(uploader.Sent.Count == sent, "An incompatible answer must not be retried quickly.");
+
+            // An unexpected delivery failure is contained: the worker keeps running and retries after the retry delay.
+            uploader.Next = UploadResult.Accepted;
+            uploader.ThrowNext = true;
+            var fourth = Enrollment();
+            link.Publish(fourth);
+            await WaitUntilAsync(() => uploader.Sent.Count(item => item.EndpointId == fourth.EndpointId) >= 2,
+                "A delivery that failed unexpectedly was not retried.");
+            Ensure(worker.ExecuteTask is { IsCompleted: false } && !uploader.ThrowNext,
+                "An unexpected telemetry failure must never stop the worker or the Agent host.");
         }
         finally
         {
@@ -773,12 +783,19 @@ internal static class EndpointTelemetryTests
         private int _accepted;
         public System.Collections.Concurrent.ConcurrentQueue<EndpointTelemetryReport> Sent { get; } = new();
         public volatile UploadResult Next = UploadResult.Accepted;
+        public volatile bool ThrowNext;
         public int Accepted => Volatile.Read(ref _accepted);
 
         public Task<TelemetryUploadOutcome> SendAsync(EndpointTelemetryReport report, EnrollmentState enrollment,
             CancellationToken cancellationToken)
         {
             Sent.Enqueue(report);
+            if (ThrowNext)
+            {
+                ThrowNext = false;
+                throw new InvalidOperationException("Synthetic unexpected uploader failure.");
+            }
+
             var result = Next;
             if (result == UploadResult.Accepted) Interlocked.Increment(ref _accepted);
             return Task.FromResult(new TelemetryUploadOutcome(result, result == UploadResult.Accepted ? 204 : 503));
