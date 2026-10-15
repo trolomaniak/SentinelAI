@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using SentinelAI.Contracts.EndpointTelemetry;
 using SentinelAI.Desktop.Foundation;
 
 internal static class HttpDeviceReadsTests
@@ -16,6 +18,7 @@ internal static class HttpDeviceReadsTests
     {
         _assertions = 0;
         await ReadsAndUnknownValuesAsync();
+        await TelemetryAsync();
         await StatusAndTrustAsync();
         await ResponseValidationAsync();
         await WorkBoundsAsync();
@@ -116,6 +119,146 @@ internal static class HttpDeviceReadsTests
         using var empty = new TestContext((_, _) => Task.FromResult(Json("[]")));
         await empty.SignInAsync();
         Ensure((await empty.Client.GetDevicesAsync(default)) is { Outcome: DeviceReadOutcome.Success, Value.Count: 0 }, "An empty enrolled fleet was treated as unavailable.");
+    }
+
+    /// <summary>Core's device projection of the newest telemetry report (synthetic SIDs and values only).</summary>
+    private static JsonObject Telemetry() => JsonNode.Parse("""
+        {"schemaVersion":1,"collectedUtc":"2026-10-03T11:30:00Z","receivedUtc":"2026-10-03T11:30:02Z",
+         "bitLocker":{"availability":"accessDenied","protectionStatus":null,"conversionStatus":null},
+         "antivirus":{"availability":"unsupported","securityCenterHealth":null},
+         "defender":{"availability":"collected","runningMode":"futureMode","antivirusEnabled":true,"realTimeProtectionEnabled":false,"tamperProtectionEnabled":null,"signatureAgeDays":1},
+         "localAdministrators":{"availability":"collected","memberCount":4,"members":[
+           {"sid":"S-1-5-21-1000-1000-1000-500","scope":"local","accountType":"user"},
+           {"sid":"S-1-5-21-2000-2000-2000-512","scope":"domain","accountType":"group"},
+           {"sid":"S-1-12-1-1000-2000-3000-4000","scope":"entra","accountType":"futureType"},
+           {"sid":"S-1-5-21-1000-1000-1000-1001","scope":null,"accountType":null}]},
+         "windowsUpdate":{"policyAvailability":"collected","resultsAvailability":"unavailable","automaticUpdatesPolicy":"disabled","managedUpdateServer":true,"lastSuccessfulSearchUtc":null,"lastSuccessfulInstallationUtc":null},
+         "pendingReboot":{"availability":"collected","componentBasedServicing":true,"windowsUpdate":false,"pendingFileRenameOperations":null},
+         "services":{"availability":"collected","items":[{"name":"MpsSvc","state":"stopped","startType":"disabled"},{"name":"Sense","state":"notInstalled","startType":null},{"name":"EventLog","state":"running","startType":"auto"}]},
+         "software":{"availability":"collected","totalCount":1234,"reportedCount":1000,"truncated":true,"skippedCount":2}}
+        """)!.AsObject();
+
+    private static async Task TelemetryAsync()
+    {
+        var telemetry = Telemetry();
+        using (var context = new TestContext((_, _) => Task.FromResult(Json(Detail("\"securityTelemetry\":" + telemetry.ToJsonString())))))
+        {
+            await context.SignInAsync();
+            var result = await context.Client.GetDeviceDetailAsync(EndpointId, default);
+            Ensure(result.Outcome == DeviceReadOutcome.Success && result.Value!.SecurityTelemetry is { } parsed &&
+                   parsed.CollectedUtc == DateTimeOffset.Parse("2026-10-03T11:30:00Z") && parsed.BitLocker.Availability == "accessDenied" &&
+                   parsed.Defender is { RunningMode: null, AntivirusEnabled: true, RealTimeProtectionEnabled: false, TamperProtectionEnabled: null } &&
+                   parsed.LocalAdministrators is { MemberCount: 4, Members.Count: 4 } && parsed.LocalAdministrators.Members![2].AccountType is null &&
+                   parsed.Services.Items!.Count == 3 && parsed.Software is { TotalCount: 1234, ReportedCount: 1000, Truncated: true, SkippedCount: 2 },
+                "Endpoint telemetry was not read, or an unknown vocabulary value did not become Unknown.");
+            // Member rows repeat their label; every other label is unique.
+            var facts = new EndpointPresentation(result.Value!).TelemetryFacts.GroupBy(fact => fact.Label)
+                .ToDictionary(group => group.Key, group => group.First().Value);
+            Ensure(facts["BitLocker protection (system volume)"] == "Unknown (not readable by the Agent's service account)" &&
+                   facts["Antivirus health (Windows Security Center)"] == "Unknown (not supported on this endpoint)" &&
+                   facts["Last successful update search"] == "Unknown (source unavailable)" &&
+                   facts["Microsoft Defender mode"] == "Unknown" && facts["Microsoft Defender tamper protection"] == "Unknown" &&
+                   facts["Microsoft Defender real-time protection"] == "Disabled" && facts["Microsoft Defender signature age"] == "1 day" &&
+                   facts["Restart pending (file rename operations)"] == "Unknown" && facts["Restart pending (component servicing)"] == "Pending" &&
+                   facts["Automatic updates policy"] == "Disabled by policy" && facts["Managed update server policy (WSUS)"] == "Configured",
+                "Telemetry presentation must show observed values and say why every other value is Unknown.");
+            Ensure(facts["Local Administrators members"] == "4" &&
+                   facts["Local Administrators composition"] == "1 local, 1 domain, 1 Microsoft Entra, 1 unknown scope" &&
+                   !facts.ContainsKey("Administrators members not listed"),
+                "Administrator membership must be counted by scope.");
+            Ensure(facts["Service: Windows Defender Firewall (MpsSvc)"] == "Stopped · start disabled" &&
+                   facts["Service: Defender for Endpoint (Sense)"] == "Not installed" &&
+                   facts["Service: Base Filtering Engine (BFE)"] == "Unknown" &&
+                   facts["Installed applications (machine-wide)"] == "1,234 (1,000 reported; list truncated)" &&
+                   facts["Application entries not readable"] == "2",
+                "Service and application summaries were not explicit.");
+            var members = new EndpointPresentation(result.Value!).TelemetryFacts.Where(fact => fact.Label == "Administrators member")
+                .Select(fact => fact.Value).ToArray();
+            Ensure(members.Length == 4 && members[0] == "S-1-5-21-1000-1000-1000-500 · local · user" &&
+                   members[3] == "S-1-5-21-1000-1000-1000-1001 · unknown scope · unknown type",
+                "Administrator members must be shown as SIDs with scope and type only.");
+        }
+
+        foreach (var (body, expected) in new[]
+                 {
+                     (Detail(), (string?)null), (Detail("\"securityTelemetry\":null"), null),
+                     (Detail("\"securityTelemetry\":" + Mutated(node => node["schemaVersion"] = 2)), "future")
+                 })
+        {
+            using var context = new TestContext((_, _) => Task.FromResult(Json(body)));
+            await context.SignInAsync();
+            var result = await context.Client.GetDeviceDetailAsync(EndpointId, default);
+            Ensure(result.Outcome == DeviceReadOutcome.Success && result.Value!.SecurityTelemetry is null,
+                $"Absent or {expected ?? "missing"} telemetry must leave the device readable without telemetry.");
+            var presentation = new EndpointPresentation(result.Value!);
+            Ensure(presentation.TelemetryStatusText.StartsWith("No endpoint telemetry reported", StringComparison.Ordinal) &&
+                   presentation.TelemetryFacts.Where(fact => !fact.Label.StartsWith("Telemetry ", StringComparison.Ordinal))
+                       .All(fact => fact.Value == "Unknown (no telemetry reported)") &&
+                   presentation.TelemetryFacts.Count(fact => fact.Label.StartsWith("Service: ", StringComparison.Ordinal)) ==
+                   EndpointTelemetryContract.MonitoredServices.Count,
+                "Without telemetry every telemetry value must be shown as Unknown.");
+        }
+
+        var invalid = new (string Name, Action<JsonObject> Change)[]
+        {
+            ("unknown availability", node => node["bitLocker"]!["availability"] = "partial"),
+            ("value while not collected", node => node["bitLocker"]!["protectionStatus"] = "on"),
+            ("missing section", node => node.Remove("services")),
+            ("unexpected member", node => node["software"]!["items"] = new JsonArray()),
+            ("string Boolean", node => node["defender"]!["realTimeProtectionEnabled"] = "false"),
+            ("local-offset time", node => node["collectedUtc"] = "2026-10-03T13:30:00+02:00"),
+            ("invalid SID", node => node["localAdministrators"]!["members"]![0]!["sid"] = "Administrator"),
+            ("listed members beyond the count", node => node["localAdministrators"]!["memberCount"] = 3),
+            ("service outside the catalog", node => node["services"]!["items"]![0]!["name"] = "Spooler"),
+            ("inconsistent truncation", node => node["software"]!["truncated"] = false),
+            ("software count while not collected", node => node["software"]!["availability"] = "unavailable"),
+            ("signature age out of range", node => node["defender"]!["signatureAgeDays"] = 36_501),
+            ("update result after collection", node => node["windowsUpdate"]!["resultsAvailability"] = "collected")
+        };
+        foreach (var (name, change) in invalid)
+        {
+            var mutated = Mutated(change);
+            if (name == "update result after collection")
+                mutated = Mutated(node => { change(node); node["windowsUpdate"]!["lastSuccessfulSearchUtc"] = "2026-10-05T11:30:00Z"; });
+            using var context = new TestContext((_, _) => Task.FromResult(Json(Detail("\"securityTelemetry\":" + mutated))));
+            await context.SignInAsync();
+            Ensure((await context.Client.GetDeviceDetailAsync(EndpointId, default)).Outcome == DeviceReadOutcome.InvalidResponse,
+                $"Invalid endpoint telemetry was admitted: {name}.");
+        }
+
+        // A large group lists the first 64 members by SID and discloses the rest.
+        var bounded = Mutated(node =>
+        {
+            node["localAdministrators"]!["memberCount"] = 66;
+            node["localAdministrators"]!["members"] = new JsonArray(Enumerable.Range(0, 64)
+                .Select(index => (JsonNode)new JsonObject { ["sid"] = $"S-1-5-21-1000-1000-1000-{2000 + index}" }).ToArray());
+        });
+        using (var context = new TestContext((_, _) => Task.FromResult(Json(Detail("\"securityTelemetry\":" + bounded)))))
+        {
+            await context.SignInAsync();
+            var result = await context.Client.GetDeviceDetailAsync(EndpointId, default);
+            var facts = result.Value is null ? [] : new EndpointPresentation(result.Value).TelemetryFacts.ToArray();
+            Ensure(result.Outcome == DeviceReadOutcome.Success && facts.Count(fact => fact.Label == "Administrators member") == 64 &&
+                   facts.Single(fact => fact.Label == "Administrators members not listed").Value == "2" &&
+                   facts.Single(fact => fact.Label == "Local Administrators composition").Value == "64 unknown scope",
+                "A bounded administrator list must disclose the members it does not list.");
+        }
+
+        var many = Mutated(node => node["localAdministrators"]!["members"] = new JsonArray(Enumerable.Range(0, 65)
+            .Select(index => (JsonNode)new JsonObject { ["sid"] = $"S-1-5-21-1000-1000-1000-{2000 + index}" }).ToArray()));
+        using (var context = new TestContext((_, _) => Task.FromResult(Json(Detail("\"securityTelemetry\":" + many)))))
+        {
+            await context.SignInAsync();
+            Ensure((await context.Client.GetDeviceDetailAsync(EndpointId, default)).Outcome == DeviceReadOutcome.TooLarge,
+                "An oversized administrator list was silently truncated.");
+        }
+    }
+
+    private static string Mutated(Action<JsonObject> change)
+    {
+        var node = Telemetry();
+        change(node);
+        return node.ToJsonString();
     }
 
     private static async Task StatusAndTrustAsync()

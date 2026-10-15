@@ -1,3 +1,4 @@
+using SentinelAI.Contracts.EndpointTelemetry;
 using SentinelAI.Contracts.Inventory;
 
 namespace SentinelAI.Desktop.Foundation;
@@ -22,7 +23,23 @@ public sealed record EndpointDetail(
     long? InstalledRamBytes,
     IReadOnlyList<DiskInventory> Disks,
     SecurityPostureInventory? SecurityPosture,
-    string? OsName = null);
+    string? OsName = null,
+    EndpointTelemetryDetail? SecurityTelemetry = null);
+
+/// <summary>Core's newest accepted endpoint telemetry (schema 1); installed applications are a summary only.</summary>
+public sealed record EndpointTelemetryDetail(
+    DateTimeOffset CollectedUtc,
+    DateTimeOffset ReceivedUtc,
+    BitLockerTelemetry BitLocker,
+    AntivirusTelemetry Antivirus,
+    DefenderTelemetry Defender,
+    LocalAdministratorsTelemetry LocalAdministrators,
+    WindowsUpdateTelemetry WindowsUpdate,
+    PendingRebootTelemetry PendingReboot,
+    SecurityServicesTelemetry Services,
+    InstalledSoftwareSummary Software);
+
+public sealed record InstalledSoftwareSummary(string Availability, int? TotalCount, int? ReportedCount, bool Truncated, int SkippedCount);
 
 public enum DeviceReadOutcome
 {
