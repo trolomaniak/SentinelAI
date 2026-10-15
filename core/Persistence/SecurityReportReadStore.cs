@@ -34,7 +34,8 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
         var endpoints = snapshots.Values.OrderBy(endpoint => endpoint.EndpointId).Select(endpoint =>
             new ReportEndpoint(endpoint.EndpointId, endpoint.EndpointName, HealthState(endpoint.LastSeenUtc, now),
                 endpoint.LastSeenUtc, risks.ScoreSnapshot(endpoint.EndpointId, endpoint.EndpointName,
-                    endpoint.Inventory?.CollectedUtc, endpoint.Inventory, endpoint.Alerts, now))).ToArray();
+                    endpoint.Inventory?.CollectedUtc, endpoint.Inventory, endpoint.Alerts, now,
+                    telemetry: endpoint.Telemetry))).ToArray();
         var contributions = endpoints.SelectMany(endpoint => endpoint.CurrentRisk.Risk.Contributions)
             .ToDictionary(contribution => contribution.AlertId, contribution => contribution.Contribution);
         var incidents = retained.Select(incident => incident with
@@ -79,8 +80,9 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
         var endpoints = new Dictionary<Guid, SnapshotEndpoint>();
         await using var query = connection.CreateCommand();
         query.Transaction = transaction;
-        // Project only fields needed for names and existing rule coverage, never raw inventory or credentials.
-        query.CommandText = """
+        // Project only fields needed for names, existing rule coverage and telemetry availability, never raw
+        // inventory, telemetry values or credentials.
+        query.CommandText = $"""
             SELECT e.EndpointId, d.LastSeenUtcTicks, i.CollectedUtcTicks,
                 substr(json_extract(i.ReportJson, '$.Hostname'), 1, 256),
                 substr(json_extract(i.ReportJson, '$.OsName'), 1, 128),
@@ -97,10 +99,12 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
                 json_extract(i.ReportJson, '$.SecurityPosture.Configuration.SmbInsecureGuestLogonsAllowed'),
                 json_extract(i.ReportJson, '$.SecurityPosture.Configuration.AutomaticAdminLogonEnabled'),
                 json_extract(i.ReportJson, '$.SecurityPosture.Configuration.LsaProtectionEnabled'),
-                json_extract(i.ReportJson, '$.SecurityPosture.Configuration.AutomaticUpdatesDisabled')
+                json_extract(i.ReportJson, '$.SecurityPosture.Configuration.AutomaticUpdatesDisabled'),
+                {TelemetryState.Columns}
             FROM EndpointEnrollments AS e
             LEFT JOIN Devices AS d ON d.InstallationId = e.InstallationId
             LEFT JOIN EndpointInventories AS i ON i.EndpointId = e.EndpointId
+            LEFT JOIN EndpointSecurityTelemetry AS t ON t.EndpointId = e.EndpointId
             ORDER BY e.EndpointId;
             """;
         await using var reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -119,7 +123,8 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
                     reader.IsDBNull(4) ? "" : reader.GetString(4), "", "", new CpuInventory(null, 0), null, [],
                     new SecurityPostureInventory(ReadBoolean(reader, 5), ReadBoolean(reader, 6), ReadBoolean(reader, 7), configuration));
             }
-            endpoints.Add(id, new SnapshotEndpoint(id, name, reader.IsDBNull(1) ? null : ReadUtc(reader, 1), inventory, []));
+            endpoints.Add(id, new SnapshotEndpoint(id, name, reader.IsDBNull(1) ? null : ReadUtc(reader, 1), inventory, [],
+                TelemetryState.Read(reader, 19)));
         }
         return endpoints;
     }
@@ -227,7 +232,10 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
         // Runtime event rules carry fixed wording; their stored evidence stays excluded by the AI allowlist.
         var events = EventRuleEngine.CreateDefault().Rules.OfType<EventRule>().Select(rule => new SecurityAlert(rule.Id,
             rule.Title, rule.Severity, rule.Reason, [], Guid.Empty, DateTimeOffset.UnixEpoch, rule.RecommendedAction));
-        return first.Concat(second).DistinctBy(alert => alert.RuleId).Concat(events)
+        // Endpoint telemetry rules likewise carry fixed wording and no AI-allowlisted evidence.
+        var telemetry = TelemetryRuleEngine.CreateDefault().Rules.Select(rule => new SecurityAlert(rule.Id,
+            rule.Title, rule.Severity, rule.Reason, [], Guid.Empty, DateTimeOffset.UnixEpoch, rule.RecommendedAction));
+        return first.Concat(second).DistinctBy(alert => alert.RuleId).Concat(events).Concat(telemetry)
             .ToDictionary(alert => alert.RuleId, StringComparer.Ordinal);
     }
 
@@ -239,7 +247,9 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
                 group.Key, group.First().RecommendedAction, group.Select(incident => incident.EndpointId).Distinct().Count(),
                 EventRuleEngine.DefaultRuleIds.Contains(group.Key)
                     ? "Tracked unresolved runtime event detections; confirm the recorded activity on the endpoint before approved changes."
-                    : "Tracked unresolved configuration findings; verify current configuration before approved changes.",
+                    : TelemetryRuleEngine.DefaultRuleIds.Contains(group.Key)
+                        ? "Tracked unresolved endpoint telemetry findings; verify the current state on the endpoint before approved changes."
+                        : "Tracked unresolved configuration findings; verify current configuration before approved changes.",
                 group.Sum(incident => incident.CurrentRiskContribution)))
             .OrderByDescending(action => SeverityRank(action.Priority)).ThenByDescending(action => action.CurrentRiskContribution)
             .ThenBy(action => action.RuleId, StringComparer.Ordinal).ToList();
@@ -271,5 +281,5 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
         : now - lastSeen.Value <= TimeSpan.FromMinutes(2) ? "healthy"
         : now - lastSeen.Value <= TimeSpan.FromMinutes(5) ? "warning" : "offline";
     private sealed record SnapshotEndpoint(Guid EndpointId, string EndpointName, DateTimeOffset? LastSeenUtc,
-        InventoryReport? Inventory, List<RiskAlertView> Alerts);
+        InventoryReport? Inventory, List<RiskAlertView> Alerts, TelemetryState? Telemetry);
 }

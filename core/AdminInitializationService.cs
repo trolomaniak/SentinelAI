@@ -9,6 +9,7 @@ internal sealed class AdminInitializationService(
     InventoryStore inventories,
     SecurityEventStore securityEvents,
     AlertStore alerts,
+    EndpointTelemetryStore telemetry,
     LicenseStateStore licenses,
     CoreHostingMode hostingMode) : IHostedService
 {
@@ -20,6 +21,7 @@ internal sealed class AdminInitializationService(
         await inventories.InitializeAsync(cancellationToken);
         await securityEvents.InitializeAsync(cancellationToken);
         await alerts.InitializeAsync(cancellationToken);
+        await telemetry.InitializeAsync(cancellationToken);
         await inventories.BackfillAlertsAsync(cancellationToken);
         await licenses.InitializeAsync(cancellationToken);
     }

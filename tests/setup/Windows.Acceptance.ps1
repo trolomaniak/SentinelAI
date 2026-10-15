@@ -499,6 +499,11 @@ function Wait-ExactEndpoint([Guid]$EndpointId, [DateTimeOffset]$SinceUtc) {
             $heartbeat -ge $SinceUtc -and $inventory -ge $SinceUtc
     } 'The exact enrolled Agent did not deliver fresh authenticated heartbeat and inventory.' $script:TimeoutSeconds
 }
+function Get-AgentTelemetry([Guid]$EndpointId) {
+    # The device view's telemetry projection: availabilities and observed states, never the application list.
+    $detail = Invoke-SetupCoreRequest ('/api/admin/devices/' + $EndpointId.ToString('D')) 'GET' $null $script:accessToken | ConvertFrom-Json
+    return $detail.securityTelemetry
+}
 function Get-AgentEventSources([Guid]$EndpointId) {
     # Status only: channel states, counters and record numbers, never event content.
     $view = Invoke-SetupCoreRequest ('/api/admin/devices/' + $EndpointId.ToString('D') + '/event-sources') 'GET' $null $script:accessToken | ConvertFrom-Json
@@ -682,6 +687,17 @@ try {
     $eventCheckpoint = Get-Item -LiteralPath (Join-Path $agentData 'event-checkpoints')
     Assert-SetupAcceptance ($eventCheckpoint.Length -gt 0 -and $eventCheckpoint.Length -le 4096 -and -not $eventCheckpoint.LinkType) 'The Agent event checkpoint is invalid.'
     Write-Output ('Installed Agent event channels: ' + ((@(Get-AgentEventSources $endpointId) | ForEach-Object { [string]$_.channel + '=' + [string]$_.state }) -join ', '))
+    # The installed LocalService Agent delivers endpoint telemetry. Service states and machine-wide applications are
+    # readable by that account; what else it can read is printed rather than assumed.
+    Wait-SetupAcceptance {
+        $telemetry = Get-AgentTelemetry $endpointId
+        $null -ne $telemetry -and [int]$telemetry.schemaVersion -eq 1 -and
+            [string]$telemetry.services.availability -ceq 'collected' -and [string]$telemetry.software.availability -ceq 'collected'
+    } 'The installed LocalService Agent did not deliver endpoint telemetry with services and applications collected.' $script:TimeoutSeconds
+    $telemetry = Get-AgentTelemetry $endpointId
+    Write-Output ('Installed Agent telemetry sources: ' + ((@('bitLocker', 'antivirus', 'defender', 'localAdministrators', 'pendingReboot', 'services', 'software') |
+        ForEach-Object { $_ + '=' + [string]$telemetry.$_.availability }) -join ', ') + ', updatePolicy=' + [string]$telemetry.windowsUpdate.policyAvailability +
+        ', updateResults=' + [string]$telemetry.windowsUpdate.resultsAvailability)
 
     Use-SetupWindow $setup
     Show-SetupControl 'SetupOpenDesktopButton'

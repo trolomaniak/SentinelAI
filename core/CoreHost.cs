@@ -14,6 +14,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
+using SentinelAI.Contracts.EndpointTelemetry;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core.Persistence;
@@ -86,6 +87,8 @@ public static class CoreHost
         builder.Services.AddSingleton(EventRuleEngine.CreateDefault());
         builder.Services.AddSingleton<SecurityEventStore>();
         builder.Services.AddSingleton<AlertStore>();
+        builder.Services.AddSingleton(TelemetryRuleEngine.CreateDefault());
+        builder.Services.AddSingleton<EndpointTelemetryStore>();
         builder.Services.AddSingleton(RuleEngine.CreateDefault());
         var riskOptions = RiskScoringOptions.Load(builder.Configuration);
         builder.Services.AddSingleton(riskOptions);
@@ -160,6 +163,16 @@ public static class CoreHost
                     AutoReplenishment = true
                 }));
             options.AddPolicy("inventory", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+            // Agents send telemetry hourly and retry after five minutes; this matches the inventory allowance.
+            options.AddPolicy("security-telemetry", context => RateLimitPartition.GetFixedWindowLimiter(
                 context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions
                 {
@@ -404,6 +417,57 @@ public static class CoreHost
             .AllowAnonymous()
             .RequireRateLimiting("security-events")
             .WithMetadata(new RequestSizeLimitAttribute(SecurityEventContract.MaxRequestBytes));
+
+        app.MapPost("/api/agent/security-telemetry", async (
+                HttpContext context,
+                EnrollmentStore enrollments,
+                EndpointTelemetryStore telemetry,
+                TimeProvider time,
+                ILogger<EndpointTelemetryStore> logger,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                // Authenticate before any body byte is read, so anonymous callers cannot make Core parse a report.
+                if (!TryReadAgentCredential(context.Request.Headers.Authorization.ToString(),
+                        out var endpointId, out var credential) ||
+                    !await enrollments.AuthenticateEndpointAsync(endpointId, credential, cancellationToken))
+                {
+                    return Results.Unauthorized();
+                }
+
+                // Bodies and parser messages are never logged; only the endpoint and status code.
+                var read = await AgentJsonRequestReader.ReadAsync<EndpointTelemetryReport>(context.Request,
+                    EndpointTelemetryContract.MaxRequestBytes, EndpointTelemetryContract.Json, cancellationToken);
+                if (read.ErrorStatus is { } status)
+                {
+                    logger.LogWarning("Endpoint telemetry from endpoint {EndpointId} rejected with HTTP {StatusCode}",
+                        endpointId, status);
+                    return Results.StatusCode(status);
+                }
+
+                if (read.Value!.EndpointId != endpointId)
+                {
+                    return Results.Unauthorized();
+                }
+
+                if (!EndpointTelemetryContract.IsValid(read.Value, time.GetUtcNow()))
+                {
+                    logger.LogWarning("Endpoint telemetry from endpoint {EndpointId} rejected with HTTP {StatusCode}",
+                        endpointId, StatusCodes.Status400BadRequest);
+                    return Results.BadRequest();
+                }
+
+                // An older report than the stored one is acknowledged without change, like inventory.
+                await telemetry.RecordLatestAsync(read.Value, cancellationToken);
+                return Results.NoContent();
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting("security-telemetry")
+            .WithMetadata(new RequestSizeLimitAttribute(EndpointTelemetryContract.MaxRequestBytes));
 
         app.MapPost("/api/auth/login", async (
                 LoginRequest? request,

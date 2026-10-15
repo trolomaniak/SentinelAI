@@ -171,6 +171,30 @@ var snapshotOnly = engine.ScoreEndpoint(endpoint,
 Ensure(!snapshotOnly.Contributions.Single().CorrelationEligible,
     "Without the event flag an alert still needs the latest inventory snapshot to correlate.");
 
+// Endpoint telemetry findings correlate only when the latest telemetry report confirms them, never the inventory.
+var telemetryUtc = now.AddMinutes(-30);
+var telemetryContext = context with { LatestInventoryUtc = telemetryUtc };
+var telemetryScore = engine.ScoreEndpoint(endpoint,
+[
+    new ScoringAlert(Guid.NewGuid(), "SA-AV-001", "high", "open", telemetryUtc, TelemetryDetection: true, TelemetrySnapshotUtc: telemetryUtc),
+    new ScoringAlert(Guid.NewGuid(), "SA-DISK-001", "medium", "open", telemetryUtc.AddHours(-1), TelemetryDetection: true,
+        TelemetrySnapshotUtc: telemetryUtc),
+    new ScoringAlert(Guid.NewGuid(), "SA-SVC-001", "high", "open", telemetryUtc, TelemetryDetection: true, TelemetrySnapshotUtc: telemetryUtc),
+    new ScoringAlert(Guid.NewGuid(), "SA-FW-001", "high", "open", telemetryUtc)
+], telemetryContext, now);
+var telemetryByRule = telemetryScore.Contributions.ToDictionary(item => item.RuleId);
+Ensure(telemetryByRule["SA-AV-001"] is { CorrelationEligible: true, LatestSnapshotConfirmed: true, CorrelationGroup: "AV" } &&
+       telemetryByRule["SA-DISK-001"] is { CorrelationEligible: false, LatestSnapshotConfirmed: false, CorrelationGroup: "DISK" } &&
+       telemetryByRule["SA-SVC-001"] is { CorrelationEligible: true, CorrelationGroup: "FW" } &&
+       telemetryScore.CorrelatedGroups.SequenceEqual(["AV", "FW"]),
+    "Telemetry findings correlate only when confirmed by the latest telemetry report; a stopped firewall service shares the firewall group.");
+var noTelemetrySnapshot = engine.ScoreEndpoint(endpoint,
+    [new ScoringAlert(Guid.NewGuid(), "SA-AV-001", "high", "open", telemetryUtc, TelemetryDetection: true)], telemetryContext, now);
+Ensure(!noTelemetrySnapshot.Contributions.Single().LatestSnapshotConfirmed,
+    "A telemetry finding is never confirmed by an inventory snapshot with the same timestamp.");
+Ensure(telemetryByRule["SA-AV-001"].Contribution == 25m && telemetryByRule["SA-DISK-001"].Contribution == 15m,
+    "Telemetry findings use the ordinary severity points and default confidence.");
+
 Console.WriteLine($"Scoring tests passed ({assertions} assertions).");
 
 void Ensure(bool condition, string message)

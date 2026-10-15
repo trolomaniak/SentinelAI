@@ -515,7 +515,7 @@ public sealed class SecurityEventStore(AdminStore admins, SecurityEventRetention
         }
     }
 
-    private static async Task<string> ReadEndpointNameAsync(SqliteConnection connection, SqliteTransaction transaction,
+    internal static async Task<string> ReadEndpointNameAsync(SqliteConnection connection, SqliteTransaction transaction,
         Guid endpointId, CancellationToken cancellationToken)
     {
         await using var query = connection.CreateCommand();

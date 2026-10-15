@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using SentinelAI.Contracts.EndpointTelemetry;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Rules;
@@ -13,6 +14,9 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
     // The Agent reports channel status at least hourly; an older report no longer describes collection.
     private static readonly TimeSpan EventStatusFreshFor = TimeSpan.FromHours(2);
     private static readonly EventRuleEngine EventRules = EventRuleEngine.CreateDefault();
+    // The Agent reports telemetry hourly; an older report may no longer describe the endpoint.
+    private static readonly TimeSpan TelemetryFreshFor = TimeSpan.FromHours(3);
+    private static readonly TelemetryRuleEngine TelemetryRules = TelemetryRuleEngine.CreateDefault();
 
     public async Task<RiskPage> ListAsync(int offset, int limit, CancellationToken cancellationToken = default)
     {
@@ -60,20 +64,25 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
 
     private EndpointRiskDetail Score(SnapshotEndpoint endpoint, DateTimeOffset now) =>
         ScoreSnapshot(endpoint.EndpointId, endpoint.EndpointName, endpoint.InventoryCollectedUtc,
-            endpoint.Inventory, endpoint.Alerts, now, endpoint.EventChannels);
+            endpoint.Inventory, endpoint.Alerts, now, endpoint.EventChannels, endpoint.Telemetry);
 
-    /// <summary><paramref name="eventChannels"/> is null when the caller did not read event channel status.</summary>
+    /// <summary>
+    /// <paramref name="eventChannels"/> is null when the caller did not read event channel status;
+    /// <paramref name="telemetry"/> is null when the endpoint has no stored telemetry report.
+    /// </summary>
     internal EndpointRiskDetail ScoreSnapshot(Guid endpointId, string endpointName,
         DateTimeOffset? inventoryCollectedUtc, InventoryReport? inventory,
-        IReadOnlyList<RiskAlertView> alerts, DateTimeOffset now, IReadOnlyList<EventChannelState>? eventChannels = null) => new(
+        IReadOnlyList<RiskAlertView> alerts, DateTimeOffset now, IReadOnlyList<EventChannelState>? eventChannels = null,
+        TelemetryState? telemetry = null) => new(
         endpointId,
         endpointName,
         inventoryCollectedUtc,
         options.Scorer.ScoreEndpoint(endpointId,
             alerts.Select(alert => new ScoringAlert(alert.AlertId, alert.RuleId, alert.Severity,
-                alert.Status, alert.LastObservedUtc, EventRuleEngine.DefaultRuleIds.Contains(alert.RuleId))),
+                alert.Status, alert.LastObservedUtc, EventRuleEngine.DefaultRuleIds.Contains(alert.RuleId),
+                TelemetryRuleEngine.DefaultRuleIds.Contains(alert.RuleId), telemetry?.CollectedUtc)),
             options.ContextFor(endpointId, inventoryCollectedUtc), now),
-        AssessCoverage(inventory, eventChannels, now),
+        AssessCoverage(inventory, eventChannels, telemetry, now),
         alerts,
         options.Scorer.Policy,
         options.InventoryFreshForHours);
@@ -92,11 +101,11 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
     }
 
     private RiskCoverage AssessCoverage(InventoryReport? inventory, IReadOnlyList<EventChannelState>? eventChannels,
-        DateTimeOffset now)
+        TelemetryState? telemetry, DateTimeOffset now)
     {
         var caution = "Coverage counts only the 13 supported Windows configuration rules. " +
             "Missing or unknown observations have no score; a zero score is not a security assurance. " +
-            EventCaution(eventChannels, now);
+            EventCaution(eventChannels, now) + " " + TelemetryCaution(telemetry, now);
         if (inventory is null)
         {
             return new RiskCoverage("missing", "unknown", 0, 13, caution);
@@ -128,6 +137,23 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         var missing = SecurityEventChannels.All.Where(channel => !collecting.Contains(channel))
             .Select(channel => $"{channel} ({StateOf(channel)})");
         return $"{able} of {rules.Count} event rules can fire; channels not collecting: {string.Join(", ", missing)}. {unknown}";
+    }
+
+    /// <summary>
+    /// Telemetry rules fire only on collected report sections. A section that is not collected, or a report older
+    /// than the Agent's reporting bound, leaves its rules unable to fire; that is stated, never scored as safe.
+    /// </summary>
+    private static string TelemetryCaution(TelemetryState? telemetry, DateTimeOffset now)
+    {
+        var rules = TelemetryRules.Rules;
+        if (telemetry is null) return $"No endpoint telemetry is reported, so its {rules.Count} rules cannot fire.";
+        var stale = now - telemetry.CollectedUtc > TelemetryFreshFor ? " (latest report is stale)" : string.Empty;
+        string StateOf(string section) => telemetry.Sections.GetValueOrDefault(section) ?? "not reported";
+        var able = rules.Count(rule => rule.Sections.All(section => StateOf(section) == TelemetryAvailability.Collected));
+        if (able == rules.Count) return $"All {rules.Count} endpoint telemetry rules have collected inputs{stale}.";
+        var missing = TelemetryState.SectionNames.Where(section => StateOf(section) != TelemetryAvailability.Collected)
+            .Select(section => $"{section} ({StateOf(section)})");
+        return $"{able} of {rules.Count} endpoint telemetry rules can fire{stale}; not collected: {string.Join(", ", missing)}.";
     }
 
     private static int CountKnownSignals(SecurityPostureInventory posture)
@@ -193,6 +219,24 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         await using (var query = connection.CreateCommand())
         {
             query.Transaction = transaction;
+            query.CommandText = $"""
+                SELECT t.EndpointId, {TelemetryState.Columns}
+                FROM EndpointSecurityTelemetry AS t
+                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = t.EndpointId
+                WHERE ($endpointId IS NULL OR t.EndpointId = $endpointId);
+                """;
+            query.Parameters.AddWithValue("$endpointId", endpointId?.ToString("D") ?? (object)DBNull.Value);
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = Guid.Parse(reader.GetString(0));
+                endpoints[id] = endpoints[id] with { Telemetry = TelemetryState.Read(reader, 1) };
+            }
+        }
+
+        await using (var query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
             query.CommandText = """
                 SELECT s.EndpointId, s.Channel, s.State, s.ReceivedUtcTicks
                 FROM SecurityEventSources AS s
@@ -236,7 +280,7 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
 
     private sealed record SnapshotEndpoint(Guid EndpointId, string EndpointName,
         DateTimeOffset? InventoryCollectedUtc, InventoryReport? Inventory, List<RiskAlertView> Alerts,
-        List<EventChannelState> EventChannels);
+        List<EventChannelState> EventChannels, TelemetryState? Telemetry = null);
 }
 
 /// <summary>The latest reported state of one event channel and Core's receipt time of that report.</summary>
