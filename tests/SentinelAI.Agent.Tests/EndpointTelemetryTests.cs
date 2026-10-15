@@ -35,6 +35,8 @@ internal static class EndpointTelemetryTests
         VerifySoftwareBounds();
         await VerifyBoundedCollectionAsync();
         await VerifyWorkerScheduleAsync();
+        await VerifyWorkerClockStepAsync();
+        await VerifyUploaderAsync();
         await VerifyDeliveryToCoreAsync(testDirectory);
         if (OperatingSystem.IsWindows())
         {
@@ -122,12 +124,15 @@ internal static class EndpointTelemetryTests
                 Enumerable.Range(1, 64).Select(index => new LocalAdministratorMember($"{DomainSid}-{1000 + index}")).ToArray())
         }, Now), "A bounded member prefix with the full count must be valid.");
 
-        // Size proof: the largest report the Agent can build stays within Core's request bound.
+        // Size proof: every other value at its largest plus the whole application budget stays within Core's request bound.
         var worst = WorstCase(Guid.NewGuid());
         var bytes = JsonSerializer.SerializeToUtf8Bytes(worst, EndpointTelemetryContract.Json).Length;
-        Ensure(EndpointTelemetryContract.IsValid(worst, Now) && bytes <= EndpointTelemetryContract.MaxRequestBytes,
-            $"The worst-case report ({bytes} bytes) must be valid and within {EndpointTelemetryContract.MaxRequestBytes} bytes.");
-        Console.WriteLine($"Endpoint telemetry worst-case request: {bytes} of {EndpointTelemetryContract.MaxRequestBytes} bytes.");
+        var listBytes = JsonSerializer.SerializeToUtf8Bytes(worst.Software.Items, EndpointTelemetryContract.Json).Length;
+        var bound = bytes - listBytes + EndpointTelemetryContract.SoftwareByteBudget;
+        Ensure(EndpointTelemetryContract.IsValid(worst, Now) && listBytes <= EndpointTelemetryContract.SoftwareByteBudget &&
+               bound <= EndpointTelemetryContract.MaxRequestBytes,
+            $"The worst-case report must be valid and its upper bound ({bound} bytes) within {EndpointTelemetryContract.MaxRequestBytes} bytes.");
+        Console.WriteLine($"Endpoint telemetry request upper bound: {bound} of {EndpointTelemetryContract.MaxRequestBytes} bytes.");
     }
 
     // A2: raw Windows values map to the closed vocabularies; anything unrecognized is Unknown.
@@ -376,6 +381,75 @@ internal static class EndpointTelemetryTests
         {
             await worker.StopAsync(CancellationToken.None);
         }
+    }
+
+    // W5: a wall clock stepped back neither stalls the worker nor stops it; the wait never exceeds the chosen delay.
+    private static async Task VerifyWorkerClockStepAsync()
+    {
+        var link = new AgentLink();
+        var source = new FakeTelemetrySource(Guid.NewGuid());
+        var uploader = new FakeUploader();
+        var clock = new SteppedClock();
+        var collector = new EndpointTelemetryCollector(source, clock, TimeSpan.FromSeconds(5));
+        var timings = new EndpointTelemetryTimings(TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(300),
+            TimeSpan.FromMilliseconds(300));
+        using var worker = new EndpointTelemetryWorker(link, collector, uploader, clock,
+            NullLogger<EndpointTelemetryWorker>.Instance, timings);
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            link.Publish(Enrollment());
+            await WaitUntilAsync(() => uploader.Accepted >= 1, "The first report was not sent.");
+
+            // One day back: an unclamped wait would last a day.
+            clock.Offset -= TimeSpan.FromDays(1);
+            var sent = uploader.Accepted;
+            await WaitUntilAsync(() => uploader.Accepted >= sent + 2, "A wall clock stepped back stalled telemetry.");
+
+            // Beyond the largest timer delay (about 49.7 days): an unclamped wait would fault the worker.
+            clock.Offset -= TimeSpan.FromDays(66);
+            sent = uploader.Accepted;
+            await WaitUntilAsync(() => uploader.Accepted >= sent + 2, "A wall clock stepped far back stopped telemetry.");
+            Ensure(worker.ExecuteTask is { IsCompleted: false }, "A clock step must never stop the worker or the Agent host.");
+        }
+        finally
+        {
+            await worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    // W6: the uploader's request shape and status classification; a clock-skew rejection (422) is retried soon.
+    private static async Task VerifyUploaderAsync()
+    {
+        var options = new AgentOptions(new Uri("http://127.0.0.1:5000"), Path.GetFullPath("telemetry-uploader"),
+            TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5), TimeSpan.FromMinutes(1), null, null);
+        var enrollment = Enrollment();
+        var report = Benign(enrollment.EndpointId);
+        async Task<TelemetryUploadOutcome> Send(StubHttpHandler handler) =>
+            await new HttpEndpointTelemetryUploader(new HttpClient(handler), options).SendAsync(report, enrollment,
+                CancellationToken.None);
+
+        var accepted = StubHttpHandler.Status(System.Net.HttpStatusCode.NoContent);
+        Ensure(await Send(accepted) == new TelemetryUploadOutcome(UploadResult.Accepted, 204) &&
+               accepted.LastMethod == HttpMethod.Post && accepted.LastPath == "/api/agent/security-telemetry" &&
+               accepted.LastAuthorization == $"SentinelAgent {enrollment.EndpointId:D}.{enrollment.AgentCredential}" &&
+               accepted.LastMediaType == "application/json" &&
+               accepted.LastBody == JsonSerializer.Serialize(report, EndpointTelemetryContract.Json),
+            "The telemetry request shape is wrong.");
+        foreach (var status in new[] { 400, 404, 405, 413, 415 })
+        {
+            Ensure(await Send(StubHttpHandler.Status((System.Net.HttpStatusCode)status)) ==
+                   new TelemetryUploadOutcome(UploadResult.Incompatible, status), $"HTTP {status} was not classified as incompatible.");
+        }
+
+        foreach (var status in new[] { 401, 403, 408, 422, 429, 500, 503 })
+        {
+            Ensure(await Send(StubHttpHandler.Status((System.Net.HttpStatusCode)status)) ==
+                   new TelemetryUploadOutcome(UploadResult.Failed, status), $"HTTP {status} was not classified as a transient failure.");
+        }
+
+        Ensure(await Send(new StubHttpHandler((_, _) => throw new HttpRequestException("synthetic"))) ==
+               new TelemetryUploadOutcome(UploadResult.Failed, null), "A transport failure was not classified as a transient failure.");
     }
 
     // E1–E2: the production Agent composition delivers telemetry to a real Core; a hung section never delays heartbeats.
@@ -689,26 +763,42 @@ internal static class EndpointTelemetryTests
             .Select(name => new SecurityServiceObservation(name, ServiceRunStates.Running, ServiceStartTypes.Auto)).ToArray()),
         new InstalledSoftwareTelemetry(Collected, [new("test-only application", "1.0", "Example Corp", "x64")], 1));
 
-    /// <summary>The largest report the Agent can build: every bound reached and every character escaped.</summary>
+    /// <summary>
+    /// A report with every count, SID, vocabulary value and timestamp at its longest and every application character
+    /// escaped. The application list is filled by the Agent's own budget; the size proof counts that budget in full.
+    /// </summary>
     private static EndpointTelemetryReport WorstCase(Guid endpointId)
     {
-        var sid = "S-1-5-21-" + string.Join("-", Enumerable.Repeat("4294967295", 14));
+        static string Longest(IEnumerable<string> values) => values.MaxBy(value => value.Length)!;
+        var stamp = Now.AddTicks(1234567);
+        var sid = "S-1-" + new string('9', 13) + string.Concat(Enumerable.Repeat("-4294967295", 15));
         var members = Enumerable.Range(0, EndpointTelemetryContract.MaxAdministratorMembers)
-            .Select(index => new LocalAdministratorMember(sid[..^4] + (1000 + index), AdministratorScopes.WellKnown, "wellKnownGroup"))
+            .Select(index => new LocalAdministratorMember(sid[..^4] + (1000 + index), Longest(AdministratorScopes.All),
+                Longest(AdministratorAccountTypes.All)))
             .ToArray();
         var escaped = new string('é', EndpointTelemetryContract.MaxSoftwareNameLength);
         var entries = Enumerable.Range(0, 5000).Select(index => new RawSoftwareEntry(
             escaped[..^5] + index.ToString("D5"), new string('é', EndpointTelemetryContract.MaxSoftwareVersionLength),
             new string('<', EndpointTelemetryContract.MaxSoftwarePublisherLength), null, null, null, "arm64"));
+        var software = EndpointTelemetryNormalizer.Software(entries, unreadableEntries: 9999);
         return Benign(endpointId) with
         {
-            Defender = new DefenderTelemetry(Collected, "sxsPassive", false, false, false, EndpointTelemetryContract.MaxSignatureAgeDays),
+            CollectedUtc = stamp,
+            BitLocker = new BitLockerTelemetry(Collected, Longest(BitLockerProtectionStates.All), Longest(BitLockerConversionStates.All)),
+            Antivirus = new AntivirusTelemetry(Collected, Longest(SecurityCenterHealthStates.All)),
+            Defender = new DefenderTelemetry(Collected, Longest(DefenderRunningModes.All), false, false, false,
+                EndpointTelemetryContract.MaxSignatureAgeDays),
             LocalAdministrators = new LocalAdministratorsTelemetry(Collected, EndpointTelemetryContract.MaxAdministratorMemberCount, members),
-            WindowsUpdate = new WindowsUpdateTelemetry(Collected, Collected, "autoDownloadNotifyInstallNotifyRestart", true,
-                Now.AddMinutes(-1), Now.AddMinutes(-2)),
+            WindowsUpdate = new WindowsUpdateTelemetry(Collected, Collected, Longest(AutomaticUpdatesPolicies.All), false,
+                stamp.AddMinutes(-1), stamp.AddMinutes(-2)),
+            PendingReboot = new PendingRebootTelemetry(Collected, false, false, false),
             Services = new SecurityServicesTelemetry(Collected, EndpointTelemetryContract.MonitoredServices
-                .Select(name => new SecurityServiceObservation(name, "continuePending", ServiceStartTypes.Disabled)).ToArray()),
-            Software = EndpointTelemetryNormalizer.Software(entries, unreadableEntries: 9999)
+                .Select(name => new SecurityServiceObservation(name, Longest(ServiceRunStates.All), Longest(ServiceStartTypes.All)))
+                .ToArray()),
+            Software = software with
+            {
+                TotalCount = EndpointTelemetryContract.MaxSoftwareTotal, SkippedCount = EndpointTelemetryContract.MaxSoftwareTotal
+            }
         };
     }
 
@@ -776,6 +866,20 @@ internal static class EndpointTelemetryTests
             Interlocked.Increment(ref _calls);
             return Failures.TryGetValue(section, out var failure) ? throw failure : value;
         }
+    }
+
+    /// <summary>The system clock with an adjustable wall-clock offset; timers stay monotonic, as on Windows.</summary>
+    private sealed class SteppedClock : TimeProvider
+    {
+        private long _offsetTicks;
+
+        public TimeSpan Offset
+        {
+            get => TimeSpan.FromTicks(Interlocked.Read(ref _offsetTicks));
+            set => Interlocked.Exchange(ref _offsetTicks, value.Ticks);
+        }
+
+        public override DateTimeOffset GetUtcNow() => System.GetUtcNow() + Offset;
     }
 
     private sealed class FakeUploader : IEndpointTelemetryUploader

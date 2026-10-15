@@ -454,7 +454,16 @@ public static class CoreHost
                     return Results.Unauthorized();
                 }
 
-                if (!EndpointTelemetryContract.IsValid(read.Value, time.GetUtcNow()))
+                // A clock ahead of Core's is transient, not an incompatible report: the Agent retries after five minutes.
+                var now = time.GetUtcNow();
+                if (read.Value.CollectedUtc > now + EndpointTelemetryContract.MaxClockSkew)
+                {
+                    logger.LogWarning("Endpoint telemetry from endpoint {EndpointId} rejected with HTTP {StatusCode}",
+                        endpointId, StatusCodes.Status422UnprocessableEntity);
+                    return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
+                }
+
+                if (!EndpointTelemetryContract.IsValid(read.Value, now))
                 {
                     logger.LogWarning("Endpoint telemetry from endpoint {EndpointId} rejected with HTTP {StatusCode}",
                         endpointId, StatusCodes.Status400BadRequest);

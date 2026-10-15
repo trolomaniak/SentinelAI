@@ -218,7 +218,8 @@ public sealed class WindowsEndpointTelemetrySource : IEndpointTelemetrySource
         var nativeArchitecture = RuntimeInformation.OSArchitecture switch
         {
             Architecture.X64 => "x64",
-            Architecture.Arm64 => "arm64",
+            // ARM64 Windows keeps x64 and ARM64 applications in the same native view, so their architecture is Unknown.
+            Architecture.Arm64 => string.Empty,
             Architecture.X86 => "x86",
             _ => string.Empty
         };

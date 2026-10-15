@@ -260,6 +260,7 @@ internal static class EndpointTelemetryApiTests
                 Check(response.StatusCode == HttpStatusCode.OK && html.Contains("Antivirus protection reported at risk", StringComparison.Ordinal) &&
                       html.Contains("Windows Defender Firewall service not running", StringComparison.Ordinal) &&
                       html.Contains("Tracked unresolved endpoint telemetry findings", StringComparison.Ordinal) &&
+                      html.Contains("endpoint telemetry findings confirmed by the latest telemetry report", StringComparison.Ordinal) &&
                       !html.Contains("Unsupported stored rule", StringComparison.Ordinal) &&
                       !html.Contains(Marker, StringComparison.Ordinal),
                     "The report did not present telemetry findings with their own wording.");
@@ -314,7 +315,7 @@ internal static class EndpointTelemetryApiTests
             ("quoted number", HttpStatusCode.BadRequest, a, () => Raw(Mutate(node => node["schemaVersion"] = "1"))),
             ("missing section", HttpStatusCode.BadRequest, a, () => Raw(Mutate(node => node.Remove("services")))),
             ("unknown schema version", HttpStatusCode.BadRequest, a, () => Raw(Mutate(node => node["schemaVersion"] = 2))),
-            ("future collection time", HttpStatusCode.BadRequest, a,
+            ("future collection time", HttpStatusCode.UnprocessableEntity, a,
                 () => Raw(Mutate(node => node["collectedUtc"] = DateTimeOffset.UtcNow.AddMinutes(10)))),
             ("local-offset collection time", HttpStatusCode.BadRequest, a,
                 () => Raw(Mutate(node => node["collectedUtc"] = "2026-01-01T10:00:00+02:00"))),

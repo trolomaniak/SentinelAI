@@ -520,13 +520,22 @@ function renderAiPanel(alert) {
   return panel;
 }
 
+const telemetryRuleIds = new Set(["SA-AV-001", "SA-DISK-001", "SA-SVC-001", "SA-SVC-002"]);
+
+function alertSourceLead(ruleId) {
+  const id = String(ruleId || "");
+  if (id.startsWith("SA-EVT-")) return "A recorded detection from a collected Windows event. Evidence reflects the last matching event, not a live protection check.";
+  if (telemetryRuleIds.has(id)) return "A recorded finding from reported endpoint security telemetry. Evidence reflects the last matching report, not a live protection check.";
+  return "A recorded finding from reported configuration. Evidence reflects the last matching observation, not a live protection check.";
+}
+
 function renderAlertDetail(alert, feedback = "") {
   alertDetailContent.replaceChildren();
   const header = node("div", "detail-heading");
   const title = node("h1", null, alert.title || "Untitled alert");
   title.id = "alert-detail-heading";
   header.append(title, renderAlertBadge(alert.severity, severityPresentation), renderAlertBadge(alert.status, alertStatusPresentation));
-  alertDetailContent.append(header, node("p", "lead", String(alert.ruleId || "").startsWith("SA-EVT-") ? "A recorded detection from a collected Windows event. Evidence reflects the last matching event, not a live protection check." : "A recorded finding from reported configuration. Evidence reflects the last matching observation, not a live protection check."));
+  alertDetailContent.append(header, node("p", "lead", alertSourceLead(alert.ruleId)));
   alertDetailContent.append(riskLink(alert.endpointId, "View endpoint risk and this alert's contribution"));
 
   const grid = node("div", "detail-grid");

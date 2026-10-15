@@ -134,7 +134,7 @@ public static class SecurityReportRenderer
             Row(html, severity, Number(report.Policy.SeverityPoints[severity]));
         EndTable(html);
         Paragraph(html, "Risk uses current policy, severity, configured confidence weight, asset criticality, exposure, observation age and current status, " +
-            "plus bounded correlation of configuration findings confirmed by the latest inventory and of fresh runtime event detections. Confidence is not statistical probability. Age discounts do not prove remediation. " +
+            "plus bounded correlation of configuration findings confirmed by the latest inventory, of endpoint telemetry findings confirmed by the latest telemetry report and of fresh runtime event detections. Confidence is not statistical probability. Age discounts do not prove remediation. " +
             "Endpoint raw points and incident contributions are shown before the final score cap; correlation is additional to individual alert contributions. " +
             "The organization score is the highest endpoint score, not a fleet average. Decimal values and timestamps use invariant formatting and UTC.");
         Paragraph(html, "The report contains selected endpoint identities and typed security configuration evidence. " +

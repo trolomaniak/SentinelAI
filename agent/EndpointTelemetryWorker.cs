@@ -79,6 +79,7 @@ public sealed class EndpointTelemetryWorker(
     {
         Guid? endpointId = null;
         var nextUtc = DateTimeOffset.MinValue;
+        var lastDelay = TimeSpan.Zero;
         while (!stoppingToken.IsCancellationRequested)
         {
             // Capture the signal before reading the link so that a concurrent change still wakes the wait.
@@ -114,12 +115,21 @@ public sealed class EndpointTelemetryWorker(
                         delay = _timings.RetryDelay;
                     }
 
+                    lastDelay = delay;
                     nextUtc = time.GetUtcNow() + delay;
                     continue;
                 }
 
+                // A wall clock stepped back never stretches the wait beyond the delay that was chosen.
+                var remaining = nextUtc - now;
+                if (remaining > lastDelay)
+                {
+                    nextUtc = now + lastDelay;
+                    remaining = lastDelay;
+                }
+
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                await Task.WhenAny(Task.Delay(nextUtc - now, time, wait.Token), changed.WaitAsync(wait.Token));
+                await Task.WhenAny(Task.Delay(remaining, time, wait.Token), changed.WaitAsync(wait.Token));
                 await wait.CancelAsync();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

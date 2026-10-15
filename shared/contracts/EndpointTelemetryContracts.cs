@@ -194,6 +194,9 @@ public static class EndpointTelemetryContract
 
     public static JsonSerializerOptions Json { get; } = CreateJson();
 
+    /// <summary>How far a report's collection time may be ahead of Core's clock.</summary>
+    public static TimeSpan MaxClockSkew { get; } = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// Validates a report completely: version, identity, timestamps, vocabularies, bounds and that a section
     /// which was not collected carries no values. Core stores nothing that fails this check.
@@ -202,7 +205,7 @@ public static class EndpointTelemetryContract
     {
         if (report is null || report.SchemaVersion != CurrentSchemaVersion || report.EndpointId == Guid.Empty ||
             report.CollectedUtc.Offset != TimeSpan.Zero || report.CollectedUtc <= DateTimeOffset.UnixEpoch ||
-            report.CollectedUtc > now.AddMinutes(5))
+            report.CollectedUtc > now + MaxClockSkew)
         {
             return false;
         }
