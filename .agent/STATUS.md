@@ -154,7 +154,17 @@
   On Windows it also checks the native helper against a file held with `FileShare.None`, a real hard link and a missing file, and checks that the ACL read reports missing files and directories as not found.
 - **Reproduction against the unchanged scan.** The deterministic vanish case failed with "Cannot find path ... sentinelai.db-journal because it does not exist", and the live churn alone failed in 3 of 3 runs on `.event-checkpoints.<guid>.tmp`. With the fix the suite passed 25 of 25 repeated runs: 5,000 churned scans, with 1,528 listed transient entries vanishing before inspection.
 - **Local Linux validation on 2026-10-15** (.NET SDK 10.0.112, PowerShell 7.6.7): `./scripts/build.sh` passed with zero .NET warnings and errors, and `./scripts/test.sh` passed, including all PowerShell suites and 64 dashboard tests.
-- **Still open.** Windows CI must confirm the change. The native helper under the Windows PowerShell 5.1 compiler and the real ACL read run only there, and `setup-lifecycle-windows` needs repeated passes. The TASK-028 `setup-windows` install timeouts (2 of 9 runs) are a different symptom and are not attributed to this cause.
+- **Windows CI on `9e3252a`** ([push CI `38765877775`](https://github.com/trolomaniak/SentinelAI/actions/runs/38765877775), attempt 1):
+  - `setup-lifecycle-windows` passed: upgrade, health rollback, repair, uninstall and restore in 31 minutes. That run used the changed scan under the Windows PowerShell 5.1 worker and compiler.
+  - The new suite passed on Windows (76 assertions). The native link count read a file held with `FileShare.None` and counted a real hard link. Missing entries were reported as not found, and the real ACL read worked. In the live churn, 200 scans passed.
+  - Every other job passed except `setup-windows`.
+- **`setup-windows` on that run.** It hit the pre-existing fresh-install timeout. The stage was "Installing and enrolling Agent..." at 301 s:
+  - Core was installed and running.
+  - No Agent code or data existed yet.
+  - One `SentinelAI.Updater` process was still running, and it was still alive at job cleanup.
+
+  That stage runs the Updater's `prepare` for the signed Agent package synchronously, with no bound (`Invoke-PilotPrepare` in `installer/pilot/PilotInstaller.psm1`). The same `prepare` call succeeded for Core earlier in that install, and the PowerShell scans before the call had completed. This places the TASK-028 `setup-windows` timeouts (2 of 9 runs) in the Updater's Agent `prepare`. They are not attributed to the scan race, and they remain open for a separate fix (a bounded Updater wait with diagnostics).
+- **Still open.** Repeated `setup-lifecycle-windows` passes: further runs of this head are being collected.
 
 ## TASK-029 implementation and validation
 
