@@ -87,7 +87,7 @@ The native endpoint detail adds an **Endpoint security telemetry** card: collect
 
 ## Installed Agent account
 
-The installed Agent runs as `NT AUTHORITY\LocalService`. That account reads the Service Control Manager, the machine-wide uninstall registry, the restart markers and the update policy. The BitLocker WMI class requires administrators, so the installed Agent reports BitLocker as `accessDenied`; Windows Security Center, the Defender WMI namespace, the local group API and the Windows Update Agent may also refuse it. Native Setup acceptance prints what the installed Agent can read. Granting more access changes a security boundary and needs the owner's decision, like Security channel access (see [security event collection](SECURITY-EVENTS.md)); the Agent collects a source at its next report after access is granted, without code change.
+The installed Agent runs as `NT AUTHORITY\LocalService`, and no access is granted for telemetry. On the Windows Server CI runner, native Setup acceptance measured that the installed Agent collects every section (BitLocker, Defender, Administrators, Windows Update policy and results, restart markers, services and applications) except antivirus, which Windows Server does not provide (`unsupported`). Client editions such as Windows 11 have not been measured; WMI namespace and service security can differ between editions, so a source that an endpoint refuses is reported `accessDenied` and its rules cannot fire there. Granting more access would change a security boundary and needs the owner's decision, like Security channel access (see [security event collection](SECURITY-EVENTS.md)); the Agent collects a source at its next report after access is granted, without code change.
 
 ## Limits
 
