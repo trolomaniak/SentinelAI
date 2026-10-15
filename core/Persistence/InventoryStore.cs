@@ -47,6 +47,21 @@ public sealed class InventoryStore(AdminStore admins, AlertStore alerts, RuleEng
         upsert.Parameters.AddWithValue("$reportJson", JsonSerializer.Serialize(report));
         if (await upsert.ExecuteNonQueryAsync(cancellationToken) == 1)
         {
+            if (report.Hostname is { Length: > 0 })
+            {
+                // Event alerts raised before the first inventory carry the placeholder name until a hostname is reported.
+                await using var rename = connection.CreateCommand();
+                rename.Transaction = transaction;
+                rename.CommandText = """
+                    UPDATE TrackedAlerts SET EndpointName = $hostname
+                    WHERE EndpointId = $endpointId AND EndpointName = $placeholder;
+                    """;
+                rename.Parameters.AddWithValue("$hostname", report.Hostname);
+                rename.Parameters.AddWithValue("$endpointId", report.EndpointId.ToString("D"));
+                rename.Parameters.AddWithValue("$placeholder", SecurityEventStore.PlaceholderEndpointName(report.EndpointId));
+                await rename.ExecuteNonQueryAsync(cancellationToken);
+            }
+
             await RecordFindingsAsync(connection, transaction, report, cancellationToken);
         }
 

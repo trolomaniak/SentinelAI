@@ -40,7 +40,8 @@ public interface IEventRule
 
     /// <summary>
     /// Evaluates one newly stored trigger. <paramref name="history"/> holds the endpoint's observations of
-    /// <see cref="HistoryKinds"/> in (trigger − window, trigger], including the trigger itself when its kind matches.
+    /// <see cref="HistoryKinds"/> ordered at or before the trigger and less than the window before it, by both
+    /// effective time and the Agent's own event time; it includes the trigger itself when its kind matches.
     /// </summary>
     SecurityAlert? Evaluate(Guid endpointId, EventRuleObservation trigger, IReadOnlyList<EventRuleObservation> history);
 }
@@ -120,10 +121,14 @@ public sealed class EventRuleEngine
             {
                 if (!rule.TriggerKinds.Contains(trigger.Observation.Kind, StringComparer.Ordinal)) continue;
                 var since = trigger.EffectiveUtc - rule.HistoryWindow;
+                // Clamping can give a batch one effective instant, so the Agent's own event times (whose spacing a
+                // constant skew preserves) must also fit the window, and ties count only up to the trigger's record.
+                var agentSince = trigger.Observation.TimeCreatedUtc - rule.HistoryWindow;
                 var window = rule.HistoryWindow == TimeSpan.Zero
                     ? []
                     : known.Where(entry => rule.HistoryKinds.Contains(entry.Observation.Kind, StringComparer.Ordinal) &&
-                                           entry.EffectiveUtc > since && entry.EffectiveUtc <= trigger.EffectiveUtc).ToArray();
+                                           entry.EffectiveUtc > since && entry.Observation.TimeCreatedUtc > agentSince &&
+                                           OrderedAtOrBefore(entry, trigger)).ToArray();
                 if (rule.Evaluate(endpointId, trigger, window) is { } finding &&
                     (latest is null || finding.Timestamp >= latest.Timestamp))
                     latest = finding;
@@ -133,6 +138,13 @@ public sealed class EventRuleEngine
         }
 
         return findings.AsReadOnly();
+    }
+
+    private static bool OrderedAtOrBefore(EventRuleObservation entry, EventRuleObservation trigger)
+    {
+        if (entry.EffectiveUtc != trigger.EffectiveUtc) return entry.EffectiveUtc < trigger.EffectiveUtc;
+        var channel = string.CompareOrdinal(entry.Observation.Channel, trigger.Observation.Channel);
+        return channel < 0 || channel == 0 && entry.Observation.RecordId <= trigger.Observation.RecordId;
     }
 
     private static bool SameRecord(EventRuleObservation left, EventRuleObservation right) =>
@@ -205,14 +217,22 @@ public sealed class FailedLogonBurstRule() : EventRule(
         var failures = history.Where(item => item.Observation.Kind == SecurityEventKinds.LogonFailed).ToArray();
         if (failures.Length < Threshold) return null;
         var addresses = failures.Select(item => item.Observation.Logon?.IpAddress).OfType<string>().ToArray();
+        var accounts = failures.Select(item => item.Observation.Logon?.TargetUserSid).OfType<string>().ToArray();
         List<RuleEvidence> evidence =
         [
             RuleEvidence.Integer("logon.failedLogons", failures.Length),
-            RuleEvidence.Integer("logon.windowMinutes", WindowMinutes),
-            RuleEvidence.Integer("logon.distinctTargetAccounts",
-                failures.Select(item => item.Observation.Logon?.TargetUserSid).OfType<string>().Distinct(StringComparer.Ordinal).Count()),
-            RuleEvidence.Integer("logon.distinctSourceAddresses", addresses.Distinct(StringComparer.Ordinal).Count())
+            RuleEvidence.Integer("logon.windowMinutes", WindowMinutes)
         ];
+        // Windows usually logs the NULL SID and often no address for a failure; unknown values are counted
+        // separately and never reported as zero distinct values.
+        if (accounts.Length > 0)
+            evidence.Add(RuleEvidence.Integer("logon.distinctTargetAccounts", accounts.Distinct(StringComparer.Ordinal).Count()));
+        if (accounts.Length < failures.Length)
+            evidence.Add(RuleEvidence.Integer("logon.failuresWithoutTargetAccount", failures.Length - accounts.Length));
+        if (addresses.Length > 0)
+            evidence.Add(RuleEvidence.Integer("logon.distinctSourceAddresses", addresses.Distinct(StringComparer.Ordinal).Count()));
+        if (addresses.Length < failures.Length)
+            evidence.Add(RuleEvidence.Integer("logon.failuresWithoutSourceAddress", failures.Length - addresses.Length));
         AddText(evidence, "logon.mostFrequentSourceAddress", addresses
             .GroupBy(address => address, StringComparer.Ordinal)
             .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.Ordinal)
@@ -367,10 +387,11 @@ public sealed class ServiceFromUserWritableLocationRule() : EventRule(
             : null;
 }
 
-/// <summary>SA-EVT-PERSIST-002: a kernel or file system driver installed from outside the Windows directory.</summary>
+/// <summary>SA-EVT-PERSIST-002: a kernel or file system driver installed from outside the Windows system folders.</summary>
 public sealed class DriverOutsideWindowsRule() : EventRule(
-    "SA-EVT-PERSIST-002", "Driver installed outside the Windows directory", "high",
-    "A new kernel or file system driver service was installed whose program is outside the Windows directory.",
+    "SA-EVT-PERSIST-002", "Driver installed outside the Windows system folders", "high",
+    "A new kernel or file system driver service was installed whose program is outside the Windows system folders " +
+    "(a temporary folder under Windows counts as outside).",
     "Identify the software that installed the driver, verify its publisher and signature, and check it against known " +
     "vulnerable drivers before allowing it.",
     [SecurityEventChannels.System], [SecurityEventKinds.ServiceInstalled])

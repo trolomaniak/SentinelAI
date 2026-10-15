@@ -102,8 +102,30 @@ internal static class EventRuleTests
         var burst = engine.Evaluate(EndpointId, newer, [.. older, .. newer]);
         Check(burst.SingleOrDefault() is { RuleId: "SA-EVT-LOGON-001" } fired && Evidence(fired, "logon.failedLogons")!.Value.GetInt64() == 10 &&
               Evidence(fired, "logon.distinctSourceAddresses")!.Value.GetInt64() == 2 &&
-              Evidence(fired, "logon.mostFrequentSourceAddress")!.Value.GetString() == "192.0.2.10",
+              Evidence(fired, "logon.mostFrequentSourceAddress")!.Value.GetString() == "192.0.2.10" &&
+              Evidence(fired, "logon.distinctTargetAccounts")!.Value.GetInt64() == 1 &&
+              Evidence(fired, "logon.failuresWithoutTargetAccount") is null &&
+              Evidence(fired, "logon.failuresWithoutSourceAddress") is null,
             "Failed logons stored by earlier batches must count toward the window.");
+
+        // Windows usually logs the NULL SID, and often no address, for a failure: unknown values are counted
+        // separately and never reported as zero distinct values.
+        var partlyKnown = new List<EventRuleObservation>(Failures(6, "192.0.2.30"));
+        partlyKnown.AddRange(Enumerable.Range(6, 4).Select(index => At(Logon(SecurityEventKinds.LogonFailed, 3, null, sid: null), index * 0.5)));
+        var partly = engine.Evaluate(EndpointId, partlyKnown, partlyKnown).Single();
+        Check(Evidence(partly, "logon.distinctTargetAccounts")!.Value.GetInt64() == 1 &&
+              Evidence(partly, "logon.failuresWithoutTargetAccount")!.Value.GetInt64() == 4 &&
+              Evidence(partly, "logon.distinctSourceAddresses")!.Value.GetInt64() == 1 &&
+              Evidence(partly, "logon.failuresWithoutSourceAddress")!.Value.GetInt64() == 4 &&
+              Evidence(partly, "logon.mostFrequentSourceAddress")!.Value.GetString() == "192.0.2.30",
+            "Failures without a target SID or address must be counted as unknown, beside the distinct known values.");
+        var unknownOnly = Enumerable.Range(0, 10).Select(index => At(Logon(SecurityEventKinds.LogonFailed, 3, null, sid: null), index * 0.5)).ToList();
+        var unknown = engine.Evaluate(EndpointId, unknownOnly, unknownOnly).Single();
+        Check(Evidence(unknown, "logon.distinctTargetAccounts") is null && Evidence(unknown, "logon.distinctSourceAddresses") is null &&
+              Evidence(unknown, "logon.mostFrequentSourceAddress") is null &&
+              Evidence(unknown, "logon.failuresWithoutTargetAccount")!.Value.GetInt64() == 10 &&
+              Evidence(unknown, "logon.failuresWithoutSourceAddress")!.Value.GetInt64() == 10,
+            "Failures with no target SID or address must not report zero distinct accounts or addresses.");
 
         var fourThenRdp = new List<EventRuleObservation>(Failures(4, "192.0.2.20")) { At(Logon(SecurityEventKinds.LogonSucceeded, 10, "192.0.2.20"), 5) };
         Check(engine.Evaluate(EndpointId, fourThenRdp, fourThenRdp).Count == 0, "Four prior failures must not fire SA-EVT-RDP-001.");
@@ -113,6 +135,34 @@ internal static class EventRuleTests
         Check(engine.Evaluate(EndpointId, interactive, interactive).Count == 0, "A local interactive logon must not fire SA-EVT-RDP-001.");
         var stale = new List<EventRuleObservation>(Failures(5, "192.0.2.20")) { At(Logon(SecurityEventKinds.LogonSucceeded, 10, "192.0.2.20"), 35) };
         Check(engine.Evaluate(EndpointId, stale, stale).Count == 0, "Failures older than thirty minutes must not fire SA-EVT-RDP-001.");
+        var noAddress = Enumerable.Range(0, 5).Select(index => At(Logon(SecurityEventKinds.LogonFailed, 3, null), index)).ToList();
+        noAddress.Add(At(Logon(SecurityEventKinds.LogonSucceeded, 10, null), 6));
+        Check(engine.Evaluate(EndpointId, noAddress, noAddress).Count == 0,
+            "Failures and an RDP logon without a source address must not fire SA-EVT-RDP-001.");
+        var unknownFailures = Enumerable.Range(0, 5).Select(index => At(Logon(SecurityEventKinds.LogonFailed, 3, null), index)).ToList();
+        unknownFailures.Add(At(Logon(SecurityEventKinds.LogonSucceeded, 10, "192.0.2.20"), 6));
+        Check(engine.Evaluate(EndpointId, unknownFailures, unknownFailures).Count == 0,
+            "Failures without a source address must not count toward an RDP logon's address.");
+
+        // A skewed Agent clock clamps a batch to one receipt instant; window membership still follows the
+        // Agent's own event spacing and the log's record order.
+        var receivedEarly = Start.AddMinutes(-2);
+        var rdpFirst = Skewed(Logon(SecurityEventKinds.LogonSucceeded, 10, "192.0.2.40"), 0, receivedEarly);
+        var later = Enumerable.Range(1, 5).Select(second => Skewed(Logon(SecurityEventKinds.LogonFailed, 3, "192.0.2.40"), second / 60.0, receivedEarly));
+        List<EventRuleObservation> afterSuccess = [rdpFirst, .. later];
+        Check(engine.Evaluate(EndpointId, afterSuccess, afterSuccess).Count == 0,
+            "Failures written after an RDP success must not count as prior failures, even when clamped to one instant.");
+        var earlier = Enumerable.Range(1, 5).Select(second => Skewed(Logon(SecurityEventKinds.LogonFailed, 3, "192.0.2.41"), -second / 60.0, receivedEarly)).ToList();
+        List<EventRuleObservation> beforeSuccess = [.. earlier, Skewed(Logon(SecurityEventKinds.LogonSucceeded, 10, "192.0.2.41"), 0, receivedEarly)];
+        Check(engine.Evaluate(EndpointId, beforeSuccess, beforeSuccess).SingleOrDefault() is { RuleId: "SA-EVT-RDP-001" },
+            "Failures written before an RDP success must still count when the batch is clamped to one instant.");
+        var receivedLate = Start.AddMinutes(-60);
+        var sparse = Enumerable.Range(0, 10).Select(index => Skewed(Logon(SecurityEventKinds.LogonFailed, 3, "192.0.2.42"), index * 20, receivedLate)).ToList();
+        Check(engine.Evaluate(EndpointId, sparse, sparse).Count == 0,
+            "Failures twenty minutes apart by the Agent's clock must not fire SA-EVT-LOGON-001 when clamped to one instant.");
+        var dense = Enumerable.Range(0, 10).Select(index => Skewed(Logon(SecurityEventKinds.LogonFailed, 3, "192.0.2.43"), index * 0.5, receivedLate)).ToList();
+        Check(engine.Evaluate(EndpointId, dense, dense).SingleOrDefault() is { RuleId: "SA-EVT-LOGON-001" },
+            "Failures inside the window by the Agent's clock must still fire SA-EVT-LOGON-001 when clamped to one instant.");
 
         // Unknown or benign values never match.
         foreach (var benign in new[]
@@ -121,6 +171,8 @@ internal static class EventRuleTests
                      At(Observation(SecurityEventKinds.ProtectionServiceStartTypeChanged) with { ServiceStartType = new ServiceStartTypeEvent("WinDefend", null) }, 1),
                      At(Observation(SecurityEventKinds.DefenderSettingChanged) with { DefenderSetting = new DefenderSettingEvent(DefenderSettingAreas.ExclusionPath, DefenderSettingChanges.Removed) }, 1),
                      At(Observation(SecurityEventKinds.DefenderSettingChanged) with { DefenderSetting = new DefenderSettingEvent(DefenderSettingAreas.RealTimeProtection, DefenderSettingChanges.Added) }, 1),
+                     At(Observation(SecurityEventKinds.DefenderSettingChanged) with { DefenderSetting = new DefenderSettingEvent(DefenderSettingAreas.ExclusionPath, null) }, 1),
+                     At(Observation(SecurityEventKinds.DefenderSettingChanged) with { DefenderSetting = new DefenderSettingEvent(null, DefenderSettingChanges.Added) }, 1),
                      At(Service("test-only-svc", ServiceImageLocations.ProgramFiles, ServiceTypes.UserModeService), 1),
                      At(Service("test-only-drv", ServiceImageLocations.Windows, ServiceTypes.KernelDriver), 1),
                      At(Service("test-only-unknown", null, ServiceTypes.KernelDriver), 1),
@@ -181,6 +233,10 @@ internal static class EventRuleTests
         return new EventRuleObservation(observation with { TimeCreatedUtc = time }, time);
     }
 
+    /// <summary>An observation from an Agent whose clock is ahead, clamped to an earlier receipt time.</summary>
+    private static EventRuleObservation Skewed(SecurityEventObservation observation, double minutes, DateTimeOffset received) =>
+        EventRuleObservation.Clamped(observation with { TimeCreatedUtc = Start.AddMinutes(minutes) }, received);
+
     private static SecurityEventObservation Observation(string kind, string? channel = null, int? eventId = null)
     {
         var row = SecurityEventContract.Catalog.First(item => item.Kind == kind && (channel is null || item.Channel == channel) &&
@@ -188,8 +244,9 @@ internal static class EventRuleTests
         return new SecurityEventObservation(row.Channel, row.Provider, row.EventId, 0, 4, ++_record, Start, kind);
     }
 
-    private static SecurityEventObservation Logon(string kind, int logonType, string? address, bool? elevated = null) =>
-        Observation(kind) with { Logon = new LogonEvent(logonType, UserSid, address, kind == SecurityEventKinds.LogonFailed ? 0xC000006DL : null, null, elevated) };
+    private static SecurityEventObservation Logon(string kind, int logonType, string? address, bool? elevated = null,
+        string? sid = UserSid) =>
+        Observation(kind) with { Logon = new LogonEvent(logonType, sid, address, kind == SecurityEventKinds.LogonFailed ? 0xC000006DL : null, null, elevated) };
 
     private static SecurityEventObservation Malware(string kind, int eventId) =>
         Observation(kind, eventId: eventId) with

@@ -12,9 +12,12 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SentinelAI.Contracts.Enrollment;
+using SentinelAI.Contracts.Inventory;
 using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
+using SentinelAI.Core.Reports;
+using SentinelAI.Rules;
 
 internal static class SecurityEventApiTests
 {
@@ -143,6 +146,22 @@ internal static class SecurityEventApiTests
               unreported.Coverage.Caution.Contains($"{SecurityEventChannels.Security} (not reported)", StringComparison.Ordinal) &&
               unreported.Risk.Score == 0, "An endpoint without event telemetry was not reported as uncovered.");
 
+        // Reports present each event alert with its own rule wording and recommendation, and no evidence.
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var report = await app.Services.GetRequiredService<SecurityReportReadStore>()
+            .GenerateAsync(new ReportPeriod(today.AddDays(-1), today));
+        var reported = report.MajorPostureFindings.Where(item => item.EndpointId == a.EndpointId)
+            .OrderBy(item => item.RuleId, StringComparer.Ordinal).ToArray();
+        var burst = new FailedLogonBurstRule();
+        var eventActions = report.PriorityActions.Where(action => EventRuleEngine.DefaultRuleIds.Contains(action.RuleId)).ToArray();
+        Check(reported.Select(item => item.RuleId).SequenceEqual(["SA-EVT-DEF-001", "SA-EVT-LOGON-001"]) &&
+              reported[1].Title == burst.Title && reported[1].Reason == burst.Reason &&
+              reported[1].RecommendedAction == burst.RecommendedAction && reported.All(item => item.Evidence.Count == 0) &&
+              eventActions.Select(action => action.RuleId).Order(StringComparer.Ordinal)
+                  .SequenceEqual(["SA-EVT-DEF-001", "SA-EVT-LOGON-001"]) &&
+              eventActions.All(action => action.Reason.Contains("runtime event detections", StringComparison.Ordinal)),
+            "Reports did not present runtime event alerts with their own rule wording and recommendations.");
+
         // A resolved alert reopens on new evidence; older evidence never replaces newer.
         var alerts = app.Services.GetRequiredService<AlertStore>();
         var alertId = Guid.Parse((await QueryAsync(app,
@@ -156,6 +175,16 @@ internal static class SecurityEventApiTests
         // Record 12 is new and completes a burst, but its event time precedes the reopened alert's evidence.
         await RecordAsync(client, a, Batch(a, [Observation(failed, 12, start.AddSeconds(105))]));
         Check((await AlertsAsync(a))[1][2] == reopened[2], "Older evidence replaced the alert's newer observation.");
+
+        // The first inventory replaces the placeholder name on event alerts raised before it, without a version change.
+        var named = await AlertsAsync(a);
+        await app.Services.GetRequiredService<InventoryStore>().RecordLatestAsync(new InventoryReport(a.EndpointId,
+            DateTimeOffset.UtcNow.AddMinutes(-1), AgentVersion, "synthetic-event-endpoint", "Windows 11", "10.0.26100.1000", "X64",
+            new CpuInventory("Synthetic CPU", 4), null, [], new SecurityPostureInventory(null, null, null)));
+        var renamed = await AlertsAsync(a);
+        Check(renamed.Count == named.Count && renamed.Zip(named).All(pair => pair.First[4] == "synthetic-event-endpoint" &&
+                  pair.First[5] == pair.Second[5] && pair.First[2] == pair.Second[2]),
+            "The first inventory did not replace the placeholder endpoint name on event alerts.");
     }
 
     private static async Task VerifyIngestAsync(string directory, string username, string password,

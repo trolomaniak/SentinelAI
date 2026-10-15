@@ -102,6 +102,19 @@ test('alert details answer the incident questions and keep evidence as literal t
   }
 });
 
+test('alert details describe configuration findings and runtime event detections by their source', async () => {
+  for (const [ruleId, source] of [['SA-FW-003', 'from reported configuration'], ['SA-EVT-DEF-001', 'from a collected Windows event']]) {
+    const app = await startDashboard((call) => authenticate(call) ?? response(200, { ...alert, ruleId }), `#/alerts/${alertId}`);
+    try {
+      await app.login();
+      const content = app.get('#alert-detail-content');
+      assert.ok(content.textContent.includes(source), `${ruleId} detail names its source`);
+    } finally {
+      app.restore();
+    }
+  }
+});
+
 test('status save uses the displayed version, disables controls while pending, and displays the returned state', async () => {
   const save = deferred();
   const app = await startDashboard((call) => {

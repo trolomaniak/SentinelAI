@@ -224,7 +224,11 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
         var first = engine.Evaluate(new EndpointState(Guid.Empty, DateTimeOffset.UnixEpoch, true, posture));
         var second = engine.Evaluate(new EndpointState(Guid.Empty, DateTimeOffset.UnixEpoch, true,
             posture with { Configuration = posture.Configuration! with { UacEnabled = false } }));
-        return first.Concat(second).DistinctBy(alert => alert.RuleId).ToDictionary(alert => alert.RuleId, StringComparer.Ordinal);
+        // Runtime event rules carry fixed wording; their stored evidence stays excluded by the AI allowlist.
+        var events = EventRuleEngine.CreateDefault().Rules.OfType<EventRule>().Select(rule => new SecurityAlert(rule.Id,
+            rule.Title, rule.Severity, rule.Reason, [], Guid.Empty, DateTimeOffset.UnixEpoch, rule.RecommendedAction));
+        return first.Concat(second).DistinctBy(alert => alert.RuleId).Concat(events)
+            .ToDictionary(alert => alert.RuleId, StringComparer.Ordinal);
     }
 
     private static IReadOnlyList<ReportPriorityAction> BuildRecommendations(IReadOnlyList<ReportIncident> findings,
@@ -233,7 +237,9 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
         var recommendations = findings.GroupBy(incident => incident.RuleId, StringComparer.Ordinal)
             .Select(group => new ReportPriorityAction(group.OrderByDescending(incident => SeverityRank(incident.Severity)).First().Severity,
                 group.Key, group.First().RecommendedAction, group.Select(incident => incident.EndpointId).Distinct().Count(),
-                "Tracked unresolved configuration findings; verify current configuration before approved changes.",
+                EventRuleEngine.DefaultRuleIds.Contains(group.Key)
+                    ? "Tracked unresolved runtime event detections; confirm the recorded activity on the endpoint before approved changes."
+                    : "Tracked unresolved configuration findings; verify current configuration before approved changes.",
                 group.Sum(incident => incident.CurrentRiskContribution)))
             .OrderByDescending(action => SeverityRank(action.Priority)).ThenByDescending(action => action.CurrentRiskContribution)
             .ThenBy(action => action.RuleId, StringComparer.Ordinal).ToList();

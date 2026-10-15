@@ -45,11 +45,11 @@ Open, Investigating and Accepted are all risk-bearing. Acceptance is acknowledge
 
 ## Correlation
 
-Correlation requires positive weighted contribution, an unresolved alert, observation age within the fresh window, and exact equality between its last-positive timestamp and the latest inventory timestamp. Historical positives that were not reconfirmed by that snapshot remain individually scored but cannot correlate. A missing snapshot disables correlation. The known rules map to seven groups: FW, UAC, RDP, SMB, LOGON, LSA and UPDATE. Multiple firewall profiles or RDP settings are one group each. Unknown rule IDs receive no group unless policy explicitly maps them.
+Correlation requires positive weighted contribution, an unresolved alert, observation age within the fresh window, and, for configuration findings, exact equality between its last-positive timestamp and the latest inventory timestamp. Historical configuration positives that were not reconfirmed by that snapshot remain individually scored but cannot correlate. A missing snapshot disables correlation for configuration findings. The known rules map to seven groups: FW, UAC, RDP, SMB, LOGON, LSA and UPDATE. Multiple firewall profiles or RDP settings are one group each. Unknown rule IDs receive no group unless policy explicitly maps them.
 
 Runtime event detections (`ScoringAlert.EventDetection`) are evidenced by the event itself, so they correlate while fresh without the inventory snapshot condition, and their contributions report `latestSnapshotConfirmed: false`. Their default groups are EVT-AUTH, EVT-MALWARE, EVT-DEFENSE, EVT-EXECUTION and EVT-PERSISTENCE. Rules that commonly match benign activity have default confidence overrides: 0.5 for SA-EVT-LOGON-001, SA-EVT-PS-001 and SA-EVT-PERSIST-003, and 0.75 for SA-EVT-PROT-003. See [runtime event detections](../docs/EVENT-RULES.md).
 
-The **base** cap applies before asset/exposure. With critical asset (2) and declared Internet exposure (1.5), a capped base bonus of 20 becomes 60 final points. Both values are exposed; the overall endpoint still caps at 100. This models correlated posture observations, not evidence of an attack sequence.
+The **base** cap applies before asset/exposure. With critical asset (2) and declared Internet exposure (1.5), a capped base bonus of 20 becomes 60 final points. Both values are exposed; the overall endpoint still caps at 100. This models correlated posture observations and detections, not evidence of an attack sequence.
 
 ## Examples
 

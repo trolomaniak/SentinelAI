@@ -476,7 +476,8 @@ public sealed class SecurityEventStore(AdminStore admins, SecurityEventRetention
     private async Task EvaluateRulesAsync(SqliteConnection connection, SqliteTransaction transaction, Guid endpointId,
         IReadOnlyList<SecurityEventObservation> added, long receivedTicks, CancellationToken cancellationToken)
     {
-        // Events are ordered by their time clamped to receipt, so a skewed Agent clock cannot fire early or late.
+        // Events are ordered by their time clamped to receipt, so a future-dated event cannot fire early; the engine
+        // also checks window membership against the Agent's own event times.
         var receivedUtc = new DateTimeOffset(receivedTicks, TimeSpan.Zero);
         var triggers = added.Select(item => EventRuleObservation.Clamped(item, receivedUtc)).ToArray();
         var history = new List<EventRuleObservation>();
@@ -527,9 +528,11 @@ public sealed class SecurityEventStore(AdminStore admins, SecurityEventRetention
             return hostname;
         }
 
-        // The same fallback name the device views use before the first inventory.
-        return $"Endpoint {endpointId.ToString("N")[..8]}";
+        return PlaceholderEndpointName(endpointId);
     }
+
+    /// <summary>The fallback name the device views use before the first inventory; the inventory replaces it on alerts.</summary>
+    internal static string PlaceholderEndpointName(Guid endpointId) => $"Endpoint {endpointId.ToString("N")[..8]}";
 
     private static async Task CapAsync(SqliteConnection connection, SqliteTransaction transaction, string table,
         string endpoint, int maximum, CancellationToken cancellationToken)
