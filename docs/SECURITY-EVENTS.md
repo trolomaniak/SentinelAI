@@ -1,6 +1,6 @@
 # Continuous Windows security event collection
 
-The Agent continuously reads a fixed, compiled allowlist of Windows security events from four event log channels and delivers minimized, typed observations to Core through an authenticated batch route. A channel's position advances only after Core acknowledges a batch, so during an outage the Windows log itself is the bounded buffer. Records that could not be observed (overwritten, cleared, dropped or older than the start of coverage) are reported to Core as explicit gaps. Core deduplicates and retains observations, gaps and per-channel status, and exposes status (never content) to administrators. Observations are stored, not evaluated: detection rules, alerts and scoring based on them are TASK-028, and no Desktop view, report, rule or AI context uses them.
+The Agent continuously reads a fixed, compiled allowlist of Windows security events from four event log channels and delivers minimized, typed observations to Core through an authenticated batch route. A channel's position advances only after Core acknowledges a batch, so during an outage the Windows log itself is the bounded buffer. Records that could not be observed (overwritten, cleared, dropped or older than the start of coverage) are reported to Core as explicit gaps. Core deduplicates and retains observations, gaps and per-channel status, and exposes status to administrators; no API returns raw observations. Core evaluates newly stored observations with deterministic [runtime event rules](EVENT-RULES.md) that raise tracked alerts and feed Risk. A rule's alert copies a few minimized fields of the matching observations into its evidence, which administrators see in alert details and incident exports. Observations are never shown in reports and are never AI context.
 
 ## What is collected
 
@@ -78,7 +78,7 @@ Granting the installed Agent read access to Security changes a security boundary
 2. Add the service SID to the Event Log Readers group.
 3. Add LocalService (`S-1-5-19`) to Event Log Readers, which grants every LocalService process read access, or change the Agent's service account, which orphans its DPAPI-protected enrollment state.
 
-Approval also covers the data: Security-derived SIDs (4624, 4625 and 4698), remote IP addresses (4624 and 4625) and log clears (1102) would then be stored in Core, available to SentinelAI administrators who need not be Windows administrators on the endpoint.
+Approval also covers the data: Security-derived SIDs (4624, 4625 and 4698), remote IP addresses (4624 and 4625) and log clears (1102) would then be stored in Core, available to SentinelAI administrators who need not be Windows administrators on the endpoint. Runtime rules would copy some of them (source addresses, target and task-creator SIDs, task names) into alert evidence, which is kept for the life of the alert rather than the 30-day observation retention.
 
 The pipeline picks up a grant without a code or configuration change. At its next one-minute retry the channel becomes `collecting` and coverage starts at the log's newest record with a `coverageStarted` gap (normally cause `noCheckpoint`, with `coverageRestart` false). Events written before the grant are not backfilled.
 
@@ -159,7 +159,7 @@ Gaps are computed from the acknowledged scanned-through position, not from the l
 - **Crash consistency.** Gaps travel inside the batch whose positions they explain, and positions advance only on acknowledgement. After a crash or failed delivery the same gap is detected again with the same first record, and Core merges it.
 - **Coverage restart.** Core sets `coveredSinceUtc` for a channel from the first status that carries an acknowledged position and never clears it. A later `coverageStarted` gap on a channel with `coveredSinceUtc` is stored with `coverageRestart` true, so a deleted, corrupt or replaced checkpoint is visible. A first start or a newly readable channel has `coverageRestart` false.
 
-**Rule for TASK-028.** Missing telemetry is never evidence of safety. A channel that is not `collecting`, or a time window that contains a gap or a coverage restart for the channel, is Unknown. Event order uses `TimeCreatedUtc`; alert lifecycle ordering must clamp it to Core's receipt time.
+**Rule for detections.** Missing telemetry is never evidence of safety. A channel that is not `collecting`, or a time window that contains a gap or a coverage restart for the channel, is Unknown. The [runtime event rules](EVENT-RULES.md) order events by `TimeCreatedUtc` clamped to Core's receipt time, and Risk coverage names the channels whose rules cannot fire.
 
 ## Resource bounds
 
@@ -223,7 +223,7 @@ Retention is measured by Core's receipt time, so an endpoint's clock cannot defe
 - 30 days: every ingest also deletes up to 500 observations and 100 gap rows received more than 30 days earlier, across all endpoints, and Core startup deletes up to 5,000 of each.
 - Status rows are not pruned (at most four per endpoint, without personal data).
 
-Retention is fixed for installed Core. No API returns observation content; the only read surface is the status route below.
+Retention is fixed for installed Core. No API returns raw observations; the status route below is their only direct read surface. Alert evidence that a [runtime rule](EVENT-RULES.md#privacy-ai-and-reports) copies from observations is part of the tracked alert, returned by alert detail and incident export, and kept until a newer detection of the same rule on the endpoint replaces it, independent of this retention.
 
 ## Operator runbook: reading event-source status
 
@@ -261,14 +261,14 @@ Reading it:
 - A backlog is scanned at up to 1,024 records per second per channel, and at most 128 observations per second are delivered per endpoint. Storms above that, such as many network (type 3) logons rejected by the 4624 condition on a busy server with a Security grant, build a backlog that can end in `overwritten` gaps.
 - Windows audit policy decides whether 4624, 4625 and 4698 are logged at all. SentinelAI does not change audit policy.
 - Localized SCM text for 7045 `ServiceType`/`StartType` and 7040 `param3` maps to null (Unknown) on non-English systems; numeric start types still map.
-- Failed logons for accounts that do not exist carry no SID (`S-1-0-0` becomes null), because names are never collected; TASK-028 has to group them by source address and status.
+- A failed logon (4625) usually carries the NULL SID (`S-1-0-0`, mapped to null), even for a wrong password on an existing account, and local failures carry no address. Names are never collected, so the failed-logon rule reports how many failures had no target SID or address beside the distinct known values.
 - `ClearedChannel` of a 104 event is null on a Windows build where its UserData path does not render; the event is still collected.
 - Schedules (polling, delivery, status and channel retries) follow the Agent's wall clock. When the clock steps back (a time correction or a manual change), every schedule moves back by the same amount, so collection resumes within one poll interval instead of waiting out the step.
 - An acknowledged position of 0 (the log was empty when coverage started, or a reset emptied it) has no anchor record. Records written and then cleared between two polls of that empty log cannot be detected, and no gap is reported for them. Windows itself records the clear as System 104 or Security 1102, which is collected where the channel is readable.
 - A log cleared and refilled to exactly its previous newest record is detected only when the next record arrives; no record is lost.
 - Any LocalService process can edit the Agent's data directory. Moving a position backwards only replays (deduplicated), and deleting or corrupting the checkpoint is visible as a coverage restart, but moving a position forwards within the log silently skips records. This is the existing shared-LocalService limitation described in the [pilot guide](PILOT.md#install-and-enroll-agent).
 - Local administrators and channel writers can forge or clear events. Observations are evidence, not proof; clears surface as `logCleared` (when read before loss) and as gaps.
-- Event times are stored as reported, with no future or past bound. TASK-028 must order alert lifecycle by event time clamped to Core's receipt time.
+- Event times are stored as reported, with no future or past bound. The runtime event rules order alert lifecycle by event time clamped to Core's receipt time.
 - PowerShell 7 (`PowerShellCore/Operational`) is not collected, and 4104 is collected only at warning level, where Windows flags a suspicious script block.
 - There is no installed-endpoint switch or tuning for event collection; installed Agents always collect the fixed catalog.
 - The installed Agent does not collect Security until a read grant is approved.

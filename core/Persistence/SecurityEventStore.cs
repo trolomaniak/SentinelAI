@@ -1,6 +1,9 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using SentinelAI.Contracts.Inventory;
 using SentinelAI.Contracts.SecurityEvents;
+using SentinelAI.Rules;
 
 namespace SentinelAI.Core.Persistence;
 
@@ -93,9 +96,12 @@ public sealed record SecurityEventSourcesView(
 /// without a reader held across commit. Stored JSON is Core's re-serialization of the
 /// validated typed record, so raw request text and unknown members are never persisted.
 /// </summary>
-public sealed class SecurityEventStore(AdminStore admins, SecurityEventRetention retention, TimeProvider time)
+public sealed class SecurityEventStore(AdminStore admins, SecurityEventRetention retention, AlertStore alerts,
+    EventRuleEngine rules, TimeProvider time)
 {
     private const int RecentGapLimit = 50;
+    // Rule history read per batch: the newest rows inside the longest rule window. Thresholds are far smaller.
+    private const int RuleHistoryLimit = 4096;
     private const string Observations = "SecurityEventObservations";
     private const string Gaps = "SecurityEventGaps";
 
@@ -125,6 +131,7 @@ public sealed class SecurityEventStore(AdminStore admins, SecurityEventRetention
                 );
                 CREATE INDEX IF NOT EXISTS IX_SecurityEventObservations_Endpoint ON SecurityEventObservations (EndpointId);
                 CREATE INDEX IF NOT EXISTS IX_SecurityEventObservations_Received ON SecurityEventObservations (ReceivedUtcTicks);
+                CREATE INDEX IF NOT EXISTS IX_SecurityEventObservations_Kind ON SecurityEventObservations (EndpointId, Kind, TimeCreatedUtcTicks);
 
                 CREATE TABLE IF NOT EXISTS SecurityEventGaps (
                     Id INTEGER PRIMARY KEY,
@@ -185,6 +192,7 @@ public sealed class SecurityEventStore(AdminStore admins, SecurityEventRetention
         var endpoint = endpointId.ToString("D");
         var received = time.GetUtcNow().UtcTicks;
         int accepted = 0, duplicates = 0, ignored = 0, rejected = 0, gapsWritten = 0;
+        var added = new List<SecurityEventObservation>();
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -279,8 +287,19 @@ public sealed class SecurityEventStore(AdminStore admins, SecurityEventRetention
             Bind(observation, "$kind", item.Kind);
             Bind(observation, "$format", batch.Format);
             Bind(observation, "$json", JsonSerializer.Serialize(item));
-            if (await observation.ExecuteNonQueryAsync(cancellationToken) == 1) accepted++;
+            if (await observation.ExecuteNonQueryAsync(cancellationToken) == 1)
+            {
+                accepted++;
+                added.Add(item);
+            }
             else duplicates++;
+        }
+
+        // 2b. Runtime rules over the newly stored observations, in this transaction: an observation and the
+        // alert it raises commit together, and a replayed duplicate never fires again.
+        if (added.Any(item => rules.IsTrigger(item.Kind)))
+        {
+            await EvaluateRulesAsync(connection, transaction, endpointId, added, received, cancellationToken);
         }
 
         // 3. Latest status per channel; an older attempt of the same Agent process never wins.
@@ -454,6 +473,67 @@ public sealed class SecurityEventStore(AdminStore admins, SecurityEventRetention
         command.Parameters[name].Value = value ?? DBNull.Value;
 
     // Table names are compile-time constants; every value is a bound parameter.
+    private async Task EvaluateRulesAsync(SqliteConnection connection, SqliteTransaction transaction, Guid endpointId,
+        IReadOnlyList<SecurityEventObservation> added, long receivedTicks, CancellationToken cancellationToken)
+    {
+        // Events are ordered by their time clamped to receipt, so a future-dated event cannot fire early; the engine
+        // also checks window membership against the Agent's own event times.
+        var receivedUtc = new DateTimeOffset(receivedTicks, TimeSpan.Zero);
+        var triggers = added.Select(item => EventRuleObservation.Clamped(item, receivedUtc)).ToArray();
+        var history = new List<EventRuleObservation>();
+        if (rules.HistoryKinds.Count > 0)
+        {
+            var from = (triggers.Min(item => item.EffectiveUtc) - rules.MaximumHistoryWindow).UtcTicks;
+            var kinds = rules.HistoryKinds.Select((_, index) => "$kind" + index.ToString(CultureInfo.InvariantCulture)).ToArray();
+            await using var query = connection.CreateCommand();
+            query.Transaction = transaction;
+            // min(event time, receipt) > from exactly when both are.
+            query.CommandText =
+                "SELECT ObservationJson, ReceivedUtcTicks FROM SecurityEventObservations " +
+                "WHERE EndpointId = $e AND Kind IN (" + string.Join(", ", kinds) + ") " +
+                "AND TimeCreatedUtcTicks > $from AND ReceivedUtcTicks > $from " +
+                "ORDER BY TimeCreatedUtcTicks DESC, Id DESC LIMIT $limit;";
+            query.Parameters.AddWithValue("$e", endpointId.ToString("D"));
+            query.Parameters.AddWithValue("$from", from);
+            query.Parameters.AddWithValue("$limit", RuleHistoryLimit);
+            for (var index = 0; index < kinds.Length; index++) query.Parameters.AddWithValue(kinds[index], rules.HistoryKinds[index]);
+            await using var reader = await query.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                history.Add(EventRuleObservation.Clamped(
+                    JsonSerializer.Deserialize<SecurityEventObservation>(reader.GetString(0))!,
+                    new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero)));
+            }
+        }
+
+        var findings = rules.Evaluate(endpointId, triggers, history);
+        if (findings.Count == 0) return;
+        var endpointName = await ReadEndpointNameAsync(connection, transaction, endpointId, cancellationToken);
+        foreach (var finding in findings.OrderBy(item => item.Timestamp))
+        {
+            await alerts.RecordObservedAsync(connection, transaction, finding, endpointName, cancellationToken);
+        }
+    }
+
+    private static async Task<string> ReadEndpointNameAsync(SqliteConnection connection, SqliteTransaction transaction,
+        Guid endpointId, CancellationToken cancellationToken)
+    {
+        await using var query = connection.CreateCommand();
+        query.Transaction = transaction;
+        query.CommandText = "SELECT ReportJson FROM EndpointInventories WHERE EndpointId = $e;";
+        query.Parameters.AddWithValue("$e", endpointId.ToString("D"));
+        if (await query.ExecuteScalarAsync(cancellationToken) is string json &&
+            JsonSerializer.Deserialize<InventoryReport>(json)?.Hostname is { Length: > 0 } hostname)
+        {
+            return hostname;
+        }
+
+        return PlaceholderEndpointName(endpointId);
+    }
+
+    /// <summary>The fallback name the device views use before the first inventory; the inventory replaces it on alerts.</summary>
+    internal static string PlaceholderEndpointName(Guid endpointId) => $"Endpoint {endpointId.ToString("N")[..8]}";
+
     private static async Task CapAsync(SqliteConnection connection, SqliteTransaction transaction, string table,
         string endpoint, int maximum, CancellationToken cancellationToken)
     {

@@ -83,6 +83,7 @@ public static class CoreHost
         builder.Services.AddSingleton<EnrollmentStore>();
         builder.Services.AddSingleton<InventoryStore>();
         builder.Services.AddSingleton(SecurityEventRetention.Default);
+        builder.Services.AddSingleton(EventRuleEngine.CreateDefault());
         builder.Services.AddSingleton<SecurityEventStore>();
         builder.Services.AddSingleton<AlertStore>();
         builder.Services.AddSingleton(RuleEngine.CreateDefault());

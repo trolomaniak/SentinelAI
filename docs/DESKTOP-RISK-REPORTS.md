@@ -10,7 +10,7 @@ Select a row and **Open endpoint risk**, or double-click it. Endpoint detail exp
 
 **Refresh endpoint** reads a new Core evaluation. The ranked list and endpoint detail retain their own evaluation times; a detail refresh does not rewrite the earlier ranked list. Successful periodic session validation preserves an open page/detail. An absent endpoint, missing inventory, no contributions and unavailable Core have explicit states.
 
-Scores prioritize reported configuration findings. A zero rounded score may retain positive raw points, reflect confidence discounts/resolved findings or have missing observations; it never establishes effective protection or telemetry completeness. **Accepted** and **Investigating** remain risk-bearing under the existing policy. Criticality/exposure are declarations or labeled policy defaults, not inferred from hostname/firewall/RDP. Inventory freshness (default 12 hours) and scoring age windows (default seven/30 days) are separate. See [deterministic scoring semantics](../scoring/README.md).
+Scores prioritize reported configuration findings and runtime event detections. A zero rounded score may retain positive raw points, reflect confidence discounts/resolved findings or have missing observations; it never establishes effective protection or telemetry completeness. **Accepted** and **Investigating** remain risk-bearing under the existing policy. Criticality/exposure are declarations or labeled policy defaults, not inferred from hostname/firewall/RDP. Inventory freshness (default 12 hours) and scoring age windows (default seven/30 days) are separate. See [deterministic scoring semantics](../scoring/README.md).
 
 ## Generate and save a report
 

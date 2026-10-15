@@ -15,7 +15,7 @@ Distribution is at the **development/pilot stage**: Setup, a self-contained Desk
 | Area | Current behavior |
 | --- | --- |
 | Devices and telemetry | Enrolled endpoint list/detail, heartbeat connectivity, inventory timestamps, OS/build, CPU, RAM, disks and selected Windows configuration. Unavailable observations remain Unknown. |
-| Security rules | 13 deterministic configuration rules covering firewall profiles, UAC, RDP, SMB, automatic logon, LSA protection and update policy. Findings describe the observed configuration. |
+| Security rules | 13 deterministic configuration rules covering firewall profiles, UAC, RDP, SMB, automatic logon, LSA protection and update policy, whose findings describe the observed configuration, and 12 deterministic runtime event rules (`SA-EVT-*`) over collected Windows security events, such as failed-logon bursts, Defender detections, disabled protection, cleared logs and new services, drivers or scheduled tasks ([runtime event detections](docs/EVENT-RULES.md)). |
 | Alerts and incidents | Stored detections, typed evidence, observation/history details and versioned Open / Investigating / Resolved / Accepted decisions. Conflicting edits require review of the current version. |
 | Risk | Local deterministic organization/endpoint scores with decimal contributions, correlation, policy, coverage and freshness explanations. |
 | Reports | Local HTML generation for an inclusive UTC date range and explicit saving through a native Windows picker. Reports work offline and in Safe Mode; historical score trends are unavailable. |
@@ -30,7 +30,7 @@ Distribution is at the **development/pilot stage**: Setup, a self-contained Desk
 ## Architecture
 
 - **Core** (`core/`) owns the local ASP.NET Core API, administrator authentication, SQLite state, rule evaluation, risk scoring, incidents and reporting. It supports console development hosting and the `SentinelAICore` Windows Service.
-- **Agent** (`agent/`) collects bounded Windows inventory/configuration and sends authenticated heartbeats and inventory. It watches the monitored security settings and re-sends inventory within seconds of a change; the six-hour inventory remains reconciliation. It also continuously collects a fixed allowlist of minimized Windows security events and reports overwritten, cleared or dropped records as explicit gaps; Core stores both for later detection rules. The pilot installs `SentinelAIAgent` under LocalService and protects its enrollment credential with Windows DPAPI.
+- **Agent** (`agent/`) collects bounded Windows inventory/configuration and sends authenticated heartbeats and inventory. It watches the monitored security settings and re-sends inventory within seconds of a change; the six-hour inventory remains reconciliation. It also continuously collects a fixed allowlist of minimized Windows security events and reports overwritten, cleared or dropped records as explicit gaps; Core stores both and evaluates newly stored events with deterministic runtime rules. The pilot installs `SentinelAIAgent` under LocalService and protects its enrollment credential with Windows DPAPI.
 - **Desktop** (`desktop/`) is the native operator workspace. Closing it clears its in-memory authentication session and exits the GUI; Core and Agent continue. Reopening requires a fresh sign-in. Desktop does not start, stop or configure either service.
 - **Optional services** (`cloud/`) contain a separate development License API and AI Gateway. Core keeps their configured destinations and credentials; provider keys stay in the gateway. AI receives minimized evidence and does not determine detections or risk scores.
 
@@ -79,9 +79,9 @@ TASK-025 passed all twelve push/PR checks: full builds/regressions, **436 Setup 
 
 Current limits:
 
-- Detection covers the documented configuration rules. Malware scanning, live antivirus health, patch compliance and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
+- Detection covers the documented configuration rules and runtime event rules. Malware scanning, live antivirus health, patch compliance and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
 - Monitored security settings are delivered within seconds of a reachable change, but other inventory can be stale, and posture is current state rather than an event history. Core does not retain complete inventory/heartbeat history or historical risk scores; reports distinguish current risk from retained incident activity.
-- Selected Windows security events are collected and stored but not yet evaluated by rules or shown in Desktop, reports or AI (TASK-028). The installed LocalService Agent cannot read the Security channel (logons, scheduled tasks, Security log clears) until a read grant is approved; it reports that channel as access denied.
+- Selected Windows security events are evaluated by twelve deterministic runtime rules whose alerts appear with the other alerts and in Risk; raw events are not shown in Desktop, reports or AI. The installed LocalService Agent cannot read the Security channel (logons, scheduled tasks, Security log clears) until a read grant is approved; it reports that channel as access denied, and the logon and scheduled task rules cannot fire.
 - Setup's fresh Agent enrollment/DPAPI/heartbeat/inventory/restart and complete maintenance lifecycle acceptance passed. The original TASK-015 console pilot's full uninstall/reinstall scenario remains unexecuted.
 - Interactive UAC approval and physical multi-monitor DPI checks remain manual. Tray delivery and auto-start also depend on Windows shell/startup policy.
 - Pilot packages use development manifest signatures. Authenticode signing, production trust provisioning, automatic upgrades and state/account migrations remain outstanding. Unverified ownership is refused; failed transaction recovery requires explicit action.

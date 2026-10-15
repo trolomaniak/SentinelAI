@@ -526,7 +526,7 @@ function renderAlertDetail(alert, feedback = "") {
   const title = node("h1", null, alert.title || "Untitled alert");
   title.id = "alert-detail-heading";
   header.append(title, renderAlertBadge(alert.severity, severityPresentation), renderAlertBadge(alert.status, alertStatusPresentation));
-  alertDetailContent.append(header, node("p", "lead", "A recorded finding from reported configuration. Evidence reflects the last matching observation, not a live protection check."));
+  alertDetailContent.append(header, node("p", "lead", String(alert.ruleId || "").startsWith("SA-EVT-") ? "A recorded detection from a collected Windows event. Evidence reflects the last matching event, not a live protection check." : "A recorded finding from reported configuration. Evidence reflects the last matching observation, not a live protection check."));
   alertDetailContent.append(riskLink(alert.endpointId, "View endpoint risk and this alert's contribution"));
 
   const grid = node("div", "detail-grid");

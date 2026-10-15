@@ -47,7 +47,7 @@ public sealed class RiskScorer
         return new EndpointRiskScore(endpointId, score, raw, raw > Policy.MaximumScore, now, context, asset, exposure,
             Array.AsReadOnly(contributions), Array.AsReadOnly(groups), baseBonus, bonus,
             "Sum of severity × confidence policy weight × declared/default asset criticality × declared/default exposure " +
-            "× observation-age weight × remaining risk, plus the bounded current-snapshot correlation bonus weighted by asset and exposure. " +
+            "× observation-age weight × remaining risk, plus the bounded correlation bonus (configuration findings confirmed by the current snapshot; event detections while fresh) weighted by asset and exposure. " +
             "Rounded to the nearest integer (halves away from zero) and capped at 100. " +
             "Accepted and investigating statuses do not reduce remaining risk; resolved removes remaining risk. " +
             "A zero displayed score can reflect resolved or policy-discounted findings, small rounded contributions, or missing observations; " +
@@ -93,7 +93,7 @@ public sealed class RiskScorer
         var contribution = beforeMitigation * remaining;
         Policy.CorrelationGroupsByRule.TryGetValue(alert.RuleId, out var group);
         var latest = context.LatestInventoryUtc.HasValue && alert.LastObservedUtc == context.LatestInventoryUtc.Value;
-        var eligible = contribution > 0m && remaining > 0m && fresh && latest && group is not null;
+        var eligible = contribution > 0m && remaining > 0m && fresh && (latest || alert.EventDetection) && group is not null;
         return new AlertRiskContribution(alert.AlertId, alert.RuleId, severity, status, alert.LastObservedUtc,
             age, fresh ? "fresh" : aging ? "aging" : "old", future, points, confidence,
             confidenceOverride ? "rulePolicyOverride" : "policyDefault", asset, exposure, ageMultiplier, remaining,
