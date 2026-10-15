@@ -78,8 +78,8 @@ public sealed class EndpointTelemetryWorker(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         Guid? endpointId = null;
-        var nextUtc = DateTimeOffset.MinValue;
-        var lastDelay = TimeSpan.Zero;
+        long? attemptedAt = null;
+        var delay = TimeSpan.Zero;
         while (!stoppingToken.IsCancellationRequested)
         {
             // Capture the signal before reading the link so that a concurrent change still wakes the wait.
@@ -96,13 +96,13 @@ public sealed class EndpointTelemetryWorker(
                 if (linked.EndpointId != endpointId)
                 {
                     endpointId = linked.EndpointId;
-                    nextUtc = DateTimeOffset.MinValue;
+                    attemptedAt = null;
                 }
 
-                var now = time.GetUtcNow();
-                if (now >= nextUtc)
+                // Measured on the monotonic clock, so a wall-clock change neither delays nor advances a report.
+                var remaining = attemptedAt is { } last ? delay - time.GetElapsedTime(last) : TimeSpan.Zero;
+                if (remaining <= TimeSpan.Zero)
                 {
-                    TimeSpan delay;
                     try
                     {
                         delay = await DeliverAsync(linked, stoppingToken);
@@ -115,21 +115,13 @@ public sealed class EndpointTelemetryWorker(
                         delay = _timings.RetryDelay;
                     }
 
-                    lastDelay = delay;
-                    nextUtc = time.GetUtcNow() + delay;
+                    attemptedAt = time.GetTimestamp();
                     continue;
                 }
 
-                // A wall clock stepped back never stretches the wait beyond the delay that was chosen.
-                var remaining = nextUtc - now;
-                if (remaining > lastDelay)
-                {
-                    nextUtc = now + lastDelay;
-                    remaining = lastDelay;
-                }
-
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                await Task.WhenAny(Task.Delay(remaining, time, wait.Token), changed.WaitAsync(wait.Token));
+                await Task.WhenAny(Task.Delay(remaining < delay ? remaining : delay, time, wait.Token),
+                    changed.WaitAsync(wait.Token));
                 await wait.CancelAsync();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

@@ -383,33 +383,38 @@ internal static class EndpointTelemetryTests
         }
     }
 
-    // W5: a wall clock stepped back neither stalls the worker nor stops it; the wait never exceeds the chosen delay.
+    // W5: delays run on the monotonic clock: wall-clock steps neither delay, advance nor stop telemetry.
     private static async Task VerifyWorkerClockStepAsync()
     {
         var link = new AgentLink();
         var source = new FakeTelemetrySource(Guid.NewGuid());
         var uploader = new FakeUploader();
-        var clock = new SteppedClock();
+        var clock = new SteppedClock(Now);
+        var interval = TimeSpan.FromMilliseconds(100);
         var collector = new EndpointTelemetryCollector(source, clock, TimeSpan.FromSeconds(5));
-        var timings = new EndpointTelemetryTimings(TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(300),
-            TimeSpan.FromMilliseconds(300));
         using var worker = new EndpointTelemetryWorker(link, collector, uploader, clock,
-            NullLogger<EndpointTelemetryWorker>.Instance, timings);
+            NullLogger<EndpointTelemetryWorker>.Instance, new EndpointTelemetryTimings(interval, interval, interval));
         await worker.StartAsync(CancellationToken.None);
         try
         {
             link.Publish(Enrollment());
-            await WaitUntilAsync(() => uploader.Accepted >= 1, "The first report was not sent.");
+            await WaitUntilAsync(() => uploader.Accepted == 1, "The first report was not sent.");
 
-            // One day back: an unclamped wait would last a day.
-            clock.Offset -= TimeSpan.FromDays(1);
-            var sent = uploader.Accepted;
-            await WaitUntilAsync(() => uploader.Accepted >= sent + 2, "A wall clock stepped back stalled telemetry.");
+            // The monotonic clock stands still, so no report is due whatever the wall clock does.
+            await Task.Delay(500);
+            clock.StepWallClock(TimeSpan.FromDays(1));
+            await Task.Delay(500);
+            Ensure(uploader.Accepted == 1, "A wall clock stepped forward advanced telemetry.");
 
-            // Beyond the largest timer delay (about 49.7 days): an unclamped wait would fault the worker.
-            clock.Offset -= TimeSpan.FromDays(66);
-            sent = uploader.Accepted;
-            await WaitUntilAsync(() => uploader.Accepted >= sent + 2, "A wall clock stepped far back stopped telemetry.");
+            // Back beyond the largest timer delay (about 49.7 days): a wall-clock schedule would fault the worker.
+            clock.StepWallClock(-TimeSpan.FromDays(67));
+            await Task.Delay(500);
+            Ensure(uploader.Accepted == 1 && worker.ExecuteTask is { IsCompleted: false },
+                "A wall clock stepped back must neither send a report nor stop the worker.");
+
+            // Exactly one interval of monotonic time makes the next report due, however far the wall clock moved.
+            clock.Elapse(interval);
+            await WaitUntilAsync(() => uploader.Accepted == 2, "A wall clock stepped back delayed telemetry.");
             Ensure(worker.ExecuteTask is { IsCompleted: false }, "A clock step must never stop the worker or the Agent host.");
         }
         finally
@@ -868,18 +873,22 @@ internal static class EndpointTelemetryTests
         }
     }
 
-    /// <summary>The system clock with an adjustable wall-clock offset; timers stay monotonic, as on Windows.</summary>
-    private sealed class SteppedClock : TimeProvider
+    /// <summary>A wall clock and a monotonic clock that move only when told to; timers are the system's.</summary>
+    private sealed class SteppedClock(DateTimeOffset start) : TimeProvider
     {
-        private long _offsetTicks;
+        private long _utcTicks = start.UtcTicks;
+        private long _timestamp;
 
-        public TimeSpan Offset
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _utcTicks), TimeSpan.Zero);
+        public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
+        public void StepWallClock(TimeSpan by) => Interlocked.Add(ref _utcTicks, by.Ticks);
+
+        public void Elapse(TimeSpan by)
         {
-            get => TimeSpan.FromTicks(Interlocked.Read(ref _offsetTicks));
-            set => Interlocked.Exchange(ref _offsetTicks, value.Ticks);
+            Interlocked.Add(ref _timestamp, by.Ticks);
+            Interlocked.Add(ref _utcTicks, by.Ticks);
         }
-
-        public override DateTimeOffset GetUtcNow() => System.GetUtcNow() + Offset;
     }
 
     private sealed class FakeUploader : IEndpointTelemetryUploader

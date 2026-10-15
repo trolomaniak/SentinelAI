@@ -213,7 +213,7 @@ export function renderEndpointRisk(detail) {
     ["Contributing distinct groups", risk.correlatedGroups?.length ? risk.correlatedGroups.join(", ") : "None"],
     ["Base bonus", `${formatRiskNumber(risk.correlationBaseBonus)} points`],
     ["Applied bonus", `${formatRiskNumber(risk.correlationBonus)} points after asset and exposure weighting`],
-  ]), node("p", "helper-text", "Correlation combines distinct configured rule groups: configuration findings confirmed by the latest inventory and runtime event detections, with matching observations inside the policy correlation window. Repeated settings from one group do not count as independent signals. Resolved, unconfirmed configuration, ungrouped, or observations outside that window do not increase this bonus. This window is separate from the shorter inventory refresh expectation and does not establish live protection."));
+  ]), node("p", "helper-text", "Correlation combines distinct configured rule groups: configuration findings confirmed by the latest inventory, endpoint telemetry findings confirmed by the latest telemetry report and runtime event detections, with matching observations inside the policy correlation window. Repeated settings from one group do not count as independent signals. Resolved, unconfirmed configuration or telemetry, ungrouped, or observations outside that window do not increase this bonus. This window is separate from the shorter inventory refresh expectation and does not establish live protection."));
   container.append(correlation);
   const factors = Array.isArray(risk.contributions) ? risk.contributions : [];
   container.append(node("h2", "risk-factors-heading", "Alert contributions"), node("p", "helper-text", stateMeaning));

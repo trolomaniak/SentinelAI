@@ -317,6 +317,13 @@ internal static class EndpointTelemetryApiTests
             ("unknown schema version", HttpStatusCode.BadRequest, a, () => Raw(Mutate(node => node["schemaVersion"] = 2))),
             ("future collection time", HttpStatusCode.UnprocessableEntity, a,
                 () => Raw(Mutate(node => node["collectedUtc"] = DateTimeOffset.UtcNow.AddMinutes(10)))),
+            ("collection time at the end of the calendar", HttpStatusCode.UnprocessableEntity, a,
+                () => Raw(Mutate(node => node["collectedUtc"] = "9999-12-31T23:59:59.9999999+00:00"))),
+            ("future collection time with an unknown schema version", HttpStatusCode.BadRequest, a, () => Raw(Mutate(node =>
+            {
+                node["collectedUtc"] = DateTimeOffset.UtcNow.AddMinutes(10);
+                node["schemaVersion"] = 2;
+            }))),
             ("local-offset collection time", HttpStatusCode.BadRequest, a,
                 () => Raw(Mutate(node => node["collectedUtc"] = "2026-01-01T10:00:00+02:00"))),
             ("value in an uncollected section", HttpStatusCode.BadRequest, a, () => Raw(Mutate(node =>

@@ -454,20 +454,19 @@ public static class CoreHost
                     return Results.Unauthorized();
                 }
 
-                // A clock ahead of Core's is transient, not an incompatible report: the Agent retries after five minutes.
-                var now = time.GetUtcNow();
-                if (read.Value.CollectedUtc > now + EndpointTelemetryContract.MaxClockSkew)
-                {
-                    logger.LogWarning("Endpoint telemetry from endpoint {EndpointId} rejected with HTTP {StatusCode}",
-                        endpointId, StatusCodes.Status422UnprocessableEntity);
-                    return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
-                }
-
-                if (!EndpointTelemetryContract.IsValid(read.Value, now))
+                if (!EndpointTelemetryContract.IsValidIgnoringClock(read.Value))
                 {
                     logger.LogWarning("Endpoint telemetry from endpoint {EndpointId} rejected with HTTP {StatusCode}",
                         endpointId, StatusCodes.Status400BadRequest);
                     return Results.BadRequest();
+                }
+
+                // A valid report from a clock ahead of Core's is transient, not incompatible: the Agent retries after five minutes.
+                if (!EndpointTelemetryContract.IsValid(read.Value, time.GetUtcNow()))
+                {
+                    logger.LogWarning("Endpoint telemetry from endpoint {EndpointId} rejected with HTTP {StatusCode}",
+                        endpointId, StatusCodes.Status422UnprocessableEntity);
+                    return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
                 }
 
                 // An older report than the stored one is acknowledged without change, like inventory.

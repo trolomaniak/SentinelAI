@@ -201,11 +201,14 @@ public static class EndpointTelemetryContract
     /// Validates a report completely: version, identity, timestamps, vocabularies, bounds and that a section
     /// which was not collected carries no values. Core stores nothing that fails this check.
     /// </summary>
-    public static bool IsValid(EndpointTelemetryReport? report, DateTimeOffset now)
+    public static bool IsValid(EndpointTelemetryReport? report, DateTimeOffset now) =>
+        IsValidIgnoringClock(report) && report!.CollectedUtc <= now + MaxClockSkew;
+
+    /// <summary>Everything <see cref="IsValid(EndpointTelemetryReport?, DateTimeOffset)"/> checks except the receiver's clock.</summary>
+    public static bool IsValidIgnoringClock(EndpointTelemetryReport? report)
     {
         if (report is null || report.SchemaVersion != CurrentSchemaVersion || report.EndpointId == Guid.Empty ||
-            report.CollectedUtc.Offset != TimeSpan.Zero || report.CollectedUtc <= DateTimeOffset.UnixEpoch ||
-            report.CollectedUtc > now + MaxClockSkew)
+            report.CollectedUtc.Offset != TimeSpan.Zero || report.CollectedUtc <= DateTimeOffset.UnixEpoch)
         {
             return false;
         }
@@ -322,8 +325,9 @@ public static class EndpointTelemetryContract
         availability is not null && TelemetryAvailability.All.Contains(availability, StringComparer.Ordinal) &&
         (availability == TelemetryAvailability.Collected || values.All(value => value is null));
 
+    // Subtraction cannot overflow at the end of the calendar, unlike collectedUtc.AddDays(1).
     private static bool IsPastUtc(DateTimeOffset? value, DateTimeOffset collectedUtc) =>
-        value is not { } time || time.Offset == TimeSpan.Zero && time > DateTimeOffset.UnixEpoch && time <= collectedUtc.AddDays(1);
+        value is not { } time || time.Offset == TimeSpan.Zero && time > DateTimeOffset.UnixEpoch && time - collectedUtc <= TimeSpan.FromDays(1);
 
     private static bool NullOrIn(string? value, IReadOnlyList<string> vocabulary) =>
         value is null || vocabulary.Contains(value, StringComparer.Ordinal);
