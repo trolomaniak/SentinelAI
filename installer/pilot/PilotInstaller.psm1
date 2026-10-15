@@ -50,10 +50,21 @@ namespace SentinelAI.Pilot {
         }
         [DllImport("kernel32.dll", SetLastError=true)]
         private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation information);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
         public static uint GetLinkCount(string path) {
-            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
+            // FILE_READ_ATTRIBUTES only: Windows applies no sharing check to it, so a file a service
+            // holds exclusively while writing is still inspected instead of failing as in use.
+            // FILE_FLAG_OPEN_REPARSE_POINT opens the entry itself, never a link target.
+            using (var handle = CreateFileW(path, 0x80, 0x7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero)) {
+                if (handle.IsInvalid) {
+                    int error = Marshal.GetLastWin32Error();
+                    // ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND: the entry no longer exists.
+                    if (error == 2 || error == 3) throw new FileNotFoundException("Cannot inspect file links.", path);
+                    throw new IOException("Cannot inspect file links.", Marshal.GetHRForLastWin32Error());
+                }
                 FileInformation information;
-                if (!GetFileInformationByHandle(stream.SafeFileHandle, out information)) throw new IOException("Cannot inspect file links.");
+                if (!GetFileInformationByHandle(handle, out information)) throw new IOException("Cannot inspect file links.");
                 return information.LinkCount;
             }
         }
@@ -154,6 +165,8 @@ function Assert-PilotTrustedPath {
     $operator = Get-PilotCurrentOperatorSid
     $trusted = @($script:AdministratorsSid, $script:SystemSid, $script:TrustedInstallerSid, $operator)
     $pending = New-Object 'System.Collections.Generic.Queue[string]'
+    # Entries found by listing a directory, as opposed to the requested path and its ancestors.
+    $listed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     if (Test-Path -LiteralPath $Path) { $pending.Enqueue($Path) }
     $ancestor = [IO.Path]::GetDirectoryName($Path)
     while ($null -ne $ancestor) {
@@ -164,10 +177,28 @@ function Assert-PilotTrustedPath {
     while ($pending.Count -ne 0) {
         $current = $pending.Dequeue()
         if (++$count -gt 8192) { throw 'The existing installation tree is too large to validate.' }
-        $item = Get-Item -LiteralPath $current -Force
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Links and reparse points are unsupported.' }
-        if (-not $item.PSIsContainer -and (Get-PilotHardLinkCount -Path $current) -ne 1) { throw 'Hard-linked files are unsupported.' }
-        $acl = Get-Acl -LiteralPath $current
+        try {
+            # File.GetAttributes reads the entry itself and reports a missing one as not found.
+            # Get-Item can instead return an object for a concurrently removed file whose
+            # attributes read as -1, which looks like a directory and a reparse point.
+            $attributes = [IO.File]::GetAttributes($current)
+            $isContainer = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+            $isLink = ($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+            # A link is rejected below without opening it or reading through it.
+            $linkCount = if ($isLink -or $isContainer) { 1 } else { Get-PilotHardLinkCount -Path $current }
+            $acl = if ($isLink) { $null } else { Get-PilotAcl -Path $current -Container $isContainer }
+        } catch {
+            # Running services create and remove transient files in their data trees (Core's
+            # SQLite rollback journal, the Agent's atomic-write temporaries), so a listed entry
+            # can vanish before it is inspected. Skip a listed entry only when the file system
+            # reports it missing; a name created again afterwards is a new entry, as if made
+            # after the scan. The requested path, its ancestors and every other failure fail closed.
+            $failure = $_.Exception.GetBaseException()
+            if ($listed.Contains($current) -and ($failure -is [IO.FileNotFoundException] -or $failure -is [IO.DirectoryNotFoundException])) { continue }
+            throw
+        }
+        if ($isLink) { throw 'Links and reparse points are unsupported.' }
+        if ($linkCount -ne 1) { throw 'Hard-linked files are unsupported.' }
         $isAncestor = -not [string]::Equals($current, $Path, [StringComparison]::OrdinalIgnoreCase) -and
             $Path.StartsWith($current.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
         $currentTrusted = $trusted
@@ -185,9 +216,9 @@ function Assert-PilotTrustedPath {
         # Creating a name in an ancestor is different from modifying a protected existing child.
         # Windows' standard ProgramData additionally grants Users file creation/attribute rights.
         # Permit those only on that known trusted ancestor, never on targets or arbitrary parents.
-        if ($isAncestor -and $item.PSIsContainer) { $rights = $rights -band (-bnot [int][Security.AccessControl.FileSystemRights]::AppendData) }
+        if ($isAncestor -and $isContainer) { $rights = $rights -band (-bnot [int][Security.AccessControl.FileSystemRights]::AppendData) }
         $standardData = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData).TrimEnd('\')
-        if ($isAncestor -and $item.PSIsContainer -and
+        if ($isAncestor -and $isContainer -and
             [string]::Equals($current.TrimEnd('\'), $standardData, [StringComparison]::OrdinalIgnoreCase)) {
             $rights = $rights -band (-bnot [int][Security.AccessControl.FileSystemRights]::Write)
         }
@@ -198,10 +229,22 @@ function Assert-PilotTrustedPath {
                 throw 'An existing installation path grants write access outside the trusted installer accounts.'
             }
         }
-        if ($Tree -and $item.PSIsContainer -and -not $isAncestor) {
-            foreach ($child in Get-ChildItem -LiteralPath $current -Force) { $pending.Enqueue($child.FullName) }
+        if ($Tree -and $isContainer -and -not $isAncestor) {
+            foreach ($child in Get-ChildItem -LiteralPath $current -Force) { [void]$listed.Add($child.FullName); $pending.Enqueue($child.FullName) }
         }
     }
+}
+
+function Get-PilotAcl {
+    param([Parameter(Mandatory=$true)][string]$Path, [bool]$Container)
+    # The access control Get-Acl reads (owner, group and access rules), but a missing entry is
+    # reported only as FileNotFound or DirectoryNotFound and access denial as UnauthorizedAccess.
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        if ($Container) { return [IO.FileSystemAclExtensions]::GetAccessControl((New-Object IO.DirectoryInfo($Path))) }
+        return [IO.FileSystemAclExtensions]::GetAccessControl((New-Object IO.FileInfo($Path)))
+    }
+    if ($Container) { return [IO.Directory]::GetAccessControl($Path) }
+    return [IO.File]::GetAccessControl($Path)
 }
 
 function Get-PilotDirectoryAclDefinition {

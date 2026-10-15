@@ -283,6 +283,7 @@ jobs:
         run: |
           ./tests/setup/Workflow.Tests.ps1
           ./tests/setup/Lifecycle.Tests.ps1
+          ./tests/setup/TrustedPath.Tests.ps1
       - name: Publish one native Setup EXE with a private self-contained runtime
         shell: pwsh
         run: |
