@@ -14,8 +14,8 @@ Distribution is at the **development/pilot stage**: Setup, a self-contained Desk
 
 | Area | Current behavior |
 | --- | --- |
-| Devices and telemetry | Enrolled endpoint list/detail, heartbeat connectivity, inventory timestamps, OS/build, CPU, RAM, disks and selected Windows configuration. Unavailable observations remain Unknown. |
-| Security rules | 13 deterministic configuration rules covering firewall profiles, UAC, RDP, SMB, automatic logon, LSA protection and update policy, whose findings describe the observed configuration, and 12 deterministic runtime event rules (`SA-EVT-*`) over collected Windows security events, such as failed-logon bursts, Defender detections, disabled protection, cleared logs and new services, drivers or scheduled tasks ([runtime event detections](docs/EVENT-RULES.md)). |
+| Devices and telemetry | Enrolled endpoint list/detail, heartbeat connectivity, inventory timestamps, OS/build, CPU, RAM, disks and selected Windows configuration, plus hourly endpoint security telemetry: BitLocker, antivirus and Defender health, local Administrators members (SIDs only), Windows Update policy and results, pending restarts, security service states and installed application counts ([endpoint telemetry](docs/ENDPOINT-TELEMETRY.md)). Unavailable observations remain Unknown with their reason. |
+| Security rules | 13 deterministic configuration rules covering firewall profiles, UAC, RDP, SMB, automatic logon, LSA protection and update policy, whose findings describe the observed configuration, 4 endpoint telemetry rules (antivirus reported at risk, system volume without BitLocker protection, firewall or event log service not running), and 12 deterministic runtime event rules (`SA-EVT-*`) over collected Windows security events, such as failed-logon bursts, Defender detections, disabled protection, cleared logs and new services, drivers or scheduled tasks ([runtime event detections](docs/EVENT-RULES.md)). |
 | Alerts and incidents | Stored detections, typed evidence, observation/history details and versioned Open / Investigating / Resolved / Accepted decisions. Conflicting edits require review of the current version. |
 | Risk | Local deterministic organization/endpoint scores with decimal contributions, correlation, policy, coverage and freshness explanations. |
 | Reports | Local HTML generation for an inclusive UTC date range and explicit saving through a native Windows picker. Reports work offline and in Safe Mode; historical score trends are unavailable. |
@@ -79,7 +79,8 @@ TASK-025 passed all twelve push/PR checks: full builds/regressions, **436 Setup 
 
 Current limits:
 
-- Detection covers the documented configuration rules and runtime event rules. Malware scanning, live antivirus health, patch compliance and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
+- Detection covers the documented configuration, endpoint telemetry and runtime event rules. Malware scanning, patch compliance, vulnerability matching and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
+- The installed LocalService Agent cannot query BitLocker (the WMI class requires administrators) and reports it as access denied; native Setup acceptance prints which other telemetry sources that account can read. Granting more access is a security-boundary decision.
 - Monitored security settings are delivered within seconds of a reachable change, but other inventory can be stale, and posture is current state rather than an event history. Core does not retain complete inventory/heartbeat history or historical risk scores; reports distinguish current risk from retained incident activity.
 - Selected Windows security events are evaluated by twelve deterministic runtime rules whose alerts appear with the other alerts and in Risk; raw events are not shown in Desktop, reports or AI. The installed LocalService Agent cannot read the Security channel (logons, scheduled tasks, Security log clears) until a read grant is approved; it reports that channel as access denied, and the logon and scheduled task rules cannot fire.
 - Setup's fresh Agent enrollment/DPAPI/heartbeat/inventory/restart and complete maintenance lifecycle acceptance passed. The original TASK-015 console pilot's full uninstall/reinstall scenario remains unexecuted.
@@ -93,6 +94,6 @@ Current limits:
 - [Development status and verification](.agent/STATUS.md) · [Architectural decisions](.agent/DECISIONS.md)
 - [Single-EXE Windows setup](docs/SETUP.md) · [Manual pilot installation](docs/PILOT.md) · [Core Windows Service](docs/CORE-SERVICE.md) · [Desktop setup/sign-in](docs/DESKTOP-AUTH.md)
 - [Desktop operation, tray and auto-start](docs/DESKTOP-OPERATION.md) · [Devices](docs/DESKTOP-DEVICES.md) · [Alerts](docs/DESKTOP-ALERTS.md)
-- [Native Risk/Reports](docs/DESKTOP-RISK-REPORTS.md) · [Scoring policy](scoring/README.md) · [Rule catalog](rules/README.md) · [Posture monitoring](docs/POSTURE-MONITOR.md) · [Security event collection](docs/SECURITY-EVENTS.md) · [Report semantics](docs/REPORTING.md)
+- [Native Risk/Reports](docs/DESKTOP-RISK-REPORTS.md) · [Scoring policy](scoring/README.md) · [Rule catalog](rules/README.md) · [Posture monitoring](docs/POSTURE-MONITOR.md) · [Security event collection](docs/SECURITY-EVENTS.md) · [Endpoint telemetry](docs/ENDPOINT-TELEMETRY.md) · [Report semantics](docs/REPORTING.md)
 - [Native AI/licensing](docs/DESKTOP-AI-LICENSING.md) · [AI Gateway/configuration](docs/AI.md) · [Licensing](docs/LICENSING.md) · [Development issuer](cloud/license-api/README.md)
 - [Signed update verification and rollback](docs/UPDATES.md) · [Desktop structure and Windows validation](desktop/README.md)
