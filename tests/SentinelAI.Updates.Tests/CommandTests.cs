@@ -156,6 +156,7 @@ internal static class CommandTests
             }
 
             await VerifyPreparationAsync(directory, signingArguments, verifyingArguments, tamperedPackage, privateKey);
+            await VerifyPreparationDeadlineAsync(directory, privateKey, publicKey);
             await VerifyStrictArgumentsAsync(directory, signingArguments, verifyingArguments, privateKey);
             await VerifyRepositoryKeyRejectionAsync(directory, package, privateKey);
             await VerifyPartialKeyPairAsync(directory, privateKey);
@@ -167,6 +168,35 @@ internal static class CommandTests
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private static async Task VerifyPreparationDeadlineAsync(string directory, string privateKey, string publicKey)
+    {
+        // ~1000 entries take hundreds of milliseconds to extract with a flush per file;
+        // a 10 ms deadline must stop preparation, remove partial code and report a fixed line.
+        var package = Path.Combine(directory, "slow-agent.zip");
+        var manifest = Path.Combine(directory, "slow-agent.manifest.json");
+        var entries = new List<(string, string)> { ("SentinelAI.Agent.exe", "Synthetic development agent executable; never run.") };
+        for (var index = 0; index < 1000; index++) entries.Add(($"lib/dependency-{index}.dll", "synthetic dependency " + index));
+        await CreatePackageAsync(package, entries.ToArray());
+        Ensure((await RunDevAsync(SignArguments(privateKey, package, manifest))).ExitCode == 0, "The slow synthetic package was not signed.");
+        var output = Path.Combine(directory, "deadline-agent");
+        var arguments = ClientArguments("prepare", manifest, package, publicKey).Concat(["--output", output]).ToArray();
+        var temporary = Directory.EnumerateDirectories(Path.GetTempPath(), "sentinelai-update-verify-*").ToHashSet(StringComparer.Ordinal);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var exitCode = await UpdaterCommand.RunAsync(arguments, stdout, stderr, TimeSpan.FromMilliseconds(10));
+        Console.WriteLine($"deadline prepare returned in {watch.ElapsedMilliseconds} ms");
+        Ensure(exitCode == 2 && stdout.ToString().Length == 0 &&
+               stderr.ToString() == "Update preparation did not finish within its time limit." + Environment.NewLine,
+            "A preparation deadline did not fail closed with its fixed diagnostic.");
+        Ensure(!Directory.Exists(output), "A preparation deadline retained partial code.");
+        Ensure(Directory.EnumerateDirectories(Path.GetTempPath(), "sentinelai-update-verify-*").All(temporary.Contains),
+            "A preparation deadline retained its private verified copy.");
+        var completed = await RunClientAsync(arguments);
+        Ensure(completed.ExitCode == 0 && Directory.EnumerateFiles(output, "*", SearchOption.AllDirectories).Count() == 1001,
+            "The default deadline rejected a valid local preparation.");
     }
 
     private static async Task VerifyPreparationAsync(string directory, string[] signingArguments,

@@ -199,3 +199,10 @@
   - The .NET access-control read that `Get-Acl` wraps.
   - The native link count, which opens the entry with `FILE_READ_ATTRIBUTES` only. Windows applies no sharing check to that access, so a file a service holds with `FileShare.None` is still inspected. The open uses `FILE_FLAG_OPEN_REPARSE_POINT`, so it never opens a link target.
 - Root-cause fix in the scan rather than retrying the post-commit `lifecycle-cleanup` call: the same race also reached `lifecycle-context`, `lifecycle-stop` and `lifecycle-health`. A retried cleanup would have left those rollbacks in place.
+
+## 2026-10-18 — Bounded Updater preparation and CI stall probes
+
+- Bound the out-of-process Updater `prepare` twice: the Updater stops itself after 90 s (exit code 2, partial output and private copy removed), and its PowerShell caller kills it after 120 s and never waits unbounded for end of output. Preparation of a local package takes seconds; a stall must fail the step closed, before anything installed changes, instead of hanging Setup until the worker's 10-minute kill. Verification, ownership and output checks are unchanged.
+- Do not add a deadline to the in-process restore or repair transaction. A call blocked inside Windows (file flush, create or close, a filter driver, CNG) cannot be interrupted in-process, and abandoning the transaction thread would release the operation lease while a late journal write could still start rollback. If evidence shows such a block, move the deployment extraction into a separate, killable Updater process instead.
+- Diagnose intermittent CI stalls with fixed-category probes taken while the process is stuck (two samples of process, staging, Defender and disk counters), not with memory dumps: the Setup host and worker hold the synthetic administrator password and the one-use enrollment token. Probe output is numbers and allowlisted words only.
+- Do not raise the 300 s `setup-windows` install limit: the evidence shows a stall, not a slow install, and a longer limit only moves the failure to the worker's own kill.

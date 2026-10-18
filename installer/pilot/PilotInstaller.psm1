@@ -6,6 +6,9 @@ $script:ServiceSid = 'S-1-5-19'
 $script:AdministratorsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'
 $script:TrustedInstallerSid = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+$script:PilotPrepareTimeoutSeconds = 120
+# Processes that could not be released after a kill (stuck in the kernel) are kept referenced, never disposed.
+$script:PilotAbandonedProcesses = New-Object 'System.Collections.Generic.List[object]'
 
 function Assert-PilotSupportedHost {
     param([bool]$RequireElevation = $true)
@@ -355,9 +358,15 @@ function Invoke-PilotPrepare {
     $arguments = @('prepare', '--manifest', $manifest, '--package', $package, '--public-key', $PublicKeyPath,
         '--key-id', $KeyId, '--environment', $Environment, '--channel', $Channel,
         '--artifact-id', "sentinelai-$stem-win-x64", '--installed-version', '0.0.0', '--output', $OutputDirectory)
-    $raw = @(& $updater @arguments 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $raw.Count -ne 1 -or $raw[0].Length -gt 1024) { throw 'The signed pilot package was rejected.' }
-    try { $metadata = $raw[0] | ConvertFrom-Json } catch { throw 'The signed pilot package metadata is invalid.' }
+    # Preparation of a local package takes seconds; a stalled Updater must fail this step, not hang Setup.
+    $result = Invoke-PilotBoundedProcess -FilePath $updater -Arguments $arguments -WorkingDirectory $updaterDirectory -TimeoutSeconds $script:PilotPrepareTimeoutSeconds
+    if ($result.Outcome -ceq 'Timeout' -or ($result.Outcome -ceq 'Exited' -and $result.ExitCode -eq 2)) {
+        throw 'The signed pilot package preparation did not finish within its time limit.'
+    }
+    if ($result.Outcome -cne 'Exited' -or $result.ExitCode -ne 0 -or $result.Output -cnotmatch '\A[^\r\n]{1,1024}\r?\n\z') {
+        throw 'The signed pilot package was rejected.'
+    }
+    try { $metadata = $result.Output.TrimEnd() | ConvertFrom-Json } catch { throw 'The signed pilot package metadata is invalid.' }
     if ($metadata.version -notmatch '\A(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\z' -or
         $metadata.artifactId -cne "sentinelai-$stem-win-x64" -or $metadata.channel -cne $Channel -or $metadata.environment -cne $Environment) {
         throw 'The signed pilot package metadata does not match the installation policy.'
@@ -392,6 +401,42 @@ function ConvertTo-PilotWindowsArgument {
     [void]$encoded.Append(('\' * (2 * $slashes)))
     [void]$encoded.Append('"')
     return $encoded.ToString()
+}
+
+function Invoke-PilotBoundedProcess {
+    param([Parameter(Mandatory=$true)][string]$FilePath, [Parameter(Mandatory=$true)][string[]]$Arguments,
+          [Parameter(Mandatory=$true)][string]$WorkingDirectory, [ValidateRange(1,600)][int]$TimeoutSeconds)
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $FilePath
+    $start.WorkingDirectory = $WorkingDirectory
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.StandardOutputEncoding = New-Object Text.UTF8Encoding($false)
+    $start.StandardErrorEncoding = New-Object Text.UTF8Encoding($false)
+    $start.Arguments = (@($Arguments | ForEach-Object { ConvertTo-PilotWindowsArgument -Argument $_ }) -join ' ')
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $start
+    $released = $true
+    try {
+        [void]$process.Start()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill() } catch { }
+            if (-not $process.WaitForExit(5000) -or -not $stdout.Wait(5000)) { $released = $false }
+            return [pscustomobject]@{ Outcome = 'Timeout'; ExitCode = -1; Output = '' }
+        }
+        # End of output depends on every process that inherited the pipe; never wait for it unbounded.
+        if (-not $stdout.Wait(5000) -or -not $stderr.Wait(5000)) {
+            $released = $false
+            return [pscustomobject]@{ Outcome = 'OutputHeld'; ExitCode = $process.ExitCode; Output = '' }
+        }
+        return [pscustomobject]@{ Outcome = 'Exited'; ExitCode = $process.ExitCode; Output = [string]$stdout.Result }
+    } finally {
+        if ($released) { $process.Dispose() } else { [void]$script:PilotAbandonedProcesses.Add($process) }
+    }
 }
 
 function Invoke-PilotSc {

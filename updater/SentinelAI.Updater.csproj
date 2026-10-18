@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../shared/updates/SentinelAI.Updates.csproj" />
+    <InternalsVisibleTo Include="SentinelAI.Updates.Tests" />
   </ItemGroup>
   <PropertyGroup>
     <OutputType>Exe</OutputType>
