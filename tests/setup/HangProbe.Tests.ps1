@@ -37,21 +37,24 @@ try {
     $absent = Join-Path $root 'absent'
     Assert-Probe (-not (Measure-SetupProbeTree $absent).Present -and -not [IO.Directory]::Exists($absent)) 'Absent staging is reported, not created.'
 
-    # Synthetic Program Files and ProgramData layouts: every staging kind is found and counted, nothing else.
+    # Synthetic Program Files and ProgramData layouts as Setup creates them: every staging kind is found and counted, nothing else.
     $programFiles = Join-Path $root 'Program Files'; $programData = Join-Path $root 'ProgramData'
     $prepare = Join-Path $programFiles ('SentinelAI/.sentinelai-pilot-' + $secret)
     $work = Join-Path $programFiles ('.SentinelAI.sentinelai-update-' + $secret)
     $session = Join-Path $programData ('SentinelAI-SetupHost/' + $secret)
+    $setupWork = Join-Path $programData ('SentinelAI-Setup/' + $secret)
     foreach ($directory in @($prepare, (Join-Path $work 'replacement'), (Join-Path $session 'temp/sentinelai-update-verify-a'),
-        (Join-Path $session 'bundle/retained-candidate'), (Join-Path $programFiles 'SentinelAI/Core'))) {
+        (Join-Path $setupWork 'retained-candidate'), (Join-Path $session 'bundle/retained-candidate'), (Join-Path $programFiles 'SentinelAI/Core'))) {
         [void][IO.Directory]::CreateDirectory($directory)
     }
     [IO.File]::WriteAllBytes((Join-Path $prepare 'SentinelAI.Agent.exe'), (New-Object byte[] 4096))
     [IO.File]::WriteAllBytes((Join-Path $work 'package.zip'), (New-Object byte[] 8192))
     [IO.File]::WriteAllBytes((Join-Path $work 'replacement/a.dll'), (New-Object byte[] 1024))
     [IO.File]::WriteAllBytes((Join-Path $session 'temp/sentinelai-update-verify-a/verified.zip'), (New-Object byte[] 2048))
-    [IO.File]::WriteAllBytes((Join-Path $session 'bundle/retained-candidate.zip'), (New-Object byte[] 3072))
-    [IO.File]::WriteAllBytes((Join-Path $session 'bundle/retained-candidate/b.dll'), (New-Object byte[] 1024))
+    [IO.File]::WriteAllBytes((Join-Path $setupWork 'retained-candidate.zip'), (New-Object byte[] 3072))
+    [IO.File]::WriteAllBytes((Join-Path $setupWork 'retained-candidate/b.dll'), (New-Object byte[] 1024))
+    # A same-named tree outside Setup's work directory is not a restore candidate.
+    [IO.File]::WriteAllBytes((Join-Path $session 'bundle/retained-candidate/c.dll'), (New-Object byte[] 1024))
     [IO.File]::WriteAllBytes((Join-Path $programFiles 'SentinelAI/Core/SentinelAI.Core.exe'), (New-Object byte[] 1024))
     $staging = Get-SetupProbeStaging -ProgramFiles $programFiles -ProgramData $programData
     $line = Format-SetupProbe $staging

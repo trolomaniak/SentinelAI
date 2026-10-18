@@ -105,10 +105,12 @@ function Get-SetupProbeStaging([string]$ProgramFiles = $env:ProgramFiles, [strin
     $fields = [ordered]@{}
     $codeParent = if ([string]::IsNullOrEmpty($ProgramFiles)) { '' } else { Join-Path $ProgramFiles 'SentinelAI' }
     $hostRoot = if ([string]::IsNullOrEmpty($ProgramData)) { '' } else { Join-Path $ProgramData 'SentinelAI-SetupHost' }
-    # Pilot Updater prepare output, its private verified copy, the retained-restore candidate and the transaction work tree.
+    $setupRoot = if ([string]::IsNullOrEmpty($ProgramData)) { '' } else { Join-Path $ProgramData 'SentinelAI-Setup' }
+    # Pilot Updater prepare output, its private verified copy (under the host's TEMP), the retained-restore
+    # candidate (in Setup's protected work directory) and the transaction work tree.
     Add-SetupProbeFields $fields 'Prepare.' (Measure-SetupProbeEntries (Find-SetupProbeEntries $codeParent @('.sentinelai-pilot-*', '.sentinelai-core-service-*') 1))
     Add-SetupProbeFields $fields 'Verify.' (Measure-SetupProbeEntries (Find-SetupProbeEntries $hostRoot @('sentinelai-update-verify-*') 3))
-    Add-SetupProbeFields $fields 'Retained.' (Measure-SetupProbeEntries (Find-SetupProbeEntries $hostRoot @('retained-candidate', 'retained-candidate.zip') 4))
+    Add-SetupProbeFields $fields 'Retained.' (Measure-SetupProbeEntries (Find-SetupProbeEntries $setupRoot @('retained-candidate', 'retained-candidate.zip') 2))
     Add-SetupProbeFields $fields 'Work.' (Measure-SetupProbeEntries (Find-SetupProbeEntries $ProgramFiles @('.SentinelAI.sentinelai-update-*') 1))
     return $fields
 }

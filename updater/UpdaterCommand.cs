@@ -6,8 +6,9 @@ namespace SentinelAI.Updater;
 /// <summary>Operator-controlled local verification, staging and fresh code preparation; never starts services or downloads code.</summary>
 public static class UpdaterCommand
 {
-    // A local, already-downloaded package prepares in seconds; a stalled installer step fails closed.
-    internal static readonly TimeSpan PrepareDeadline = TimeSpan.FromSeconds(90);
+    // A local package prepares in seconds on CI and well within a minute on slow write-through disks;
+    // a stalled installer step fails closed long before Setup's ten-minute worker limit.
+    internal static readonly TimeSpan PrepareDeadline = TimeSpan.FromMinutes(5);
     internal const int DeadlineExitCode = 2;
 
     public static Task<int> RunAsync(string[] args, TextWriter output, TextWriter error) =>

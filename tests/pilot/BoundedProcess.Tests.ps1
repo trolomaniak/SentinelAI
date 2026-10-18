@@ -102,7 +102,7 @@ try {
     $metadata = Invoke-PilotPrepare -BundleDirectory $bundle -PublicKeyPath (Join-Path $testRoot 'public.pem') -KeyId 'dev-test' `
         -Environment 'development' -Channel 'pilot' -Component Agent -OutputDirectory (Join-Path $testRoot 'prepared')
     Assert-Test ($metadata.version -ceq '1.2.3' -and $metadata.artifactId -ceq 'sentinelai-agent-win-x64') 'Valid preparation metadata was not returned.'
-    Assert-Test ((& $module { $script:PilotPrepareTimeoutSeconds }) -eq 120) 'The preparation time limit changed unexpectedly.'
+    Assert-Test ((& $module { $script:PilotPrepareTimeoutSeconds }) -eq 330) 'The preparation time limit changed unexpectedly.'
 
     Write-Output "Bounded process tests passed ($script:assertionCount assertions)."
 } finally {

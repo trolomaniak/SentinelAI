@@ -6,7 +6,7 @@ $script:ServiceSid = 'S-1-5-19'
 $script:AdministratorsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'
 $script:TrustedInstallerSid = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
-$script:PilotPrepareTimeoutSeconds = 120
+$script:PilotPrepareTimeoutSeconds = 330
 # Processes that could not be released after a kill (stuck in the kernel) are kept referenced, never disposed.
 $script:PilotAbandonedProcesses = New-Object 'System.Collections.Generic.List[object]'
 
@@ -358,7 +358,7 @@ function Invoke-PilotPrepare {
     $arguments = @('prepare', '--manifest', $manifest, '--package', $package, '--public-key', $PublicKeyPath,
         '--key-id', $KeyId, '--environment', $Environment, '--channel', $Channel,
         '--artifact-id', "sentinelai-$stem-win-x64", '--installed-version', '0.0.0', '--output', $OutputDirectory)
-    # Preparation of a local package takes seconds; a stalled Updater must fail this step, not hang Setup.
+    # The Updater stops itself after five minutes; a stalled Updater that cannot must fail this step, not hang Setup.
     $result = Invoke-PilotBoundedProcess -FilePath $updater -Arguments $arguments -WorkingDirectory $updaterDirectory -TimeoutSeconds $script:PilotPrepareTimeoutSeconds
     if ($result.Outcome -ceq 'Timeout' -or ($result.Outcome -ceq 'Exited' -and $result.ExitCode -eq 2)) {
         throw 'The signed pilot package preparation did not finish within its time limit.'
