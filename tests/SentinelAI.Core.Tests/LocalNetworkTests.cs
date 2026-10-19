@@ -46,6 +46,7 @@ internal static class LocalNetworkTests
             using var certificate = CreateServerCertificate("synthetic-core");
             await VerifyListenerAsync(Path.Combine(root, "listener"), certificate, username, password);
             await VerifyUnavailableCertificateAsync(Path.Combine(root, "missing"), username, password);
+            await VerifyOccupiedPortAsync(Path.Combine(root, "occupied"), certificate, username, password);
             await VerifyLocalOnlyAsync(Path.Combine(root, "local-only"), username, password);
             if (OperatingSystem.IsWindows() && IsElevated())
                 await VerifyMachineCertificateAsync(Path.Combine(root, "machine"), username, password);
@@ -344,6 +345,41 @@ internal static class LocalNetworkTests
         using var probe = new TcpClient();
         Reject(() => probe.Connect(IPAddress.Loopback, port), "Core listened on the local network without its certificate.");
         await app.StopAsync();
+    }
+
+    // Another program holding the local-network port after a restart leaves the loopback origin and local monitoring running.
+    private static async Task VerifyOccupiedPortAsync(string directory, X509Certificate2 certificate, string username, string password)
+    {
+        foreach (var address in Socket.OSSupportsIPv6 ? new[] { IPAddress.Any, IPAddress.IPv6Any } : [IPAddress.Any])
+        {
+            var holder = new TcpListener(address, 0);
+            if (address.Equals(IPAddress.IPv6Any)) holder.Server.DualMode = true;
+            holder.Start();
+            try
+            {
+                var port = ((IPEndPoint)holder.LocalEndpoint).Port;
+                Check(!LocalNetworkHosting.PortAvailable(port), "The local-network port probe missed a port another program holds.");
+                await using var app = BuildCore(Path.Combine(directory, address.AddressFamily.ToString()), port,
+                    LocalNetworkCertificate.Sha256(certificate), new FixedSource(certificate));
+                await app.StartAsync();
+                Check(app.Urls.Count == 1, "Core opened the local-network listener on a port another program holds.");
+                using var local = new HttpClient(new HttpClientHandler { UseProxy = false }) { BaseAddress = new Uri(app.Urls.Single()) };
+                var token = await LoginAsync(local, username, password);
+                using var view = await GetAsync(local, "/api/admin/local-network", token);
+                using var json = JsonDocument.Parse(await view.Content.ReadAsStringAsync());
+                Check(json.RootElement.GetProperty("enabled").GetBoolean() && !json.RootElement.GetProperty("listening").GetBoolean(),
+                    "Desktop could not see that the local-network port is unavailable.");
+                await app.StopAsync();
+            }
+            finally
+            {
+                holder.Stop();
+            }
+        }
+
+        var free = FreePort();
+        Check(LocalNetworkHosting.PortAvailable(free) && LocalNetworkHosting.PortAvailable(free),
+            "The local-network port probe held or misjudged a free port.");
     }
 
     private static async Task VerifyLocalOnlyAsync(string directory, string username, string password)

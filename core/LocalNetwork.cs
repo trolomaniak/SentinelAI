@@ -198,6 +198,14 @@ internal static class LocalNetworkHosting
                 return;
             }
 
+            // Kestrel binds every endpoint or none, so a port another program holds must not stop the loopback origin.
+            if (!PortAvailable(options.Port))
+            {
+                logger.LogError("Local-network listener disabled: port {Port} is in use by another program.", options.Port);
+                certificate.Dispose();
+                return;
+            }
+
             kestrel.ListenAnyIP(options.Port, listen =>
             {
                 listen.Protocols = HttpProtocols.Http1;
@@ -226,5 +234,42 @@ internal static class LocalNetworkHosting
             });
             services.GetRequiredService<LocalNetworkState>().MarkListening();
         });
+    }
+
+    // Binds the port the way ListenAnyIP does (IPv6 any with IPv4 mapped, else IPv4 any) and releases it at once.
+    internal static bool PortAvailable(int port)
+    {
+        try
+        {
+            using var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = true };
+            Bind(socket, new IPEndPoint(IPAddress.IPv6Any, port));
+            return true;
+        }
+        catch (SocketException exception) when (exception.SocketErrorCode is SocketError.AddressFamilyNotSupported or SocketError.ProtocolNotSupported)
+        {
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            Bind(socket, new IPEndPoint(IPAddress.Any, port));
+            return true;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+    }
+
+    private static void Bind(Socket socket, IPEndPoint endpoint)
+    {
+        // Like Kestrel's socket transport: address reuse outside Windows only, for ports still in TIME_WAIT.
+        if (!OperatingSystem.IsWindows()) socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        socket.Bind(endpoint);
+        socket.Listen(1);
     }
 }
