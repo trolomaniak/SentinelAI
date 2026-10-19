@@ -582,9 +582,10 @@ internal static class LocalNetworkTests
         return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
     }
 
+    // Like the machine store, every lookup returns a certificate the caller owns.
     private sealed class FixedSource(X509Certificate2? certificate) : ILocalNetworkCertificateSource
     {
-        public X509Certificate2? Find(string sha256) => certificate;
+        public X509Certificate2? Find(string sha256) => certificate is null ? null : new X509Certificate2(certificate);
     }
 
     private static void Check(bool condition, string message)
