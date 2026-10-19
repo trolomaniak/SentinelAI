@@ -642,7 +642,7 @@ function Assert-SetupLocalNetworkCertificate([string]$Pin) {
         $entries = @($descriptor.DiscretionaryAcl | ForEach-Object { [string]$_.AceQualifier + '|' + $_.SecurityIdentifier.Value + '|' + $_.AccessMask })
         Assert-SetupAcceptance (($descriptor.ControlFlags -band [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -ne 0 -and $entries.Count -eq 3 -and
             $entries -ccontains 'AccessAllowed|S-1-5-18|2032127' -and $entries -ccontains 'AccessAllowed|S-1-5-32-544|2032127' -and
-            $entries -ccontains ('AccessAllowed|' + $script:coreSid + '|1179785')) "Core's private key is usable outside Core's service account, SYSTEM and Administrators."
+            $entries -ccontains ('AccessAllowed|' + $script:coreSid + '|1179785')) ("Core's private key is usable outside Core's service account, SYSTEM and Administrators: " + $descriptor.GetSddlForm('Access'))
     } finally { if ($null -ne $key) { $key.Dispose() } }
     foreach ($certificate in $certificates) { $certificate.Dispose() }
 }
@@ -786,6 +786,9 @@ try {
     Wait-SetupAcceptance { Test-SetupControl 'SetupErrorText' $false } 'Setup did not reject empty administrator credentials.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $dataRoot) -and
         $null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Invalid administrator input created installation files or services.'
+    Wait-SetupAcceptance { Test-SetupControl 'SetupLocalNetworkAccess' } 'Setup did not offer local-network access for the central computer.'
+    $localNetworkOption = [Windows.Automation.TogglePattern](Find-SetupControl 'SetupLocalNetworkAccess').GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
+    Assert-SetupAcceptance ([string]$localNetworkOption.Current.ToggleState -ceq 'On') 'Setup did not enable local-network access by default.'
     Set-SetupCredentials
     Assert-NoCredentialArguments $setup
     $installationSince = [DateTimeOffset]::UtcNow

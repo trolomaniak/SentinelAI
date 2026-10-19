@@ -17,7 +17,7 @@ public sealed class SetupWindow : Window
     private readonly PasswordBox _password = new() { MaxLength = 1024 };
     private readonly PasswordBox _confirmation = new() { MaxLength = 1024 };
     private readonly StackPanel _credentials = new() { Visibility = Visibility.Collapsed };
-    private readonly CheckBox _localNetwork = new() { Content = "Allow Agents on other computers in this local network to connect", IsChecked = true, Margin = new Thickness(0, 16, 0, 4) };
+    private readonly CheckBox _localNetwork = new() { Content = "Allow Agents on other computers in this local network to connect", IsChecked = true, Margin = new Thickness(0, 4, 0, 4) };
     private readonly StackPanel _maintenance = new() { Visibility = Visibility.Collapsed };
     private readonly ComboBox _action = new() { MinHeight = 30 };
     private readonly CheckBox _preserveData = new() { Content = "Keep security history and protected configuration", IsChecked = true, Margin = new Thickness(0, 12, 0, 8) };
@@ -47,11 +47,11 @@ public sealed class SetupWindow : Window
         panel.Children.Add(new TextBlock { Text = "SentinelAI Setup", FontSize = 26, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 14) });
         panel.Children.Add(new TextBlock { Text = "Administrator elevation is required and was requested before this window opened. Setup checks the protected local deployment before offering installation, repair, upgrade or uninstall. Repair and upgrade preserve security history, identity and protected configuration.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) });
         AutomationProperties.SetAutomationId(_version, "SetupInstallationVersion"); panel.Children.Add(_version);
+        AutomationProperties.SetAutomationId(_localNetwork, "SetupLocalNetworkAccess"); _credentials.Children.Add(_localNetwork);
+        _credentials.Children.Add(new TextBlock { Text = "This computer becomes the company's central SentinelAI computer. Core accepts Agents over HTTPS on port 5443 with its own certificate, which Agents trust only by its SHA-256 fingerprint shown in Desktop Settings. Windows Firewall allows that port only from the local subnet on Domain and Private networks, never on Public networks. Clear this option to keep the installation local to this computer only.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) });
         AddField(_credentials, "Administrator username", _username, "SetupAdministratorUsername");
         AddField(_credentials, "Administrator password (12–1024 characters)", _password, "SetupAdministratorPassword");
         AddField(_credentials, "Confirm administrator password", _confirmation, "SetupAdministratorConfirmPassword");
-        AutomationProperties.SetAutomationId(_localNetwork, "SetupLocalNetworkAccess"); _credentials.Children.Add(_localNetwork);
-        _credentials.Children.Add(new TextBlock { Text = "This computer becomes the company's central SentinelAI computer. Core accepts Agents over HTTPS on port 5443 with its own certificate, which Agents trust only by its SHA-256 fingerprint shown in Desktop Settings. Windows Firewall allows that port only from the local subnet on Domain and Private networks, never on Public networks. Clear this option to keep the installation local to this computer only.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4) });
         AutomationProperties.SetAutomationId(_install, "SetupInstallButton"); AutomationProperties.SetAutomationId(_open, "SetupOpenDesktopButton");
         AutomationProperties.SetAutomationId(_progress, "SetupProgressText"); AutomationProperties.SetAutomationId(_finished, "SetupFinishedText"); AutomationProperties.SetAutomationId(_error, "SetupErrorText");
         _install.Margin = new Thickness(0, 12, 0, 12); _credentials.Children.Add(_install); panel.Children.Add(_credentials);

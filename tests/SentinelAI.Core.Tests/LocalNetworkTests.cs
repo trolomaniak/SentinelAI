@@ -376,7 +376,8 @@ internal static class LocalNetworkTests
                       entries.Contains((AceQualifier.AccessAllowed, "S-1-5-18", 0x1F01FF)) &&
                       entries.Contains((AceQualifier.AccessAllowed, "S-1-5-32-544", 0x1F01FF)) &&
                       entries.Contains((AceQualifier.AccessAllowed, LocalNetworkCertificate.CoreServiceSid, 0x120089)),
-                    "Core's private key is usable by identities other than Core's service account, SYSTEM and Administrators.");
+                    "Core's private key is usable by identities other than Core's service account, SYSTEM and Administrators: " +
+                    descriptor.GetSddlForm(AccessControlSections.Access));
                 foreach (var root in new[] { StoreName.Root, StoreName.CertificateAuthority })
                 {
                     using var store = new X509Store(root, StoreLocation.LocalMachine);
