@@ -125,8 +125,12 @@ namespace SentinelAI.Setup.Acceptance {
         public static string Sha256(byte[] data) {
             using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(data)).Replace("-", "");
         }
-        // Returns the negotiated protocol, cipher, key exchange and the bounded raw HTTP response.
+        // Returns the negotiated protocol, cipher, key exchange and the bounded raw HTTP response. Each call uses
+        // its own TLS target name, so SChannel never resumes a session from another call's trust decision.
         public static string[] Request(string address, int port, string pin, int protocols, string method, string path, string bearer, string body) {
+            return Request(address, port, "sentinelai-core-" + Guid.NewGuid().ToString("N"), pin, protocols, method, path, bearer, body);
+        }
+        public static string[] Request(string address, int port, string target, string pin, int protocols, string method, string path, string bearer, string body) {
             using (var tcp = new TcpClient()) {
                 if (!tcp.ConnectAsync(address, port).Wait(10000)) throw new IOException("The local-network listener did not accept a connection.");
                 tcp.ReceiveTimeout = 10000; tcp.SendTimeout = 10000;
@@ -134,7 +138,8 @@ namespace SentinelAI.Setup.Acceptance {
                     return certificate != null && String.Equals(Sha256(certificate.GetRawCertData()), pin, StringComparison.Ordinal);
                 };
                 using (var tls = new SslStream(tcp.GetStream(), false, pinned)) {
-                    tls.AuthenticateAsClient("sentinelai-core", null, (SslProtocols)protocols, false);
+                    try { tls.AuthenticateAsClient(target, null, (SslProtocols)protocols, false); }
+                    catch (IOException error) { throw new IOException("TLS handshake failed: " + Describe(error), error); }
                     var content = body == null ? new byte[0] : Encoding.UTF8.GetBytes(body);
                     var head = new StringBuilder();
                     head.Append(method).Append(' ').Append(path).Append(" HTTP/1.1\r\nHost: sentinelai-core\r\nConnection: close\r\n");
@@ -142,12 +147,21 @@ namespace SentinelAI.Setup.Acceptance {
                     if (body != null) head.Append("Content-Type: application/json\r\n");
                     head.Append("Content-Length: ").Append(content.Length).Append("\r\n\r\n");
                     var bytes = Encoding.ASCII.GetBytes(head.ToString());
-                    tls.Write(bytes, 0, bytes.Length); tls.Write(content, 0, content.Length); tls.Flush();
                     var buffer = new byte[8192]; int total = 0, read;
-                    while (total < buffer.Length && (read = tls.Read(buffer, total, buffer.Length - total)) > 0) total += read;
+                    try {
+                        tls.Write(bytes, 0, bytes.Length); tls.Write(content, 0, content.Length); tls.Flush();
+                        while (total < buffer.Length && (read = tls.Read(buffer, total, buffer.Length - total)) > 0) total += read;
+                    } catch (IOException error) {
+                        throw new IOException("HTTP exchange failed after TLS " + tls.SslProtocol + " " + tls.CipherAlgorithm + " " +
+                            (int)tls.KeyExchangeAlgorithm + " with " + total + " response bytes: " + Describe(error), error);
+                    }
                     return new[] { tls.SslProtocol.ToString(), tls.CipherAlgorithm.ToString(), ((int)tls.KeyExchangeAlgorithm).ToString(), Encoding.ASCII.GetString(buffer, 0, total) };
                 }
             }
+        }
+        private static string Describe(IOException error) {
+            var socket = error.InnerException as SocketException;
+            return error.Message + (socket == null ? "" : " (" + socket.SocketErrorCode + ")");
         }
     }
 }
@@ -753,6 +767,20 @@ function Test-SetupLocalNetwork {
     $refused = $false
     try { [void](Invoke-SetupLocalNetworkRequest $address $wrongPin 3072 'GET' '/api/health' $null $null) } catch { $refused = $true }
     Assert-SetupAcceptance $refused 'A client accepted Core''s certificate under a different pin.'
+    # A Windows 10 Agent reconnects over TLS 1.2 under one target name, so SChannel resumes its session: Core admits it.
+    # The outcome under the same name right after a refused pin is reported for diagnosis.
+    $target = 'sentinelai-core-reuse-' + [Guid]::NewGuid().ToString('N')
+    foreach ($attempt in 1..3) {
+        $reused = [SentinelAI.Setup.Acceptance.LocalNetwork]::Request($address, $script:localNetworkPort, $target, $pin, 3072, 'GET', '/api/health', $null, $null)
+        Assert-SetupAcceptance ($reused[3].StartsWith('HTTP/1.1 404', [StringComparison]::Ordinal)) 'Core did not admit a reconnecting TLS 1.2 client.'
+    }
+    try { [void][SentinelAI.Setup.Acceptance.LocalNetwork]::Request($address, $script:localNetworkPort, $target, $wrongPin, 3072, 'GET', '/api/health', $null, $null) } catch { }
+    $afterRefusal = 'admitted'
+    try { [void][SentinelAI.Setup.Acceptance.LocalNetwork]::Request($address, $script:localNetworkPort, $target, $pin, 3072, 'GET', '/api/health', $null, $null) }
+    catch { $afterRefusal = [string]$_.Exception.InnerException.Message }
+    Write-Output ('Local network TLS 1.2 reconnection: resumed=admitted; sameTargetAfterRefusedPin=' + $afterRefusal)
+    $after = Invoke-SetupLocalNetworkRequest $address $pin 3072 'GET' '/api/health' $null $null
+    Assert-SetupAcceptance ($after[3].StartsWith('HTTP/1.1 404', [StringComparison]::Ordinal)) 'A pinned client failed after another client''s refused pin.'
 
     # An Agent configured with this computer's own non-loopback address: a wrong pin is refused before the one-use
     # token is sent, then the exact pin enrolls with the same token and reports over the local-network listener.
