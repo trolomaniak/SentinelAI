@@ -183,8 +183,8 @@ function Invoke-SetupProcessProbe([string]$Role, [int]$Id, [string]$Reason, [int
     return $line
 }
 function Invoke-SetupHangWatch([int]$MinimumAgeSeconds = 45) {
-    # Fresh install: probe each Updater once when it is older than any normal preparation, before its
-    # own deadline (90 s) and its caller's limit (120 s) remove it.
+    # Fresh install: probe each Updater once when it is older than a normal preparation, well before its
+    # own deadline (5 minutes) and its caller's limit (330 s) remove it.
     if ($null -ne $script:SetupProbeWatch -and $script:SetupProbeWatch.Elapsed.TotalSeconds -lt 5) { return }
     $script:SetupProbeWatch = [Diagnostics.Stopwatch]::StartNew()
     try {
