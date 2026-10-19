@@ -86,6 +86,7 @@ try
     await VerifyRetryAndStableIdentityAsync(Path.Combine(testDirectory, "retry"));
     await VerifyAgentToCoreAsync(Path.Combine(testDirectory, "end-to-end"));
     await VerifyAgentEnrollmentAsync(Path.Combine(testDirectory, "enrollment"));
+    await LocalNetworkTrustTests.RunAsync(Path.Combine(testDirectory, "local-network"));
     await PostureMonitorTests.RunAsync(Path.Combine(testDirectory, "posture"));
     await SecurityEventPipelineTests.RunAsync(Path.Combine(testDirectory, "security-events"));
     var telemetryChecks = await EndpointTelemetryTests.RunAsync(Path.Combine(testDirectory, "telemetry"));
@@ -173,9 +174,14 @@ static void VerifyRemoteCoreTrustConfiguration()
         "The Agent rejected a valid pinned Core certificate.");
     Ensure(!CoreCertificateTrust.IsTrusted(certificate, SslPolicyErrors.None, new string('0', 64)),
         "The Agent accepted a different Core certificate.");
-    Ensure(!CoreCertificateTrust.IsTrusted(certificate,
-            SslPolicyErrors.RemoteCertificateChainErrors, pin),
-        "The Agent bypassed certificate chain validation for a matching pin.");
+    // Pin-only trust (owner decision 2026-10-19): a chain error is accepted only with the exact pin.
+    Ensure(CoreCertificateTrust.IsTrusted(certificate,
+            SslPolicyErrors.RemoteCertificateChainErrors, pin) &&
+           !CoreCertificateTrust.IsTrusted(certificate,
+            SslPolicyErrors.RemoteCertificateChainErrors, new string('0', 64)) &&
+           !CoreCertificateTrust.IsTrusted(certificate,
+            SslPolicyErrors.RemoteCertificateChainErrors, null),
+        "The Agent did not trust Core's own certificate by its exact pin alone.");
 }
 
 static async Task VerifyAgentEnrollmentAsync(string testDirectory)

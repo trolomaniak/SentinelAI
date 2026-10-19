@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     public RiskViewModel? Risk { get; }
     public ReportsViewModel? Reports { get; }
     public LicenseViewModel? License { get; }
+    public LocalNetworkViewModel? LocalNetwork { get; }
     public AiExplanationViewModel? AiExplanation { get; }
     public DesktopIntegrationViewModel? DesktopIntegration { get; }
     public WindowsServiceStatusModel? ServiceStatus { get; }
@@ -46,7 +47,8 @@ public partial class MainWindow : Window
     public MainWindow(ShellViewModel viewModel, AuthenticationViewModel? authentication, DevicesViewModel? devices,
         AlertsViewModel? alerts, RiskViewModel? risk, ReportsViewModel? reports,
         LicenseViewModel? license, AiExplanationViewModel? aiExplanation,
-        DesktopIntegrationViewModel? desktopIntegration, WindowsServiceStatusModel? serviceStatus)
+        DesktopIntegrationViewModel? desktopIntegration, WindowsServiceStatusModel? serviceStatus,
+        LocalNetworkViewModel? localNetwork = null)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
@@ -57,6 +59,7 @@ public partial class MainWindow : Window
         Risk = risk;
         Reports = reports;
         License = license;
+        LocalNetwork = localNetwork;
         AiExplanation = aiExplanation;
         DesktopIntegration = desktopIntegration;
         ServiceStatus = serviceStatus;
@@ -71,6 +74,7 @@ public partial class MainWindow : Window
             license.PropertyChanged += OnLicenseChanged;
         }
         if (aiExplanation is not null) aiExplanation.SessionExpired += OnWorkspaceSessionExpired;
+        if (localNetwork is not null) localNetwork.SessionExpired += OnWorkspaceSessionExpired;
         if (alerts is not null) alerts.PropertyChanged += OnAlertsChanged;
         AuthenticationPanel.DataContext = authentication;
         DataContext = viewModel;
@@ -122,7 +126,7 @@ public partial class MainWindow : Window
         PageRow.Height = authorized ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         if (!authorized)
         {
-            AiExplanation?.Clear(); License?.Clear();
+            AiExplanation?.Clear(); License?.Clear(); LocalNetwork?.Clear();
             Devices?.Clear(); Alerts?.Clear(); Risk?.Clear(); Reports?.Clear();
         }
         else if (authorizationChanged)
@@ -157,6 +161,7 @@ public partial class MainWindow : Window
         // License availability never delays the local security pages.
         if (License is not null && _viewModel.CurrentPage.Id is PageId.Settings or PageId.Alerts)
             _ = License.RefreshAsync();
+        if (LocalNetwork is not null && _viewModel.CurrentPage.Id == PageId.Settings) _ = LocalNetwork.RefreshAsync();
         if (Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
         else if (Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts) await Alerts.RefreshAsync();
         else if (Risk is not null && _viewModel.CurrentPage.Id == PageId.Risk) await Risk.RefreshAsync();
@@ -224,6 +229,7 @@ public partial class MainWindow : Window
             License.SessionExpired -= OnWorkspaceSessionExpired; License.Dispose();
         }
         if (AiExplanation is not null) { AiExplanation.SessionExpired -= OnWorkspaceSessionExpired; AiExplanation.Dispose(); }
+        if (LocalNetwork is not null) { LocalNetwork.SessionExpired -= OnWorkspaceSessionExpired; LocalNetwork.Dispose(); }
         _sessionTimer?.Stop();
         if (_sessionTimer is not null) _sessionTimer.Tick -= OnSessionTick;
         if (_authentication is not null)

@@ -8,7 +8,7 @@ $ProgressPreference = 'SilentlyContinue'
 $script:SetupPhase = 'validate'
 
 function Write-SetupProgress {
-    param([ValidateSet('validate','core','services','agent','desktop','shortcut','inspect','replace','health','rollback','uninstall')][string]$Phase)
+    param([ValidateSet('validate','core','services','network','agent','desktop','shortcut','inspect','replace','health','rollback','uninstall')][string]$Phase)
     $script:SetupPhase = $Phase
     Write-Output ('PROGRESS|' + $Phase)
 }
@@ -82,6 +82,8 @@ function Assert-SetupFreshTargets {
         if (Test-Path -LiteralPath $path) { throw 'Existing installation requires separate inspection.' }
     }
     if ($null -ne (Get-PilotService)) { throw 'Existing Agent service.' }
+    # The completion phase follows the start phase, which added the owned rule of the central role.
+    if (-not $AllowStartedCore -and $null -ne (Get-CoreServiceFirewallRule)) { throw 'Existing Core firewall rule.' }
     $core = Get-CoreService
     if (-not $AllowStartedCore -and $null -ne $core) { throw 'Existing Core service.' }
     if ($AllowStartedCore -and ($null -eq $core -or $core.State -cne 'Running')) { throw 'Prepared Core service unavailable.' }
@@ -167,7 +169,13 @@ function Invoke-SetupInstallation {
     Assert-SetupFreshTargets -Locations $locations -AllowPreparedCore:($Request.action -ne 'prepare-core') -AllowStartedCore:($Request.action -eq 'complete')
     if ($Request.action -eq 'prepare-core') {
         Write-SetupProgress 'core'
-        $installed = Invoke-PilotInstall -Component Core @policy -CodeDirectory $locations.CoreCode -DataDirectory $locations.CoreData
+        $network = @{}
+        if ($Request.localNetworkCertificateSha256.Length -ne 0) {
+            # The Setup host created Core's certificate; only its public SHA-256 crosses this boundary.
+            if (-not (Test-CoreServiceCertificate -Sha256 $Request.localNetworkCertificateSha256)) { throw 'Core certificate unavailable.' }
+            $network.LocalNetworkCertificateSha256 = $Request.localNetworkCertificateSha256
+        }
+        $installed = Invoke-PilotInstall -Component Core @policy @network -CodeDirectory $locations.CoreCode -DataDirectory $locations.CoreData
         if ($installed.component -cne 'Core') { throw 'Core preparation failed.' }
         Write-Output 'DONE'
         return
@@ -176,6 +184,11 @@ function Invoke-SetupInstallation {
         Write-SetupProgress 'services'
         $started = Invoke-CoreServiceManagement -Action Install @policy -CodeDirectory $locations.CoreCode -DataDirectory $locations.CoreData -TimeoutSeconds 60
         if ($started.component -cne 'Core') { throw 'Core service failed.' }
+        $network = Get-CoreServiceLocalNetwork -DataDirectory $locations.CoreData
+        if ($null -ne $network) {
+            Write-SetupProgress 'network'
+            Set-CoreServiceFirewallRule -ExecutablePath (Join-Path $locations.CoreCode 'SentinelAI.Core.exe') -Port $network.Port
+        }
         Write-Output 'DONE'
         return
     }
@@ -206,7 +219,10 @@ function Invoke-SetupInstallation {
 
 function Assert-SetupRequest {
     param($Request)
-    Assert-PilotObjectProperties -Object $Request -Names @('action','workDirectory','keyId','channel','enrollmentToken','version','preserveData')
+    Assert-PilotObjectProperties -Object $Request -Names @('action','workDirectory','keyId','channel','enrollmentToken','version','preserveData','localNetworkCertificateSha256')
+    # Only the fresh Core preparation carries the public SHA-256 of the certificate the Setup host created.
+    if ($Request.localNetworkCertificateSha256 -isnot [string] -or ($Request.localNetworkCertificateSha256.Length -ne 0 -and
+        ($Request.action -cne 'prepare-core' -or $Request.localNetworkCertificateSha256 -cnotmatch '\A[0-9A-F]{64}\z'))) { throw 'Invalid local-network policy.' }
     if ($Request.action -cnotin @('prepare-core','start-core','complete','inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile','uninstall') -or $Request.keyId -isnot [string] -or
         $Request.keyId -cnotmatch '\Adev-[A-Za-z0-9_-]{1,48}\z' -or $Request.channel -cnotin @('stable','pilot','beta')) { throw 'Invalid policy.' }
     if ($Request.version -isnot [string] -or $Request.version -cnotmatch '\A(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\z' -or

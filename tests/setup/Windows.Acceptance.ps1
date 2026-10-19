@@ -109,6 +109,51 @@ namespace SentinelAI.Setup.Acceptance {
 '@ | Out-Null
 }
 
+if ($null -eq ('SentinelAI.Setup.Acceptance.LocalNetwork' -as [type])) {
+    # Raw HTTPS over the local-network listener with pin-only trust, like an Agent on another computer.
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Net.Security;
+using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+namespace SentinelAI.Setup.Acceptance {
+    public static class LocalNetwork {
+        public static string Sha256(byte[] data) {
+            using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(data)).Replace("-", "");
+        }
+        // Returns the negotiated protocol, cipher, key exchange and the bounded raw HTTP response.
+        public static string[] Request(string address, int port, string pin, int protocols, string method, string path, string bearer, string body) {
+            using (var tcp = new TcpClient()) {
+                if (!tcp.ConnectAsync(address, port).Wait(10000)) throw new IOException("The local-network listener did not accept a connection.");
+                tcp.ReceiveTimeout = 10000; tcp.SendTimeout = 10000;
+                RemoteCertificateValidationCallback pinned = delegate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors) {
+                    return certificate != null && String.Equals(Sha256(certificate.GetRawCertData()), pin, StringComparison.Ordinal);
+                };
+                using (var tls = new SslStream(tcp.GetStream(), false, pinned)) {
+                    tls.AuthenticateAsClient("sentinelai-core", null, (SslProtocols)protocols, false);
+                    var content = body == null ? new byte[0] : Encoding.UTF8.GetBytes(body);
+                    var head = new StringBuilder();
+                    head.Append(method).Append(' ').Append(path).Append(" HTTP/1.1\r\nHost: sentinelai-core\r\nConnection: close\r\n");
+                    if (!String.IsNullOrEmpty(bearer)) head.Append("Authorization: Bearer ").Append(bearer).Append("\r\n");
+                    if (body != null) head.Append("Content-Type: application/json\r\n");
+                    head.Append("Content-Length: ").Append(content.Length).Append("\r\n\r\n");
+                    var bytes = Encoding.ASCII.GetBytes(head.ToString());
+                    tls.Write(bytes, 0, bytes.Length); tls.Write(content, 0, content.Length); tls.Flush();
+                    var buffer = new byte[8192]; int total = 0, read;
+                    while (total < buffer.Length && (read = tls.Read(buffer, total, buffer.Length - total)) > 0) total += read;
+                    return new[] { tls.SslProtocol.ToString(), tls.CipherAlgorithm.ToString(), ((int)tls.KeyExchangeAlgorithm).ToString(), Encoding.ASCII.GetString(buffer, 0, total) };
+                }
+            }
+        }
+    }
+}
+'@ | Out-Null
+}
+
 $username = 'setup-test-' + [Guid]::NewGuid().ToString('N')
 $passwordBytes = New-Object byte[] 32
 $random = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -337,6 +382,7 @@ function Get-SetupFailureSummary {
             foreach ($known in @('Validating installation files...', 'Preparing Core...',
                 'Creating the local administrator...', 'Starting Core...', 'Enrolling Agent...',
                 'Installing Windows services and Desktop...', 'Starting Windows services...',
+                "Creating Core's local-network certificate...", 'Allowing Agents on the local network...',
                 'Installing and enrolling Agent...', 'Installing Desktop and Updater...',
                 'Creating Start Menu shortcuts...', 'Installation finished.', 'Stopping setup...',
                 'Checking the installed deployment...', 'Replacing verified program files...',
@@ -555,6 +601,172 @@ function Get-AgentEventSources([Guid]$EndpointId) {
     return @($view.sources)
 }
 
+$localNetworkPort = 5443
+$firewallRuleName = 'SentinelAI-Core-LocalNetwork'
+function Get-SetupLocalNetworkPin {
+    # The pin Setup configured for Core; Agents receive the same value.
+    $config = [IO.File]::ReadAllText((Join-Path $script:coreData 'pilot-config.json')) | ConvertFrom-Json
+    Assert-SetupAcceptance ([string]$config.SentinelAI.LocalNetworkPort -ceq [string]$script:localNetworkPort -and
+        [string]$config.SentinelAI.LocalNetworkCertificateSha256 -cmatch '\A[0-9A-F]{64}\z') 'Setup did not configure the default local-network listener and certificate pin.'
+    return [string]$config.SentinelAI.LocalNetworkCertificateSha256
+}
+function Get-SetupLocalNetworkCertificate([string]$Pin) {
+    $store = New-Object Security.Cryptography.X509Certificates.X509Store('My', 'LocalMachine')
+    $store.Open([Security.Cryptography.X509Certificates.OpenFlags]'ReadOnly, OpenExistingOnly')
+    try {
+        return @($store.Certificates | Where-Object { [SentinelAI.Setup.Acceptance.LocalNetwork]::Sha256($_.RawData) -ceq $Pin })
+    } finally { $store.Close() }
+}
+function Assert-SetupLocalNetworkCertificate([string]$Pin) {
+    $certificates = @(Get-SetupLocalNetworkCertificate $Pin)
+    Assert-SetupAcceptance ($certificates.Count -eq 1 -and $certificates[0].HasPrivateKey -and
+        $certificates[0].FriendlyName -ceq 'SentinelAI Core local network') "Core's pinned certificate is not in LocalMachine\My with its key."
+    $certificate = $certificates[0]
+    $names = @($certificate.Extensions | Where-Object { $_.Oid.Value -ceq '2.5.29.17' } | ForEach-Object { $_.Format($false) })
+    Assert-SetupAcceptance ($names.Count -eq 1 -and $names[0] -match ('(?i)DNS Name=' + [Regex]::Escape([Net.Dns]::GetHostName()))) "Core's certificate does not name this computer."
+    Assert-SetupAcceptance ($certificate.NotAfter.ToUniversalTime() -gt [DateTime]::UtcNow.AddYears(10).AddDays(-2) -and
+        $certificate.PublicKey.Oid.Value -ceq '1.2.840.10045.2.1') "Core's certificate is not an ECDSA certificate valid for ten years."
+    foreach ($storeName in @('Root', 'CA', 'TrustedPeople')) {
+        $trusted = New-Object Security.Cryptography.X509Certificates.X509Store($storeName, 'LocalMachine')
+        $trusted.Open([Security.Cryptography.X509Certificates.OpenFlags]'ReadOnly')
+        try {
+            Assert-SetupAcceptance (@($trusted.Certificates | Where-Object { [SentinelAI.Setup.Acceptance.LocalNetwork]::Sha256($_.RawData) -ceq $Pin }).Count -eq 0) 'Setup added Core''s certificate to a trusted store.'
+        } finally { $trusted.Close() }
+    }
+    # The private key is usable only by Core's service account, SYSTEM and Administrators, and is not exportable.
+    $key = [Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPrivateKey($certificate)
+    try {
+        Assert-SetupAcceptance ($key -is [Security.Cryptography.ECDsaCng] -and $key.Key.IsMachineKey -and
+            [string]$key.Key.ExportPolicy -ceq 'None' -and $key.KeySize -eq 256) "Core's private key is not a non-exportable P-256 machine key."
+        $descriptor = New-Object Security.AccessControl.RawSecurityDescriptor -ArgumentList @($key.Key.GetProperty('Security Descr', [Security.Cryptography.CngPropertyOptions]4).GetValue(), 0)
+        $entries = @($descriptor.DiscretionaryAcl | ForEach-Object { [string]$_.AceQualifier + '|' + $_.SecurityIdentifier.Value + '|' + $_.AccessMask })
+        Assert-SetupAcceptance (($descriptor.ControlFlags -band [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -ne 0 -and $entries.Count -eq 3 -and
+            $entries -ccontains 'AccessAllowed|S-1-5-18|2032127' -and $entries -ccontains 'AccessAllowed|S-1-5-32-544|2032127' -and
+            $entries -ccontains ('AccessAllowed|' + $script:coreSid + '|1179785')) "Core's private key is usable outside Core's service account, SYSTEM and Administrators."
+    } finally { if ($null -ne $key) { $key.Dispose() } }
+    foreach ($certificate in $certificates) { $certificate.Dispose() }
+}
+function Assert-SetupFirewallRule {
+    $rule = @(Get-NetFirewallRule -Name $script:firewallRuleName -ErrorAction SilentlyContinue)
+    Assert-SetupAcceptance ($rule.Count -eq 1) 'Setup did not add its owned Core firewall rule.'
+    $ports = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule[0]
+    $addresses = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule[0]
+    $application = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule[0]
+    Assert-SetupAcceptance ([string]$rule[0].Enabled -ceq 'True' -and [string]$rule[0].Direction -ceq 'Inbound' -and [string]$rule[0].Action -ceq 'Allow' -and
+        [int]$rule[0].Profile -eq 3 -and [string]$ports.Protocol -ceq 'TCP' -and (@($ports.LocalPort) -join ',') -ceq [string]$script:localNetworkPort -and
+        (@($addresses.RemoteAddress) -join ',') -ceq 'LocalSubnet' -and
+        [string]::Equals([Environment]::ExpandEnvironmentVariables([string]$application.Program), (Join-Path $script:coreCode 'SentinelAI.Core.exe'), [StringComparison]::OrdinalIgnoreCase)) 'The Core firewall rule is not limited to Core, TCP 5443, LocalSubnet and the Domain/Private profiles.'
+    Write-Output ('Core firewall rule: Profile=' + [string]$rule[0].Profile + '; RemoteAddress=' + (@($addresses.RemoteAddress) -join ',') + '; LocalPort=' + (@($ports.LocalPort) -join ','))
+}
+function Assert-SetupLocalNetworkListener {
+    $service = Get-SetupService 'SentinelAICore'
+    $listeners = @(Get-NetTCPConnection -LocalPort $script:localNetworkPort -State Listen -ErrorAction SilentlyContinue)
+    Assert-SetupAcceptance ($listeners.Count -gt 0 -and @($listeners | Where-Object {
+        $_.OwningProcess -ne $service.ProcessId -or $_.LocalAddress -notin @('0.0.0.0', '::') }).Count -eq 0) 'The local-network listener is not owned by the Core service on every interface.'
+}
+function Get-SetupDeviceCount {
+    # Windows PowerShell 5.1 returns a JSON array as one object; count its elements.
+    $devices = Invoke-SetupCoreRequest '/api/admin/devices' 'GET' $null $script:accessToken | ConvertFrom-Json
+    return @($devices).Count
+}
+function Get-SetupLocalNetworkView {
+    return Invoke-SetupCoreRequest '/api/admin/local-network' 'GET' $null $script:accessToken | ConvertFrom-Json
+}
+function Invoke-SetupLocalNetworkRequest([string]$Address, [string]$Pin, [int]$Protocols, [string]$Method, [string]$Path, [string]$Bearer, [string]$Body) {
+    return [SentinelAI.Setup.Acceptance.LocalNetwork]::Request($Address, $script:localNetworkPort, $Pin, $Protocols, $Method, $Path, $Bearer, $Body)
+}
+function Start-SetupNetworkAgent([string]$Address, [string]$Pin, [string]$Token, [string]$DataDirectory) {
+    # The installed Agent as a second endpoint: it reaches Core only through the runner's own non-loopback address.
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = Join-Path $script:agentCode 'SentinelAI.Agent.exe'; $start.WorkingDirectory = $DataDirectory
+    $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+    $start.EnvironmentVariables['Agent__CoreUrl'] = 'https://' + $Address + ':' + $script:localNetworkPort
+    $start.EnvironmentVariables['Agent__CoreCertificateSha256'] = $Pin
+    $start.EnvironmentVariables['Agent__DataDirectory'] = $DataDirectory
+    $start.EnvironmentVariables['Agent__EnrollmentToken'] = $Token
+    $start.EnvironmentVariables['Agent__HeartbeatInterval'] = '00:00:05'
+    $start.EnvironmentVariables['Agent__RetryDelay'] = '00:00:01'
+    $start.EnvironmentVariables['Agent__MaxRetryDelay'] = '00:00:02'
+    $process = [Diagnostics.Process]::Start($start)
+    # Drain the console logs without keeping them.
+    [void]$process.StandardOutput.ReadToEndAsync(); [void]$process.StandardError.ReadToEndAsync()
+    return $process
+}
+function Stop-SetupNetworkAgent([Diagnostics.Process]$Process) {
+    if ($null -eq $Process) { return }
+    try { if (-not $Process.HasExited) { $Process.Kill(); [void]$Process.WaitForExit(15000) } } finally { $Process.Dispose() }
+}
+function Test-SetupLocalNetwork {
+    $pin = Get-SetupLocalNetworkPin
+    Assert-SetupLocalNetworkCertificate $pin
+    Assert-SetupFirewallRule
+    Assert-SetupLocalNetworkListener
+    # The pin Desktop shows is exactly the configured certificate's SHA-256.
+    $view = Get-SetupLocalNetworkView
+    $addresses = @($view.addresses | ForEach-Object { [string]$_ })
+    Assert-SetupAcceptance ($view.enabled -eq $true -and $view.listening -eq $true -and [int]$view.port -eq $script:localNetworkPort -and
+        [string]$view.certificateSha256 -ceq $pin -and $addresses.Count -gt 0) 'Core did not export its local-network address, port and certificate pin.'
+    $local = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.IPAddress })
+    $address = $addresses[0]
+    Assert-SetupAcceptance ($address -cne '127.0.0.1' -and $local -ccontains $address) 'The exported address is not one of this computer''s own non-loopback IPv4 addresses.'
+    Write-Output ('Local network: address=' + $address + '; port=' + $script:localNetworkPort + '; pin=' + $pin)
+
+    # TLS 1.2 is the Windows 10 case; SChannel negotiates ECDHE with AES-GCM, which Core admits.
+    $tls12 = Invoke-SetupLocalNetworkRequest $address $pin 3072 'GET' '/api/health' $null $null
+    Assert-SetupAcceptance ($tls12[0] -ceq 'Tls12' -and $tls12[1] -match '\AAes(128|256)\z' -and $tls12[3].StartsWith('HTTP/1.1 404', [StringComparison]::Ordinal)) 'Core did not admit TLS 1.2 with ECDHE and AES-GCM from Windows.'
+    Write-Output ('Local network TLS 1.2 client: protocol=' + $tls12[0] + '; cipher=' + $tls12[1] + '; keyExchange=' + $tls12[2])
+    # Administrator, authentication, health, dashboard and Desktop routes are refused on the local-network listener.
+    $loginBody = @{ username = $script:username; password = $script:password } | ConvertTo-Json -Compress
+    foreach ($route in @(@('GET','/api/health',$false,$null), @('GET','/',$false,$null), @('GET','/assets/app.js',$false,$null),
+        @('POST','/api/auth/login',$false,$loginBody), @('GET','/api/admin/me',$true,$null), @('GET','/api/admin/devices',$true,$null),
+        @('GET','/api/admin/local-network',$true,$null), @('POST','/api/admin/enrollment-tokens',$true,''))) {
+        $response = (Invoke-SetupLocalNetworkRequest $address $pin 3072 $route[0] $route[1] $(if ($route[2]) { $script:accessToken } else { $null }) $route[3])[3]
+        $separator = $response.IndexOf("`r`n`r`n", [StringComparison]::Ordinal)
+        Assert-SetupAcceptance ($response.StartsWith('HTTP/1.1 404', [StringComparison]::Ordinal) -and $separator -gt 0 -and
+            $response.Length -eq $separator + 4) ('The local-network listener served a non-Agent route: ' + $route[1])
+        Assert-NoSecretText $response
+    }
+    $loginBody = $null
+    # A client with a different pin never completes TLS with Core.
+    $wrongPin = 'F' * 64
+    $refused = $false
+    try { [void](Invoke-SetupLocalNetworkRequest $address $wrongPin 3072 'GET' '/api/health' $null $null) } catch { $refused = $true }
+    Assert-SetupAcceptance $refused 'A client accepted Core''s certificate under a different pin.'
+
+    # An Agent configured with this computer's own non-loopback address: a wrong pin is refused before the one-use
+    # token is sent, then the exact pin enrolls with the same token and reports over the local-network listener.
+    $issued = Invoke-SetupCoreRequest '/api/admin/enrollment-tokens' 'POST' '' $script:accessToken | ConvertFrom-Json
+    $token = [string]$issued.token
+    $before = Get-SetupDeviceCount
+    $wrongData = Join-Path ([IO.Path]::GetTempPath()) ('sentinelai-network-agent-wrong-' + [Guid]::NewGuid().ToString('N'))
+    $networkData = Join-Path ([IO.Path]::GetTempPath()) ('sentinelai-network-agent-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $wrongData, $networkData | Out-Null
+    $agent = $null
+    try {
+        $agent = Start-SetupNetworkAgent $address $wrongPin $token $wrongData
+        Start-Sleep -Seconds 15
+        Assert-SetupAcceptance (-not $agent.HasExited) 'The Agent with a wrong pin stopped instead of retrying.'
+        Stop-SetupNetworkAgent $agent; $agent = $null
+        $after = Get-SetupDeviceCount
+        Assert-SetupAcceptance (-not (Test-Path -LiteralPath (Join-Path $wrongData 'enrollment-state')) -and $after -eq $before) 'An Agent with a wrong pin enrolled with Core.'
+        $since = [DateTimeOffset]::UtcNow
+        $agent = Start-SetupNetworkAgent $address $pin $token $networkData
+        $endpointFile = Join-Path $networkData 'endpoint-id'
+        Wait-SetupAcceptance { (Test-Path -LiteralPath $endpointFile) -and (Test-Path -LiteralPath (Join-Path $networkData 'enrollment-state')) } 'The pinned Agent did not enroll over the local-network listener.' $script:TimeoutSeconds
+        $networkEndpoint = [Guid]::ParseExact([IO.File]::ReadAllText($endpointFile).Trim(), 'D')
+        Wait-ExactEndpoint $networkEndpoint $since
+        Wait-SetupAcceptance { $null -ne (Get-AgentTelemetry $networkEndpoint) } 'The pinned Agent did not deliver endpoint telemetry over the local-network listener.' $script:TimeoutSeconds
+        Wait-SetupAcceptance { @(Get-AgentEventSources $networkEndpoint).Count -gt 0 } 'The pinned Agent did not deliver security events over the local-network listener.' $script:TimeoutSeconds
+        Assert-SetupAcceptance ((Get-SetupDeviceCount) -eq $before + 1) 'The local-network Agent did not appear as one more endpoint.'
+        Write-Output ('Local-network Agent enrolled and reported through ' + $address + ':' + $script:localNetworkPort)
+    } finally {
+        Stop-SetupNetworkAgent $agent
+        foreach ($directory in @($wrongData, $networkData)) { if (Test-Path -LiteralPath $directory) { Remove-Item -LiteralPath $directory -Recurse -Force } }
+        $token = $null
+    }
+}
+
 try {
     foreach ($directory in @($poisonedExtraction, $poisonedTemp)) {
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
@@ -743,6 +955,7 @@ try {
     Write-Output ('Installed Agent telemetry sources: ' + ((@('bitLocker', 'antivirus', 'defender', 'localAdministrators', 'pendingReboot', 'services', 'software') |
         ForEach-Object { $_ + '=' + [string]$telemetry.$_.availability }) -join ', ') + ', updatePolicy=' + [string]$telemetry.windowsUpdate.policyAvailability +
         ', updateResults=' + [string]$telemetry.windowsUpdate.resultsAvailability)
+    Test-SetupLocalNetwork
 
     Use-SetupWindow $setup
     Show-SetupControl 'SetupOpenDesktopButton'

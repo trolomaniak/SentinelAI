@@ -7,6 +7,7 @@ $script:AdministratorsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'
 $script:TrustedInstallerSid = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
 $script:PilotPrepareTimeoutSeconds = 330
+$script:PilotLocalNetworkPort = 5443
 # Processes that could not be released after a kill (stuck in the kernel) are kept referenced, never disposed.
 $script:PilotAbandonedProcesses = New-Object 'System.Collections.Generic.List[object]'
 
@@ -691,18 +692,50 @@ function Assert-PilotObjectProperties {
     }
 }
 
+function Get-PilotCoreLocalNetworkSettings {
+    param([Parameter(Mandatory=$true)]$CoreSettings)
+    # Core's local-network listener: the fixed port and the exact SHA-256 Agents pin, together or not at all.
+    $names = @($CoreSettings.PSObject.Properties | ForEach-Object { $_.Name })
+    if ($names -cnotcontains 'LocalNetworkPort' -and $names -cnotcontains 'LocalNetworkCertificateSha256') {
+        Assert-PilotObjectProperties -Object $CoreSettings -Names @('DataDirectory')
+        return $null
+    }
+    Assert-PilotObjectProperties -Object $CoreSettings -Names @('DataDirectory','LocalNetworkPort','LocalNetworkCertificateSha256')
+    if ($CoreSettings.LocalNetworkPort -isnot [string] -or $CoreSettings.LocalNetworkPort -cne [string]$script:PilotLocalNetworkPort -or
+        $CoreSettings.LocalNetworkCertificateSha256 -isnot [string] -or $CoreSettings.LocalNetworkCertificateSha256 -cnotmatch '\A[0-9A-F]{64}\z') {
+        throw 'The Core local-network configuration is invalid.'
+    }
+    return [pscustomobject]@{ Port = $script:PilotLocalNetworkPort; CertificateSha256 = $CoreSettings.LocalNetworkCertificateSha256 }
+}
+
+function Get-PilotCoreLocalNetwork {
+    param([Parameter(Mandatory=$true)][string]$Path, [string]$ServiceWriteSid, [string]$ServiceWriteRoot)
+    # Called after the configuration was validated at its trusted protected path.
+    [void](Assert-PilotPath -Path $Path -MustExist -File)
+    Assert-PilotTrustedPath -Path $Path -AllowServiceParent:([bool]$ServiceWriteSid) -ServiceWriteSid $ServiceWriteSid -ServiceWriteRoot $ServiceWriteRoot
+    $config = Read-PilotStrictJson -Json (Read-PilotUtf8Document -Path $Path -MaximumBytes 8192)
+    Assert-PilotObjectProperties -Object $config -Names @('urls','SentinelAI')
+    return Get-PilotCoreLocalNetworkSettings -CoreSettings $config.SentinelAI
+}
+
 function Assert-PilotExistingConfiguration {
     param([string]$Path, [ValidateSet('Core','Agent')][string]$Component, [string]$DataDirectory,
-          [string]$CoreUrl, [string]$CoreCertificateSha256, [string]$ServiceWriteSid, [string]$ServiceWriteRoot)
+          [string]$CoreUrl, [string]$CoreCertificateSha256, [string]$ServiceWriteSid, [string]$ServiceWriteRoot,
+          [string]$LocalNetworkCertificateSha256, [switch]$AnyLocalNetwork)
     [void](Assert-PilotPath -Path $Path -MustExist -File)
     Assert-PilotTrustedPath -Path $Path -AllowServiceParent:($Component -eq 'Agent' -or [bool]$ServiceWriteSid) -ServiceWriteSid $ServiceWriteSid -ServiceWriteRoot $ServiceWriteRoot
     $config = Read-PilotStrictJson -Json (Read-PilotUtf8Document -Path $Path -MaximumBytes 8192)
     if ($Component -eq 'Core') {
         Assert-PilotObjectProperties -Object $config -Names @('urls','SentinelAI')
-        Assert-PilotObjectProperties -Object $config.SentinelAI -Names @('DataDirectory')
+        $network = Get-PilotCoreLocalNetworkSettings -CoreSettings $config.SentinelAI
         if ($config.urls -isnot [string] -or $config.urls -cne $CoreUrl -or
             $config.SentinelAI.DataDirectory -isnot [string] -or $config.SentinelAI.DataDirectory -cne $DataDirectory) {
             throw 'Existing Core configuration does not match the selected pilot paths and origin.'
+        }
+        # Maintenance keeps whichever role the installation has; a retried install must match exactly.
+        if (-not $AnyLocalNetwork -and (($null -eq $network) -ne [string]::IsNullOrEmpty($LocalNetworkCertificateSha256) -or
+            ($null -ne $network -and $network.CertificateSha256 -cne $LocalNetworkCertificateSha256))) {
+            throw 'Existing Core configuration does not match the selected local-network role.'
         }
     } else {
         Assert-PilotObjectProperties -Object $config -Names @('Agent')
@@ -762,8 +795,11 @@ function Invoke-PilotInstall {
           [ValidateSet('stable','pilot','beta')][string]$Channel,
           [string]$CodeDirectory, [string]$DataDirectory, [string]$CoreUrl = 'http://127.0.0.1:5000',
           [string]$CoreCertificateSha256, [ValidateRange(10,600)][int]$TimeoutSeconds = 180, [PSCredential]$AdminCredential,
-          [string]$EnrollmentToken)
+          [string]$EnrollmentToken, [string]$LocalNetworkCertificateSha256)
     Assert-PilotSupportedHost
+    if ($LocalNetworkCertificateSha256 -and ($Component -cne 'Core' -or $LocalNetworkCertificateSha256 -cnotmatch '\A[0-9A-F]{64}\z')) {
+        throw 'A local-network certificate fingerprint applies only to Core and must be an uppercase SHA-256.'
+    }
     # Validate supplied input explicitly so releasing the borrowed token below
     # cannot trigger parameter-variable validation during null cleanup.
     if ($PSBoundParameters.ContainsKey('EnrollmentToken') -and
@@ -831,12 +867,18 @@ function Invoke-PilotInstall {
                 throw 'This workflow supports initial installation or retry of the same signed package, not upgrades or Core/account changes.'
             }
             Assert-PilotPreparedCodeMatches -PreparedDirectory $prepared -CodeDirectory $CodeDirectory
-            Assert-PilotExistingConfiguration -Path $configurationPath -Component $kind -DataDirectory $DataDirectory -CoreUrl $origin -CoreCertificateSha256 $CoreCertificateSha256
+            Assert-PilotExistingConfiguration -Path $configurationPath -Component $kind -DataDirectory $DataDirectory -CoreUrl $origin -CoreCertificateSha256 $CoreCertificateSha256 -LocalNetworkCertificateSha256 $LocalNetworkCertificateSha256
         }
         New-PilotProtectedDirectory -Path $DataDirectory -Kind ($kind + 'Data')
         if ($null -eq $receipt) {
             $config = if ($kind -eq 'Core') {
-                @{ urls = $origin; SentinelAI = @{ DataDirectory = $DataDirectory } }
+                $settings = @{ DataDirectory = $DataDirectory }
+                if ($LocalNetworkCertificateSha256) {
+                    # The central role: Core also serves Agents on the local network with its own pinned certificate.
+                    $settings.LocalNetworkPort = [string]$script:PilotLocalNetworkPort
+                    $settings.LocalNetworkCertificateSha256 = $LocalNetworkCertificateSha256
+                }
+                @{ urls = $origin; SentinelAI = $settings }
             } else {
                 $settings = @{ CoreUrl = $origin; DataDirectory = $DataDirectory; EnrollmentTokenFile = $tokenPath }
                 if ($CoreCertificateSha256) { $settings.CoreCertificateSha256 = $CoreCertificateSha256.ToUpperInvariant() }

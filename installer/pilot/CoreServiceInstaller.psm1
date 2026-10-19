@@ -12,6 +12,8 @@ $script:CoreServiceAccount = 'NT SERVICE\SentinelAICore'
 # Windows derives a service SID from SHA-1 of the uppercase UTF-16 service name.
 # Registration additionally verifies the native account-to-SID translation.
 $script:CoreServiceSid = 'S-1-5-80-1772522954-4099193962-4247269631-2556497313-4219375900'
+# The one owned inbound rule of the central role (fixed unique rule name).
+$script:CoreFirewallRuleName = 'SentinelAI-Core-LocalNetwork'
 
 function Get-CoreServiceAclRules {
     param([ValidateSet('Code','DataDirectory','DataFile','ProtectedFile','RetainedFile')][string]$Kind, [bool]$Directory = $false)
@@ -135,7 +137,7 @@ function Assert-CoreServiceListenerAvailable {
 }
 
 function Wait-CoreServiceHealth {
-    param([Uri]$Origin, [int]$TimeoutSeconds = 60)
+    param([Uri]$Origin, [int]$TimeoutSeconds = 60, [int]$LocalNetworkPort = 0)
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do {
         $service = Get-CoreService
@@ -146,7 +148,8 @@ function Wait-CoreServiceHealth {
                 $health = Read-CoreServiceHealth -Origin $Origin -TimeoutMilliseconds $remaining
                 $current = Get-CoreService
                 if ($health.status -ceq 'healthy' -and $null -ne $current -and $current.State -eq 'Running' -and
-                    $current.ProcessId -eq $service.ProcessId -and (Test-CoreServiceListener -Origin $Origin -Service $current)) { return }
+                    $current.ProcessId -eq $service.ProcessId -and (Test-CoreServiceListener -Origin $Origin -Service $current) -and
+                    ($LocalNetworkPort -eq 0 -or (Test-CoreServiceLocalNetworkListener -Port $LocalNetworkPort -Service $current))) { return }
             }
         } catch { }
         Start-Sleep -Milliseconds 250
@@ -165,6 +168,107 @@ function Test-CoreServiceListener {
         if ($listener.LocalAddress -notin $addresses -or $listener.OwningProcess -ne $Service.ProcessId) { return $false }
     }
     return $true
+}
+
+function Test-CoreServiceLocalNetworkListener {
+    param([int]$Port, $Service)
+    # The central role's HTTPS listener on every interface, owned only by the Core service process.
+    if ($Service.ProcessId -le 0) { return $false }
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if ($listeners.Count -eq 0) { return $false }
+    foreach ($listener in $listeners) {
+        if ($listener.LocalAddress -notin @('0.0.0.0','::') -or $listener.OwningProcess -ne $Service.ProcessId) { return $false }
+    }
+    return $true
+}
+
+function Assert-CoreServiceLocalNetworkPortAvailable {
+    param([int]$Port)
+    $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Any, $Port)
+    try { $listener.Start() } finally { $listener.Stop() }
+}
+
+function Get-CoreServiceCertificateSha256 {
+    param([Parameter(Mandatory=$true)][Security.Cryptography.X509Certificates.X509Certificate2]$Certificate)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($Certificate.RawData)).Replace('-', '') } finally { $sha.Dispose() }
+}
+
+function Test-CoreServiceCertificate {
+    param([Parameter(Mandatory=$true)][string]$Sha256)
+    # Core's own certificate in LocalMachine\My, found by the exact SHA-256 Agents pin, with its private key.
+    $store = New-Object Security.Cryptography.X509Certificates.X509Store('My', 'LocalMachine')
+    $store.Open([Security.Cryptography.X509Certificates.OpenFlags]'ReadOnly, OpenExistingOnly')
+    try {
+        foreach ($certificate in @($store.Certificates)) {
+            try { if ($certificate.HasPrivateKey -and (Get-CoreServiceCertificateSha256 $certificate) -ceq $Sha256) { return $true } }
+            finally { $certificate.Dispose() }
+        }
+        return $false
+    } finally { $store.Close() }
+}
+
+function Remove-CoreServiceCertificate {
+    param([Parameter(Mandatory=$true)][string]$Sha256)
+    if ($Sha256 -cnotmatch '\A[0-9A-F]{64}\z') { throw 'A Core certificate fingerprint is required.' }
+    # Confirmed data removal only: the certificate and its CNG machine key, which every Agent pins.
+    $store = New-Object Security.Cryptography.X509Certificates.X509Store('My', 'LocalMachine')
+    $store.Open([Security.Cryptography.X509Certificates.OpenFlags]'ReadWrite, OpenExistingOnly')
+    try {
+        foreach ($certificate in @($store.Certificates)) {
+            try {
+                if ((Get-CoreServiceCertificateSha256 $certificate) -cne $Sha256) { continue }
+                if ($certificate.HasPrivateKey) {
+                    $key = [Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPrivateKey($certificate)
+                    try {
+                        if ($key -isnot [Security.Cryptography.ECDsaCng]) { throw 'The Core certificate key is not the expected CNG key.' }
+                        $key.Key.Delete()
+                    } finally { if ($null -ne $key) { $key.Dispose() } }
+                }
+                $store.Remove($certificate)
+            } finally { $certificate.Dispose() }
+        }
+    } finally { $store.Close() }
+}
+
+function Get-CoreServiceFirewallRule {
+    return Get-NetFirewallRule -Name $script:CoreFirewallRuleName -ErrorAction SilentlyContinue
+}
+
+function Test-CoreServiceFirewallRule {
+    param($Rule, [Parameter(Mandatory=$true)][string]$ExecutablePath, [Parameter(Mandatory=$true)][int]$Port)
+    # Inbound TCP to Core's port, for Core's program, from the local subnet, on Domain/Private only.
+    if (@($Rule).Count -ne 1 -or $null -eq @($Rule)[0]) { return $false }
+    $Rule = @($Rule)[0]
+    if ([string]$Rule.Enabled -cne 'True' -or [string]$Rule.Direction -cne 'Inbound' -or [string]$Rule.Action -cne 'Allow' -or
+        [int]$Rule.Profile -ne 3 -or [string]$Rule.EdgeTraversalPolicy -cne 'Block') { return $false }
+    $ports = @(Get-NetFirewallPortFilter -AssociatedNetFirewallRule $Rule)
+    $addresses = @(Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $Rule)
+    $applications = @(Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $Rule)
+    return $ports.Count -eq 1 -and [string]$ports[0].Protocol -ceq 'TCP' -and (@($ports[0].LocalPort) -join ',') -ceq [string]$Port -and
+        (@($ports[0].RemotePort) -join ',') -ceq 'Any' -and
+        $addresses.Count -eq 1 -and (@($addresses[0].RemoteAddress) -join ',') -ceq 'LocalSubnet' -and (@($addresses[0].LocalAddress) -join ',') -ceq 'Any' -and
+        $applications.Count -eq 1 -and [string]::Equals([Environment]::ExpandEnvironmentVariables([string]$applications[0].Program), $ExecutablePath, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Set-CoreServiceFirewallRule {
+    param([Parameter(Mandatory=$true)][string]$ExecutablePath, [Parameter(Mandatory=$true)][int]$Port)
+    $existing = Get-CoreServiceFirewallRule
+    if (Test-CoreServiceFirewallRule -Rule $existing -ExecutablePath $ExecutablePath -Port $Port) { return }
+    # Repair restores the owned rule exactly; a changed copy under the owned name is replaced.
+    if ($null -ne $existing) { Remove-NetFirewallRule -Name $script:CoreFirewallRuleName }
+    [void](New-NetFirewallRule -Name $script:CoreFirewallRuleName -DisplayName 'SentinelAI Core (Agents on the local network)' `
+        -Description 'Allows SentinelAI Agents in the local subnet to reach Core over HTTPS. Domain and Private networks only.' `
+        -Group 'SentinelAI' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress LocalSubnet `
+        -Profile Domain, Private -Program $ExecutablePath -EdgeTraversalPolicy Block -Enabled True)
+    if (-not (Test-CoreServiceFirewallRule -Rule (Get-CoreServiceFirewallRule) -ExecutablePath $ExecutablePath -Port $Port)) {
+        throw 'The Core firewall rule could not be verified.'
+    }
+}
+
+function Remove-CoreServiceFirewallRule {
+    if ($null -ne (Get-CoreServiceFirewallRule)) { Remove-NetFirewallRule -Name $script:CoreFirewallRuleName }
+    if ($null -ne (Get-CoreServiceFirewallRule)) { throw 'The Core firewall rule remains.' }
 }
 
 function Read-CoreServiceHealth {
@@ -207,6 +311,20 @@ function Read-CoreServiceHealth {
         if ($null -ne $response) { $response.Dispose() }
         $deadline.Dispose(); $client.Dispose()
     }
+}
+
+function Get-CoreServiceLocalNetwork {
+    param([Parameter(Mandatory=$true)][string]$DataDirectory)
+    return Get-PilotCoreLocalNetwork -Path (Join-Path $DataDirectory 'pilot-config.json') -ServiceWriteSid $script:CoreServiceSid -ServiceWriteRoot $DataDirectory
+}
+
+function Get-CoreServiceLocalNetworkPort {
+    param([Parameter(Mandatory=$true)][string]$DataDirectory)
+    # Health requires the local-network listener when the central role is configured and its certificate
+    # exists. Without the certificate Core keeps serving the local Desktop and Agent only.
+    $network = Get-CoreServiceLocalNetwork -DataDirectory $DataDirectory
+    if ($null -ne $network -and (Test-CoreServiceCertificate -Sha256 $network.CertificateSha256)) { return [int]$network.Port }
+    return 0
 }
 
 function Assert-CoreServiceDatabase {
@@ -267,8 +385,9 @@ function Invoke-CoreServiceManagement {
     $configuration = Join-Path $DataDirectory 'pilot-config.json'
     $executable = Join-Path $CodeDirectory 'SentinelAI.Core.exe'
     [void](Assert-PilotPath -Path $executable -MustExist -File)
-    Assert-PilotExistingConfiguration -Path $configuration -Component Core -DataDirectory $DataDirectory -CoreUrl $pilot.coreUrl -ServiceWriteSid $script:CoreServiceSid -ServiceWriteRoot $DataDirectory
+    Assert-PilotExistingConfiguration -Path $configuration -Component Core -DataDirectory $DataDirectory -CoreUrl $pilot.coreUrl -ServiceWriteSid $script:CoreServiceSid -ServiceWriteRoot $DataDirectory -AnyLocalNetwork
     if ($Action -in 'Install','Start','Restart') { Assert-CoreServiceDatabase -Path (Join-Path $DataDirectory 'sentinelai.db') }
+    $localNetworkPort = Get-CoreServiceLocalNetworkPort -DataDirectory $DataDirectory
     $receiptPath = Join-Path $DataDirectory 'core-service-installation.json'
     $receipt = Read-CoreServiceReceipt -Path $receiptPath -CodeDirectory $CodeDirectory -DataDirectory $DataDirectory -PilotReceipt $pilot
     $service = Get-CoreService
@@ -294,7 +413,10 @@ function Invoke-CoreServiceManagement {
             Assert-PilotTrustedPath -Path $prepared -Tree
             if ($metadata.version -cne $pilot.version -or $Environment -cne $pilot.environment -or $Channel -cne $pilot.channel) { throw 'The service installer requires the exact existing signed pilot package.' }
             Assert-PilotPreparedCodeMatches -PreparedDirectory $prepared -CodeDirectory $CodeDirectory
-            if ($null -eq $service -or $service.State -ne 'Running') { Assert-CoreServiceListenerAvailable -Origin $origin }
+            if ($null -eq $service -or $service.State -ne 'Running') {
+                Assert-CoreServiceListenerAvailable -Origin $origin
+                if ($localNetworkPort -ne 0) { Assert-CoreServiceLocalNetworkPortAvailable -Port $localNetworkPort }
+            }
             Set-CoreServiceInstallationAcl -CodeDirectory $CodeDirectory -DataDirectory $DataDirectory
             if ($null -eq $receipt) {
                 $receipt = [pscustomobject]@{ format = 'sentinelai-core-service-v1'; serviceName = $script:CoreServiceName;
@@ -316,9 +438,12 @@ function Invoke-CoreServiceManagement {
             if ($null -ne $service) { Remove-CoreService }
             Set-CoreServiceInstallationAcl -CodeDirectory $CodeDirectory -DataDirectory $DataDirectory -RestoreConsole
         } elseif ($Action -in 'Install','Start','Restart') {
-            if ($Action -eq 'Restart' -or ($Action -eq 'Start' -and $service.State -ne 'Running')) { Assert-CoreServiceListenerAvailable -Origin $origin }
+            if ($Action -eq 'Restart' -or ($Action -eq 'Start' -and $service.State -ne 'Running')) {
+                Assert-CoreServiceListenerAvailable -Origin $origin
+                if ($localNetworkPort -ne 0) { Assert-CoreServiceLocalNetworkPortAvailable -Port $localNetworkPort }
+            }
             Start-CoreService -TimeoutSeconds $TimeoutSeconds
-            Wait-CoreServiceHealth -Origin $origin -TimeoutSeconds $TimeoutSeconds
+            Wait-CoreServiceHealth -Origin $origin -TimeoutSeconds $TimeoutSeconds -LocalNetworkPort $localNetworkPort
         }
         [pscustomobject]@{ component = 'Core'; serviceName = $script:CoreServiceName; serviceAccount = $script:CoreServiceAccount;
             action = $Action; codeDirectory = $CodeDirectory; dataDirectory = $DataDirectory; dataPreserved = $true }

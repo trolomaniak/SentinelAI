@@ -9,6 +9,8 @@ $script:ServiceName = 'SentinelAIAgent'
 $script:ServiceSid = 'S-1-5-19'
 $script:CoreServiceName = 'SentinelAICore'
 $script:CoreServiceAccount = 'NT SERVICE\SentinelAICore'
+$script:CoreServiceSid = 'S-1-5-80-1772522954-4099193962-4247269631-2556497313-4219375900'
+$script:PilotLocalNetworkPort = 5443
 $script:fixture = $null
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('sentinelai-lifecycle-tests-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testRoot | Out-Null
@@ -39,8 +41,10 @@ function Import-LifecycleTestFunctions([string]$Path, [string[]]$Names) {
 Import-LifecycleTestFunctions (Join-Path $repo 'installer/pilot/PilotInstaller.psm1') @(
     'Read-PilotUtf8Document','Read-PilotStrictJson','Assert-PilotObjectProperties','Read-PilotInstallationReceipt',
     'Read-PilotGuidFile','Assert-PilotExistingConfiguration','Assert-PilotCoreOrigin',
-    'Get-PilotAgentImagePath','Assert-PilotOwnedService','Get-PilotServiceAccountSid')
-Import-LifecycleTestFunctions (Join-Path $repo 'installer/pilot/CoreServiceInstaller.psm1') @('Assert-CoreServiceOwned','Assert-CoreServiceDatabase')
+    'Get-PilotAgentImagePath','Assert-PilotOwnedService','Get-PilotServiceAccountSid',
+    'Get-PilotCoreLocalNetworkSettings','Get-PilotCoreLocalNetwork')
+Import-LifecycleTestFunctions (Join-Path $repo 'installer/pilot/CoreServiceInstaller.psm1') @('Assert-CoreServiceOwned','Assert-CoreServiceDatabase',
+    'Get-CoreServiceLocalNetwork','Get-CoreServiceLocalNetworkPort','Read-CoreServiceReceipt')
 . (Join-Path $repo 'installer/setup/SetupLifecycle.ps1')
 
 function Assert-PilotPath {
@@ -78,13 +82,31 @@ function Stop-PilotService { param($TimeoutSeconds); $script:events.Add('stop-ag
 function Remove-CoreService { $script:events.Add('remove-core'); $script:fixture.CoreService = $null }
 function Remove-PilotService { $script:events.Add('remove-agent'); $script:fixture.AgentService = $null }
 function Write-SetupProgress { param($Phase); }
+# Windows Firewall and the LocalMachine certificate store are native boundaries; the policy around them is tested here.
+function Get-CoreServiceFirewallRule { return $script:fixture.FirewallRule }
+function Set-CoreServiceFirewallRule {
+    param($ExecutablePath,$Port)
+    $script:events.Add('firewall-set:' + $Port + ':' + [IO.Path]::GetFileName($ExecutablePath)); $script:fixture.FirewallRule = 'owned'
+}
+function Remove-CoreServiceFirewallRule { $script:events.Add('firewall-remove'); $script:fixture.FirewallRule = $null }
+function Test-CoreServiceCertificate { param($Sha256); return $script:fixture.CertificatePresent -and $Sha256 -ceq $script:fixture.Pin }
+function Remove-CoreServiceCertificate { param($Sha256); $script:events.Add('certificate-remove:' + $Sha256.Substring(0, 4)) }
+function Set-SetupLifecycleCodeAcl { param($Locations); }
+function Start-CoreService { param($TimeoutSeconds); $script:events.Add('start-core') }
+function Start-PilotService { param($TimeoutSeconds); $script:events.Add('start-agent') }
+function Register-CoreService { param($ExecutablePath,$ConfigurationPath); $script:events.Add('register-core') }
+function Register-PilotService { param($ExecutablePath,$ConfigurationPath); $script:events.Add('register-agent') }
+function Set-CoreServiceRecovery { }
+function Wait-CoreServiceHealth { param($Origin,$TimeoutSeconds,$LocalNetworkPort); $script:events.Add('health:' + $LocalNetworkPort) }
+function Wait-PilotAgentEnrollment { param($DataDirectory,$TimeoutSeconds); }
 
 function Write-LifecycleTestDocument([string]$Path, $Document) {
     [IO.File]::WriteAllText($Path, ($Document | ConvertTo-Json -Compress -Depth 8), (New-Object Text.UTF8Encoding($false)))
 }
 function Read-LifecycleTestDocument([string]$Path) { return Read-PilotStrictJson (Read-PilotUtf8Document $Path 65536) }
-function New-LifecycleTestFixture {
+function New-LifecycleTestFixture([switch]$LocalNetwork) {
     $root = Join-Path $testRoot ([Guid]::NewGuid().ToString('N'))
+    $pin = ('C' + [Guid]::NewGuid().ToString('N').ToUpperInvariant() + [Guid]::NewGuid().ToString('N').ToUpperInvariant()).Substring(0, 64)
     $locations = @{
         CodeRoot = Join-Path $root 'ProgramFiles/SentinelAI'; DataRoot = Join-Path $root 'ProgramData/SentinelAI';
         Menu = Join-Path $root 'StartMenu/SentinelAI'
@@ -99,7 +121,9 @@ function New-LifecycleTestFixture {
     }
     [IO.File]::WriteAllText((Join-Path $locations.Menu 'SentinelAI.lnk'), 'synthetic-owned-shortcut')
     $origin = 'http://127.0.0.1:5000'
-    Write-LifecycleTestDocument (Join-Path $locations.CoreData 'pilot-config.json') @{ urls = $origin; SentinelAI = @{ DataDirectory = $locations.CoreData } }
+    $coreSettings = @{ DataDirectory = $locations.CoreData }
+    if ($LocalNetwork) { $coreSettings.LocalNetworkPort = '5443'; $coreSettings.LocalNetworkCertificateSha256 = $pin }
+    Write-LifecycleTestDocument (Join-Path $locations.CoreData 'pilot-config.json') @{ urls = $origin; SentinelAI = $coreSettings }
     Write-LifecycleTestDocument (Join-Path $locations.AgentData 'pilot-config.json') @{ Agent = @{ CoreUrl = $origin; DataDirectory = $locations.AgentData; EnrollmentTokenFile = Join-Path $locations.AgentData 'pilot-enrollment-token' } }
     foreach ($component in @('Core','Agent')) {
         Write-LifecycleTestDocument (Join-Path $locations[$component + 'Data'] 'pilot-installation.json') ([ordered]@{
@@ -135,7 +159,8 @@ function New-LifecycleTestFixture {
     $coreService = [pscustomobject]@{ Name = 'SentinelAICore'; StartName = 'NT SERVICE\SentinelAICore'; PathName = Get-PilotAgentImagePath (Join-Path $locations.CoreCode 'SentinelAI.Core.exe') (Join-Path $locations.CoreData 'pilot-config.json') }
     $agentService = [pscustomobject]@{ Name = 'SentinelAIAgent'; StartName = 'NT AUTHORITY\LocalService'; PathName = Get-PilotAgentImagePath (Join-Path $locations.AgentCode 'SentinelAI.Agent.exe') (Join-Path $locations.AgentData 'pilot-config.json') }
     $script:events.Clear()
-    $script:fixture = [pscustomobject]@{ Root = $root; Locations = $locations; CoreService = $coreService; AgentService = $agentService; Neighbor = $neighbor }
+    $script:fixture = [pscustomobject]@{ Root = $root; Locations = $locations; CoreService = $coreService; AgentService = $agentService; Neighbor = $neighbor;
+        Pin = $pin; FirewallRule = $(if ($LocalNetwork) { 'owned' } else { $null }); CertificatePresent = $true }
     return $script:fixture
 }
 function Get-LifecycleTestDataHashes($Locations) {
@@ -256,13 +281,80 @@ try {
         Invoke-SetupLifecycleWorker $request | Out-Null
         Assert-LifecycleTest (-not (Test-Path -LiteralPath $locations.CodeRoot) -and -not (Test-Path -LiteralPath $locations.Menu)) 'uninstall removes only owned code and shortcut'
         Assert-LifecycleTest ($null -eq $fixture.CoreService -and $null -eq $fixture.AgentService) 'uninstall removes both owned services'
-        Assert-LifecycleTest (($script:events -join ',') -ceq 'stop-agent,stop-core,remove-agent,remove-core') 'ownership precedes ordered service removal'
+        Assert-LifecycleTest (($script:events -join ',') -ceq 'stop-agent,stop-core,remove-agent,remove-core,firewall-remove') 'ownership precedes ordered service removal'
         Assert-LifecycleTest ([IO.File]::ReadAllText((Join-Path $fixture.Neighbor 'state')) -ceq 'foreign-neighbor-state') 'foreign neighboring data survives explicit deletion'
         if ($preserve -ceq 'true') {
             Assert-LifecycleTestDataUnchanged $hashes
             Assert-LifecycleTest ((Inspect-SetupLifecycleInstallation $locations).Kind -ceq 'Retained') 'default uninstall is recoverable retained installation'
         } else { Assert-LifecycleTest (-not (Test-Path -LiteralPath $locations.DataRoot)) 'explicit false deletes proven owned data' }
     }
+
+    # The central role: uninstall always removes the owned firewall rule; only confirmed data removal deletes
+    # Core's certificate, which every Agent pins. A local-only installation has no certificate to remove.
+    foreach ($preserve in @('true','false')) {
+        foreach ($central in @($true,$false)) {
+            $fixture = New-LifecycleTestFixture -LocalNetwork:$central; $locations = $fixture.Locations
+            $hashes = Get-LifecycleTestDataHashes $locations
+            Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'uninstall'; workDirectory = $fixture.Root; preserveData = $preserve }) | Out-Null
+            $expected = 'stop-agent,stop-core,remove-agent,remove-core,firewall-remove'
+            if ($central -and $preserve -ceq 'false') { $expected += ',certificate-remove:' + $fixture.Pin.Substring(0, 4) }
+            Assert-LifecycleTest (($script:events -join ',') -ceq $expected) 'uninstall removes the rule and only confirmed data removal deletes the certificate'
+            Assert-LifecycleTest ($null -eq $fixture.FirewallRule) 'uninstall leaves no Core firewall rule'
+            if ($preserve -ceq 'true') {
+                Assert-LifecycleTestDataUnchanged $hashes
+                Assert-LifecycleTest ((Inspect-SetupLifecycleInstallation $locations).Kind -ceq 'Retained') 'retained central installation keeps its configuration'
+                # Restoring the retained installation (code extracted again by the transaction) registers
+                # the services and restores the rule exactly.
+                foreach ($component in @('Core','Agent','Desktop','Updater')) {
+                    New-Item -ItemType Directory -Path $locations[$component + 'Code'] -Force | Out-Null
+                    [IO.File]::WriteAllText((Join-Path $locations[$component + 'Code'] ('SentinelAI.' + $component + '.exe')), ('synthetic-owned-' + $component + '-1.0.0'))
+                }
+                $script:events.Clear()
+                Start-SetupLifecycleServices $locations
+                $rule = if ($central) { 'firewall-set:5443:SentinelAI.Core.exe' } else { 'firewall-remove' }
+                Assert-LifecycleTest (($script:events -join ',') -ceq ('register-core,register-agent,' + $rule + ',start-core,start-agent')) 'restoration recreates services and the owned rule before start'
+            }
+        }
+    }
+
+    # Repair and upgrade restore a removed or changed rule; health includes the listener only while the certificate exists.
+    $fixture = New-LifecycleTestFixture -LocalNetwork; $locations = $fixture.Locations
+    $fixture.FirewallRule = $null
+    Start-SetupLifecycleServices $locations
+    Assert-LifecycleTest (($script:events -join ',') -ceq 'firewall-set:5443:SentinelAI.Core.exe,start-core,start-agent') 'repair restores the owned firewall rule'
+    $script:events.Clear(); Test-SetupLifecycleHealth $locations
+    Assert-LifecycleTest (($script:events -join ',') -ceq 'health:5443') 'health requires the local-network listener'
+    $script:events.Clear(); $fixture.CertificatePresent = $false; Test-SetupLifecycleHealth $locations
+    Assert-LifecycleTest (($script:events -join ',') -ceq 'health:0') 'without its certificate Core is healthy on loopback only'
+    $fixture = New-LifecycleTestFixture; $locations = $fixture.Locations
+    $script:events.Clear(); Test-SetupLifecycleHealth $locations
+    Assert-LifecycleTest (($script:events -join ',') -ceq 'health:0') 'a local-only installation has no local-network health'
+    # Rollback of a retained restoration returns to the uninstalled state, including the rule.
+    $fixture = New-LifecycleTestFixture -LocalNetwork; $locations = $fixture.Locations
+    Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'uninstall'; workDirectory = $fixture.Root; preserveData = 'true' }) | Out-Null
+    New-SetupLifecycleContext $locations (New-LifecycleTestRequest $fixture '1.0.0')
+    $fixture.FirewallRule = 'owned'; $script:events.Clear()
+    Start-SetupLifecycleServices $locations
+    Assert-LifecycleTest (($script:events -join ',') -ceq 'firewall-remove' -and $null -eq $fixture.FirewallRule) 'retained rollback removes the rule again'
+
+    # A changed local-network configuration is not an owned deployment; a lone rule is not a fresh computer.
+    foreach ($network in @('port','pin','partial')) {
+        $fixture = New-LifecycleTestFixture -LocalNetwork; $locations = $fixture.Locations
+        $config = Read-LifecycleTestDocument (Join-Path $locations.CoreData 'pilot-config.json')
+        switch ($network) {
+            'port' { $config.SentinelAI.LocalNetworkPort = '5444' }
+            'pin' { $config.SentinelAI.LocalNetworkCertificateSha256 = $fixture.Pin.ToLowerInvariant() }
+            'partial' { $config.SentinelAI.PSObject.Properties.Remove('LocalNetworkCertificateSha256') }
+        }
+        Write-LifecycleTestDocument (Join-Path $locations.CoreData 'pilot-config.json') $config
+        Assert-LifecycleTest ((Inspect-SetupLifecycleInstallation $locations).Kind -ceq 'Foreign') 'changed local-network configuration is refused'
+    }
+    $fixture = New-LifecycleTestFixture; $locations = $fixture.Locations
+    Remove-Item -LiteralPath $locations.CodeRoot, $locations.DataRoot, $locations.Menu -Recurse -Force
+    $fixture.CoreService = $null; $fixture.AgentService = $null; $fixture.FirewallRule = 'leftover'
+    Assert-LifecycleTest ((Inspect-SetupLifecycleInstallation $locations).Kind -ceq 'Foreign') 'a leftover Core firewall rule needs inspection'
+    $fixture.FirewallRule = $null
+    Assert-LifecycleTest ((Inspect-SetupLifecycleInstallation $locations).Kind -ceq 'Fresh') 'an empty computer is fresh'
 
     foreach ($foreign in @('core-image','core-account','agent-image','agent-account','missing-core','foreign-code','foreign-data','foreign-setup','foreign-menu','mixed-version')) {
         $fixture = New-LifecycleTestFixture; $locations = $fixture.Locations

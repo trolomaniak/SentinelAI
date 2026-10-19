@@ -321,6 +321,7 @@ try
         await AlertApiTests.VerifyRemoteHttpAsync(client, accessToken, alertTestState.AlertId);
     }
 
+    await LocalNetworkTests.RunAsync(username, password);
     await CoreServiceHostingTests.RunAsync();
     await DesktopAuthenticationTests.RunAsync();
     Console.WriteLine("Core integration tests passed.");

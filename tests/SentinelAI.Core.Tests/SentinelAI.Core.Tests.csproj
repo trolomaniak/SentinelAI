@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\core\SentinelAI.Core.csproj" />
+    <Compile Include="..\..\shared\hosting\LocalNetworkCertificateProvisioning.cs" Link="LocalNetworkCertificateProvisioning.cs" />
   </ItemGroup>
 
   <PropertyGroup>

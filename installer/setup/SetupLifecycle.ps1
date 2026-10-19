@@ -84,7 +84,7 @@ function Assert-SetupLifecycleOwnership {
     if ($null -ne $context -and ($context.oldVersion -cne $core.version -or [version]$context.candidateVersion -lt [version]$context.oldVersion)) { throw 'Invalid lifecycle version floor.' }
     $origin = Assert-PilotCoreOrigin -CoreUrl $core.coreUrl
     if (-not $origin.IsLoopback -or $origin.Scheme -cne 'http') { throw 'Unsupported Setup Core origin.' }
-    Assert-PilotExistingConfiguration -Path (Join-Path $Locations.CoreData 'pilot-config.json') -Component Core -DataDirectory $Locations.CoreData -CoreUrl $core.coreUrl -ServiceWriteSid $coreSid -ServiceWriteRoot $Locations.CoreData
+    Assert-PilotExistingConfiguration -Path (Join-Path $Locations.CoreData 'pilot-config.json') -Component Core -DataDirectory $Locations.CoreData -CoreUrl $core.coreUrl -ServiceWriteSid $coreSid -ServiceWriteRoot $Locations.CoreData -AnyLocalNetwork
     Assert-PilotExistingConfiguration -Path (Join-Path $Locations.AgentData 'pilot-config.json') -Component Agent -DataDirectory $Locations.AgentData -CoreUrl $core.coreUrl
     Assert-PilotObjectProperties -Object $service -Names @('format','serviceName','serviceAccount','serviceAccountSid','codeDirectory','dataDirectory','configurationSha256','executableSha256','version')
     if ($service.format -cne 'sentinelai-core-service-v1' -or $service.serviceName -cne 'SentinelAICore' -or
@@ -135,7 +135,16 @@ function Assert-SetupLifecycleOwnership {
             if ($entry.PSIsContainer -or $entry.Name -cne 'SentinelAI.lnk') { throw 'Foreign Start Menu entry.' }
         }
     }
-    return @{ Core = $core; Agent = $agent; Service = $service; Setup = $setup; Context = $context; Retained = $retained }
+    $network = Get-CoreServiceLocalNetwork -DataDirectory $Locations.CoreData
+    return @{ Core = $core; Agent = $agent; Service = $service; Setup = $setup; Context = $context; Retained = $retained; LocalNetwork = $network }
+}
+
+function Set-SetupLifecycleFirewallRule {
+    param($Locations, $Owned)
+    # The central role's one owned inbound rule; repair and restoration recreate it exactly.
+    if ($null -ne $Owned.LocalNetwork) {
+        Set-CoreServiceFirewallRule -ExecutablePath (Join-Path $Locations.CoreCode 'SentinelAI.Core.exe') -Port $Owned.LocalNetwork.Port
+    } else { Remove-CoreServiceFirewallRule }
 }
 
 function Get-SetupLifecycleJournal {
@@ -147,7 +156,7 @@ function Inspect-SetupLifecycleInstallation {
     param($Locations)
     $hasInstallation = $false
     foreach ($name in @('CodeRoot','DataRoot','Menu')) { if (Test-Path -LiteralPath $Locations[$name]) { $hasInstallation = $true } }
-    if ($null -ne (Get-CoreService) -or $null -ne (Get-PilotService)) { $hasInstallation = $true }
+    if ($null -ne (Get-CoreService) -or $null -ne (Get-PilotService) -or $null -ne (Get-CoreServiceFirewallRule)) { $hasInstallation = $true }
     if (-not $hasInstallation) { return @{ Kind = 'Fresh'; Version = '' } }
     try {
         $owned = Assert-SetupLifecycleOwnership $Locations -UseContext
@@ -282,6 +291,7 @@ function Start-SetupLifecycleServices {
         # including removal of registrations created only for the failed candidate.
         if ($null -ne (Get-PilotService)) { Remove-PilotService }
         if ($null -ne (Get-CoreService)) { Remove-CoreService }
+        Remove-CoreServiceFirewallRule
         Sync-SetupLifecycleReceipts $Locations
         return
     }
@@ -301,6 +311,7 @@ function Start-SetupLifecycleServices {
         if (-not $owned.Retained) { throw 'Missing owned service.' }
         Register-PilotService -ExecutablePath (Join-Path $Locations.AgentCode 'SentinelAI.Agent.exe') -ConfigurationPath (Join-Path $Locations.AgentData 'pilot-config.json')
     }
+    Set-SetupLifecycleFirewallRule $Locations $owned
     # Data/configuration/DPAPI files are never replaced or re-enrolled.
     Start-CoreService -TimeoutSeconds 30
     Start-PilotService -TimeoutSeconds 30
@@ -313,7 +324,7 @@ function Test-SetupLifecycleHealth {
         if ($null -ne (Get-CoreService) -or $null -ne (Get-PilotService)) { throw 'Retained baseline still has service registrations.' }
         return
     }
-    Wait-CoreServiceHealth -Origin ([Uri]$owned.Core.coreUrl) -TimeoutSeconds 20
+    Wait-CoreServiceHealth -Origin ([Uri]$owned.Core.coreUrl) -TimeoutSeconds 20 -LocalNetworkPort (Get-CoreServiceLocalNetworkPort -DataDirectory $Locations.CoreData)
     [void](Wait-PilotAgentEnrollment -DataDirectory $Locations.AgentData -TimeoutSeconds 15)
 }
 
@@ -358,14 +369,17 @@ function Uninstall-SetupLifecycleInstallation {
     Stop-SetupLifecycleServices $Locations
     if ($null -ne (Get-PilotService)) { Remove-PilotService }
     if ($null -ne (Get-CoreService)) { Remove-CoreService }
+    Remove-CoreServiceFirewallRule
     # All roots were fixed, bounded, link-free and proven owned before stopping.
     foreach ($path in @($Locations.Menu,$Locations.CodeRoot)) {
         Assert-PilotTrustedPath -Path $path -Tree
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
     if (-not $PreserveData) {
-        # Reachable only through explicit UI opt-in plus DELETE confirmation.
-        [void](Assert-SetupLifecycleOwnership $Locations)
+        # Reachable only through explicit UI opt-in plus DELETE confirmation. Core's certificate and key
+        # leave with the data: Agents pin them, so retained data keeps them.
+        $network = (Assert-SetupLifecycleOwnership $Locations).LocalNetwork
+        if ($null -ne $network) { Remove-CoreServiceCertificate -Sha256 $network.CertificateSha256 }
         Remove-Item -LiteralPath $Locations.DataRoot -Recurse -Force
     }
 }

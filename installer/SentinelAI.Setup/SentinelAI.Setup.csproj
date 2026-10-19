@@ -21,6 +21,8 @@
     <Compile Include="../../desktop/SentinelAI.Desktop/Services/WindowsCoreServices.cs" Link="ExistingCore/WindowsCoreServices.cs" />
     <Compile Include="../../desktop/SentinelAI.Desktop/Services/WindowsInstallationTrust.cs" Link="ExistingCore/WindowsInstallationTrust.cs" />
     <Compile Include="../../desktop/SentinelAI.Desktop/Services/WindowsNativeCore.cs" Link="ExistingCore/WindowsNativeCore.cs" />
+    <Compile Include="../../shared/hosting/LocalNetworkCertificate.cs" Link="LocalNetwork/LocalNetworkCertificate.cs" />
+    <Compile Include="../../shared/hosting/LocalNetworkCertificateProvisioning.cs" Link="LocalNetwork/LocalNetworkCertificateProvisioning.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(SetupPayloadPath)' != '' and '$(SetupTrustPath)' != '' and '$(SetupMetadataPath)' != ''">
     <EmbeddedResource Include="$(SetupPayloadPath)" LogicalName="SentinelAI.Setup.Payload" />

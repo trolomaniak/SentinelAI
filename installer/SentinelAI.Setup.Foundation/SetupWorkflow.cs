@@ -5,9 +5,18 @@ namespace SentinelAI.Setup.Foundation;
 
 public interface ISetupWorker
 {
-    Task PrepareCoreAsync(CancellationToken token);
+    /// <summary>An empty fingerprint prepares a local-only Core; otherwise the central role with that certificate.</summary>
+    Task PrepareCoreAsync(string localNetworkCertificateSha256, CancellationToken token);
     Task StartCoreAsync(CancellationToken token);
     Task CompleteAsync(ReadOnlyMemory<char> enrollmentToken, CancellationToken token);
+}
+
+/// <summary>Core's own TLS certificate for Agents on the local network, created at install time.</summary>
+public interface ISetupLocalNetworkCertificate
+{
+    /// <summary>Creates the certificate and its protected key; returns the uppercase SHA-256 Agents pin.</summary>
+    string Create();
+    void Remove(string sha256);
 }
 
 public interface ISetupEnrollmentIssuer
@@ -105,13 +114,34 @@ public static class SetupWorkflow
         return true;
     }
 
+    public static bool ValidCertificateSha256(string? value) =>
+        value is { Length: 64 } && value.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
+
+    /// <param name="localNetwork">Null keeps the installation local-only; otherwise Core also serves Agents on the local network.</param>
     public static async Task InstallAsync(ISetupWorker worker, IAdministratorSetupClient administrator, ISetupEnrollmentIssuer issuer,
-        string username, ReadOnlyMemory<char> password, IProgress<string> progress, CancellationToken token)
+        ISetupLocalNetworkCertificate? localNetwork, string username, ReadOnlyMemory<char> password, IProgress<string> progress, CancellationToken token)
     {
         if (!ValidCredentials(username, password.Span, password.Span)) throw new InvalidDataException("Invalid setup credentials.");
         token.ThrowIfCancellationRequested();
-        progress.Report("Preparing Core...");
-        await worker.PrepareCoreAsync(token).ConfigureAwait(false);
+        var certificate = string.Empty;
+        if (localNetwork is not null)
+        {
+            progress.Report("Creating Core's local-network certificate...");
+            certificate = await Task.Run(localNetwork.Create, token).ConfigureAwait(false);
+            if (!ValidCertificateSha256(certificate)) throw new InvalidDataException("Core certificate unavailable.");
+        }
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            progress.Report("Preparing Core...");
+            await worker.PrepareCoreAsync(certificate, token).ConfigureAwait(false);
+        }
+        catch when (certificate.Length != 0)
+        {
+            // Nothing references a certificate whose Core was not prepared; never leave its key behind.
+            try { localNetwork!.Remove(certificate); } catch (Exception) { }
+            throw;
+        }
         token.ThrowIfCancellationRequested();
         progress.Report("Creating the local administrator...");
         if (await administrator.GetStateAsync(token).ConfigureAwait(false) != AdministratorSetupState.Required)
@@ -140,12 +170,13 @@ public static class SetupWorkflow
 
     /// <summary>Caller owns and wipes the fixed buffer immediately after the private pipe write.</summary>
     public static int WriteWorkerRequest(byte[] buffer, string action, string workDirectory, SetupMetadata metadata,
-        ReadOnlySpan<char> enrollmentToken, bool preserveData = true)
+        ReadOnlySpan<char> enrollmentToken, bool preserveData = true, string localNetworkCertificateSha256 = "")
     {
         if (buffer.Length < 8192 || action is not ("prepare-core" or "start-core" or "complete" or "inspect" or "lifecycle-stop" or "lifecycle-start" or "lifecycle-health" or "lifecycle-context" or "lifecycle-cleanup" or "uninstall" or "lifecycle-reconcile") || workDirectory.Length is <= 0 or > 260 ||
             metadata.KeyId.Length is <= 0 or > 64 || metadata.Channel is not ("stable" or "pilot" or "beta") || !TryVersion(metadata.Version, out _) ||
             action != "complete" && enrollmentToken.Length != 0 ||
-            action == "complete" && !ValidEnrollmentToken(enrollmentToken) || action != "uninstall" && !preserveData)
+            action == "complete" && !ValidEnrollmentToken(enrollmentToken) || action != "uninstall" && !preserveData ||
+            localNetworkCertificateSha256.Length != 0 && (action != "prepare-core" || !ValidCertificateSha256(localNetworkCertificateSha256)))
             throw new InvalidDataException("Invalid setup request.");
         using var stream = new MemoryStream(buffer, 0, 8192, writable: true, publiclyVisible: true);
         stream.SetLength(0);
@@ -157,6 +188,8 @@ public static class SetupWorkflow
             // A credential-free phase carries an exact empty string, never null.
             writer.WriteString("enrollmentToken", enrollmentToken);
             writer.WriteString("version", metadata.Version); writer.WriteString("preserveData", preserveData ? "true" : "false");
+            // Only the public SHA-256 of the certificate the host created; empty for local-only and every other phase.
+            writer.WriteString("localNetworkCertificateSha256", localNetworkCertificateSha256);
             writer.WriteEndObject(); writer.Flush();
         }
         if (stream.Length >= 8192) throw new InvalidDataException("Setup request is too large.");
@@ -169,6 +202,7 @@ public static class SetupWorkflow
         "PROGRESS|validate" => "Validating installation files...",
         "PROGRESS|core" => "Preparing Core...",
         "PROGRESS|services" => "Starting Windows services...",
+        "PROGRESS|network" => "Allowing Agents on the local network...",
         "PROGRESS|agent" => "Installing and enrolling Agent...",
         "PROGRESS|desktop" => "Installing Desktop and Updater...",
         "PROGRESS|shortcut" => "Creating Start Menu shortcuts...",
