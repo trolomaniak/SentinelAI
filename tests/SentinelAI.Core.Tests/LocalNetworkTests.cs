@@ -178,6 +178,32 @@ internal static class LocalNetworkTests
         Check(LocalNetworkCertificateProvisioning.KeySecurityDescriptorSddl ==
               "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;S-1-5-80-1772522954-4099193962-4247269631-2556497313-4219375900)",
             "Core's key ACL is not limited to SYSTEM, Administrators and Core's service account.");
+
+        // The DACL check accepts the requested masks and the form Microsoft Software KSP reports, and nothing wider.
+        const string system = "S-1-5-18", administrators = "S-1-5-32-544", core = LocalNetworkCertificate.CoreServiceSid;
+        (bool, string, uint)[] Access(uint full, uint read) => [(true, system, full), (true, administrators, full), (true, core, read)];
+        Check(LocalNetworkCertificateProvisioning.HasExpectedKeyAccess(true, Access(0x1F01FF, 0x120089)) &&
+              LocalNetworkCertificateProvisioning.HasExpectedKeyAccess(true, Access(0xD01F01FF, 0x80120089)),
+            "The key ACL check rejected the ACL Setup requests or the form Windows reports.");
+        foreach (var (protectedDacl, entries, reason) in new (bool, (bool, string, uint)[], string)[]
+        {
+            (false, Access(0x1F01FF, 0x120089), "an inheritable DACL"),
+            (true, Access(0x1F01FF, 0x120089 | 0x2), "Core write access"),
+            (true, Access(0x1F01FF, 0x120089 | 0x10000), "Core delete access"),
+            (true, Access(0x1F01FF, 0x120089 | 0x40000), "Core permission changes"),
+            (true, Access(0x1F01FF, 0x80120089 | 0x40000000), "Core generic write access"),
+            (true, Access(0x1F01FF, 0x10000000), "Core generic full control"),
+            (true, Access(0x1F01FF, 0x80000000), "Core without specific read access"),
+            (true, Access(0x120089, 0x120089), "SYSTEM and Administrators without full control"),
+            (true, [.. Access(0x1F01FF, 0x120089), (true, "S-1-5-32-545", 0x120089)], "Users read access"),
+            (true, [(true, system, 0x1F01FF), (true, administrators, 0x1F01FF), (true, "S-1-5-11", 0x120089)], "Authenticated Users instead of Core"),
+            (true, [(true, system, 0x1F01FF), (true, system, 0x1F01FF), (true, core, 0x120089)], "a duplicate identity"),
+            (true, [(true, system, 0x1F01FF), (false, administrators, 0x1F01FF), (true, core, 0x120089)], "a deny entry"),
+            (true, Access(0x1F01FF, 0x120089)[..2], "no access for Core")
+        })
+        {
+            Check(!LocalNetworkCertificateProvisioning.HasExpectedKeyAccess(protectedDacl, entries), "The key ACL check accepted " + reason + ".");
+        }
     }
 
     private static async Task VerifyListenerAsync(string directory, X509Certificate2 certificate, string username, string password)
@@ -369,13 +395,11 @@ internal static class LocalNetworkTests
                       key.Key.Provider == CngProvider.MicrosoftSoftwareKeyStorageProvider,
                     "Core's private key is not a non-exportable P-256 machine key.");
                 var descriptor = new RawSecurityDescriptor(key.Key.GetProperty("Security Descr", (CngPropertyOptions)4).GetValue()!, 0);
-                var entries = descriptor.DiscretionaryAcl!.Cast<CommonAce>()
-                    .Select(entry => (entry.AceQualifier, entry.SecurityIdentifier.Value, entry.AccessMask)).ToArray();
-                Check((descriptor.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0 &&
-                      entries.Length == 3 && entries.All(entry => entry.AceQualifier == AceQualifier.AccessAllowed) &&
-                      entries.Contains((AceQualifier.AccessAllowed, "S-1-5-18", 0x1F01FF)) &&
-                      entries.Contains((AceQualifier.AccessAllowed, "S-1-5-32-544", 0x1F01FF)) &&
-                      entries.Contains((AceQualifier.AccessAllowed, LocalNetworkCertificate.CoreServiceSid, 0x120089)),
+                var entries = descriptor.DiscretionaryAcl!.Cast<GenericAce>().Select(entry => entry is CommonAce common
+                    ? (common.AceQualifier == AceQualifier.AccessAllowed, common.SecurityIdentifier.Value, unchecked((uint)common.AccessMask))
+                    : (false, "", 0u)).ToArray();
+                Check(LocalNetworkCertificateProvisioning.HasExpectedKeyAccess(
+                        (descriptor.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0, entries),
                     "Core's private key is usable by identities other than Core's service account, SYSTEM and Administrators: " +
                     descriptor.GetSddlForm(AccessControlSections.Access));
                 foreach (var root in new[] { StoreName.Root, StoreName.CertificateAuthority })

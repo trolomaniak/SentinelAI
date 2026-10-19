@@ -639,12 +639,32 @@ function Assert-SetupLocalNetworkCertificate([string]$Pin) {
         Assert-SetupAcceptance ($key -is [Security.Cryptography.ECDsaCng] -and $key.Key.IsMachineKey -and
             [string]$key.Key.ExportPolicy -ceq 'None' -and $key.KeySize -eq 256) "Core's private key is not a non-exportable P-256 machine key."
         $descriptor = New-Object Security.AccessControl.RawSecurityDescriptor -ArgumentList @($key.Key.GetProperty('Security Descr', [Security.Cryptography.CngPropertyOptions]4).GetValue(), 0)
-        $entries = @($descriptor.DiscretionaryAcl | ForEach-Object { [string]$_.AceQualifier + '|' + $_.SecurityIdentifier.Value + '|' + $_.AccessMask })
-        Assert-SetupAcceptance (($descriptor.ControlFlags -band [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -ne 0 -and $entries.Count -eq 3 -and
-            $entries -ccontains 'AccessAllowed|S-1-5-18|2032127' -and $entries -ccontains 'AccessAllowed|S-1-5-32-544|2032127' -and
-            $entries -ccontains ('AccessAllowed|' + $script:coreSid + '|1179785')) ("Core's private key is usable outside Core's service account, SYSTEM and Administrators: " + $descriptor.GetSddlForm('Access'))
+        $entries = @($descriptor.DiscretionaryAcl | ForEach-Object {
+            $common = $_ -is [Security.AccessControl.CommonAce]
+            [pscustomobject]@{
+                Allowed = ($common -and [string]$_.AceQualifier -ceq 'AccessAllowed')
+                Sid = $(if ($common) { [string]$_.SecurityIdentifier.Value } else { '' })
+                Mask = $(if ($common) { [int64]$_.AccessMask -band 4294967295 } else { [int64]0 })
+            }
+        })
+        Assert-SetupAcceptance (Test-SetupKeyAccess (($descriptor.ControlFlags -band [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -ne 0) $entries) ("Core's private key is usable outside Core's service account, SYSTEM and Administrators: " + $descriptor.GetSddlForm('Access'))
     } finally { if ($null -ne $key) { $key.Dispose() } }
     foreach ($certificate in $certificates) { $certificate.Dispose() }
+}
+# Microsoft Software KSP reports each granted right with its generic equivalent (0xD01F01FF for full
+# control, 0x80120089 for read): a protected DACL allowing exactly SYSTEM and Administrators full
+# control and Core's service account read access (FILE_GENERIC_READ, GENERIC_READ) and nothing else.
+function Test-SetupKeyAccess([bool]$Protected, [object[]]$Entries) {
+    if (-not $Protected -or $Entries.Count -ne 3 -or @($Entries | ForEach-Object { $_.Sid } | Sort-Object -Unique).Count -ne 3) { return $false }
+    foreach ($entry in $Entries) {
+        if (-not $entry.Allowed) { return $false }
+        if ($entry.Sid -ceq 'S-1-5-18' -or $entry.Sid -ceq 'S-1-5-32-544') {
+            if (($entry.Mask -band 2032127) -ne 2032127) { return $false }
+        } elseif ($entry.Sid -ceq $script:coreSid) {
+            if (($entry.Mask -band 1179785) -ne 1179785 -or ($entry.Mask -band (-bnot [int64]2148663433)) -ne 0) { return $false }
+        } else { return $false }
+    }
+    return $true
 }
 function Assert-SetupFirewallRule {
     $rule = @(Get-NetFirewallRule -Name $script:firewallRuleName -ErrorAction SilentlyContinue)

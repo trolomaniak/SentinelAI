@@ -21,6 +21,26 @@ internal static class LocalNetworkCertificateProvisioning
     public static string KeySecurityDescriptorSddl =>
         "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;" + LocalNetworkCertificate.CoreServiceSid + ")";
 
+    private const string SystemSid = "S-1-5-18";
+    private const string AdministratorsSid = "S-1-5-32-544";
+    private const uint FullControl = 0x1F01FF; // FILE_ALL_ACCESS
+    private const uint ReadAccess = 0x120089; // FILE_GENERIC_READ
+    private const uint GenericRead = 0x80000000;
+
+    // Checks a key DACL as Windows reports it. Microsoft Software KSP stores each granted right
+    // together with its generic equivalent (0xD01F01FF for full control, 0x80120089 for read), so
+    // access is judged by what each identity may do: a protected DACL that allows exactly SYSTEM
+    // and Administrators full control and Core's service account read access, and nothing else.
+    public static bool HasExpectedKeyAccess(bool protectedDacl, IReadOnlyCollection<(bool Allowed, string Sid, uint Mask)> entries) =>
+        protectedDacl && entries.Count == 3 && entries.All(entry => entry.Allowed) &&
+        entries.Select(entry => entry.Sid).Distinct(StringComparer.Ordinal).Count() == 3 &&
+        entries.All(entry => entry.Sid switch
+        {
+            SystemSid or AdministratorsSid => (entry.Mask & FullControl) == FullControl,
+            LocalNetworkCertificate.CoreServiceSid => (entry.Mask & ReadAccess) == ReadAccess && (entry.Mask & ~(ReadAccess | GenericRead)) == 0,
+            _ => false
+        });
+
     public static (string HostName, string? FullyQualifiedName) ComputerNames()
     {
         var properties = IPGlobalProperties.GetIPGlobalProperties();

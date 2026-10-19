@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using SentinelAI.Desktop.Foundation;
 
 namespace SentinelAI.Desktop.Services;
 
@@ -38,10 +39,7 @@ internal static class WindowsInstallationTrust
         var pilotPath = Path.Combine(DataDirectory, "pilot-installation.json");
         ValidatePath(pilotPath, writers, serviceOnAncestors: true);
         using var configuration = ReadDocument(ConfigurationPath, 8192);
-        var settings = ExactObject(configuration.RootElement, "urls", "SentinelAI");
-        var data = ExactObject(settings["SentinelAI"], "DataDirectory");
-        if (!string.Equals(String(settings["urls"]), Origin.GetLeftPart(UriPartial.Authority), StringComparison.Ordinal) ||
-            !string.Equals(String(data["DataDirectory"]), DataDirectory, StringComparison.OrdinalIgnoreCase))
+        if (!InstalledCoreConfiguration.IsExpected(configuration.RootElement, Origin.GetLeftPart(UriPartial.Authority), DataDirectory))
             throw new InvalidDataException("Unexpected fixed Core configuration.");
         using var pilot = ReadDocument(pilotPath, 4096);
         var fields = ExactObject(pilot.RootElement, "format", "component", "version", "codeDirectory", "dataDirectory", "coreUrl", "environment", "channel", "serviceName", "serviceAccountSid");
