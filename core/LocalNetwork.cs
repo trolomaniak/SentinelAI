@@ -236,17 +236,15 @@ internal static class LocalNetworkHosting
         });
     }
 
-    // Binds the port the way ListenAnyIP does (IPv6 any with IPv4 mapped, else IPv4 any) and releases it at once.
+    // ListenAnyIP takes IPv6 any with IPv4 mapped where the host has IPv6. Windows keeps separate IPv4 and IPv6 wildcard
+    // ports, so a program holding only the IPv4 port would leave Kestrel's bind working while every Agent (they use
+    // IPv4 addresses) reached that program. Each family is therefore bound and released on its own.
     internal static bool PortAvailable(int port)
     {
         try
         {
-            using var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = true };
-            Bind(socket, new IPEndPoint(IPAddress.IPv6Any, port));
-            return true;
-        }
-        catch (SocketException exception) when (exception.SocketErrorCode is SocketError.AddressFamilyNotSupported or SocketError.ProtocolNotSupported)
-        {
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            Bind(socket, new IPEndPoint(IPAddress.Any, port));
         }
         catch (SocketException)
         {
@@ -255,8 +253,13 @@ internal static class LocalNetworkHosting
 
         try
         {
-            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            Bind(socket, new IPEndPoint(IPAddress.Any, port));
+            using var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = true };
+            Bind(socket, new IPEndPoint(IPAddress.IPv6Any, port));
+            return true;
+        }
+        catch (SocketException exception) when (exception.SocketErrorCode is SocketError.AddressFamilyNotSupported or SocketError.ProtocolNotSupported)
+        {
+            // Without IPv6 Kestrel binds IPv4 any, which is free.
             return true;
         }
         catch (SocketException)
