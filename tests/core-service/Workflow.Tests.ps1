@@ -320,11 +320,11 @@ try {
     $program = 'C:\Program Files\SentinelAI\Core\SentinelAI.Core.exe'
     & $module {
         param($program)
-        $script:Firewall = @{ Rule = $null; Created = $null; Removed = 0 }
+        $script:Firewall = @{ Rule = $null; Created = $null; Removed = 0; Program = $program }
         function script:New-FirewallTestRule {
             param($Overrides = @{})
             $rule = @{ Name = 'SentinelAI-Core-LocalNetwork'; Enabled = 'True'; Direction = 'Inbound'; Action = 'Allow'; Profile = 3; EdgeTraversalPolicy = 'Block';
-                Protocol = 'TCP'; LocalPort = '5443'; RemotePort = 'Any'; RemoteAddress = 'LocalSubnet'; LocalAddress = 'Any'; Program = $program }
+                Protocol = 'TCP'; LocalPort = '5443'; RemotePort = 'Any'; RemoteAddress = 'LocalSubnet'; LocalAddress = 'Any'; Program = $script:Firewall.Program }
             foreach ($key in $Overrides.Keys) { $rule[$key] = $Overrides[$key] }
             return [pscustomobject]$rule
         }
