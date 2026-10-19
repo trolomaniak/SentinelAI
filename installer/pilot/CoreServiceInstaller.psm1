@@ -149,7 +149,8 @@ function Wait-CoreServiceHealth {
                 $current = Get-CoreService
                 if ($health.status -ceq 'healthy' -and $null -ne $current -and $current.State -eq 'Running' -and
                     $current.ProcessId -eq $service.ProcessId -and (Test-CoreServiceListener -Origin $Origin -Service $current) -and
-                    ($LocalNetworkPort -eq 0 -or (Test-CoreServiceLocalNetworkListener -Port $LocalNetworkPort -Service $current))) { return }
+                    ($LocalNetworkPort -eq 0 -or (Test-CoreServiceLocalNetworkListener -Port $LocalNetworkPort -Service $current) -or
+                     (Test-CoreServiceLocalNetworkPortUnusable -Port $LocalNetworkPort -Service $current))) { return }
             }
         } catch { }
         Start-Sleep -Milliseconds 250
@@ -182,10 +183,43 @@ function Test-CoreServiceLocalNetworkListener {
     return $true
 }
 
+function Test-CoreServiceLocalNetworkPortUnusable {
+    param([int]$Port, $Service)
+    # Another program holds the port, or Windows reserved it (Hyper-V/WinNAT excluded ranges): Core then serves loopback
+    # only, as with a missing certificate. Setup cannot make the listener appear, so health rests on the loopback
+    # origin and repair is not blocked. Neither check opens a socket that could race Core's own bind.
+    if (@(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.OwningProcess -ne $Service.ProcessId }).Count -gt 0) { return $true }
+    foreach ($range in @(Get-CoreServiceExcludedPortRanges)) {
+        if ($Port -ge $range.Start -and $Port -le $range.End) { return $true }
+    }
+    return $false
+}
+
+function Get-CoreServiceExcludedPortRanges {
+    # TCP port ranges Windows reserved for IPv4; the data lines are two numbers in every display language.
+    try {
+        $lines = @(& (Join-Path ([Environment]::SystemDirectory) 'netsh.exe') interface ipv4 show excludedportrange protocol=tcp 2>&1)
+    } catch { return @() }
+    return @(ConvertFrom-CoreServiceExcludedPortRanges -Lines $lines)
+}
+
+function ConvertFrom-CoreServiceExcludedPortRanges {
+    param([object[]]$Lines)
+    foreach ($line in @($Lines)) {
+        if ($line -is [string] -and $line -match '^\s*(\d{1,5})\s+(\d{1,5})\s*\*?\s*$') { [pscustomobject]@{ Start = [int]$Matches[1]; End = [int]$Matches[2] } }
+    }
+}
+
 function Assert-CoreServiceLocalNetworkPortAvailable {
     param([int]$Port)
-    $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Any, $Port)
-    try { $listener.Start() } finally { $listener.Stop() }
+    # Binds the IPv4 port Core will listen on without listening: a listen on every interface from this interactive
+    # worker would raise a Windows Firewall prompt for PowerShell, whose answer would add rules for powershell.exe.
+    $socket = New-Object Net.Sockets.Socket(([Net.Sockets.AddressFamily]::InterNetwork), ([Net.Sockets.SocketType]::Stream), ([Net.Sockets.ProtocolType]::Tcp))
+    try {
+        $socket.ExclusiveAddressUse = $true
+        $socket.Bind((New-Object Net.IPEndPoint([Net.IPAddress]::Any, $Port)))
+    } finally { $socket.Dispose() }
 }
 
 function Get-CoreServiceCertificateSha256 {
@@ -415,7 +449,9 @@ function Invoke-CoreServiceManagement {
             Assert-PilotPreparedCodeMatches -PreparedDirectory $prepared -CodeDirectory $CodeDirectory
             if ($null -eq $service -or $service.State -ne 'Running') {
                 Assert-CoreServiceListenerAvailable -Origin $origin
-                if ($localNetworkPort -ne 0) { Assert-CoreServiceLocalNetworkPortAvailable -Port $localNetworkPort }
+                # A new central service refuses a taken local-network port up front. An existing service starts
+                # without that listener (loopback only), as Core does when another program holds the port.
+                if ($localNetworkPort -ne 0 -and $null -eq $service) { Assert-CoreServiceLocalNetworkPortAvailable -Port $localNetworkPort }
             }
             Set-CoreServiceInstallationAcl -CodeDirectory $CodeDirectory -DataDirectory $DataDirectory
             if ($null -eq $receipt) {
@@ -440,7 +476,6 @@ function Invoke-CoreServiceManagement {
         } elseif ($Action -in 'Install','Start','Restart') {
             if ($Action -eq 'Restart' -or ($Action -eq 'Start' -and $service.State -ne 'Running')) {
                 Assert-CoreServiceListenerAvailable -Origin $origin
-                if ($localNetworkPort -ne 0) { Assert-CoreServiceLocalNetworkPortAvailable -Port $localNetworkPort }
             }
             Start-CoreService -TimeoutSeconds $TimeoutSeconds
             Wait-CoreServiceHealth -Origin $origin -TimeoutSeconds $TimeoutSeconds -LocalNetworkPort $localNetworkPort

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.NetworkInformation;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
@@ -41,14 +42,35 @@ internal static class LocalNetworkCertificateProvisioning
             _ => false
         });
 
+    public const string FallbackHostName = "sentinelai-core";
+
     public static (string HostName, string? FullyQualifiedName) ComputerNames()
     {
         var properties = IPGlobalProperties.GetIPGlobalProperties();
-        var host = properties.HostName.Trim().TrimEnd('.');
-        var domain = properties.DomainName.Trim().Trim('.');
-        if (!IsDnsName(host)) throw new InvalidOperationException("The computer has no valid DNS host name.");
-        var fullyQualified = domain.Length == 0 ? null : host + "." + domain;
-        return (host, fullyQualified is not null && IsDnsName(fullyQualified) ? fullyQualified : null);
+        return ComputerNames(properties.HostName, properties.DomainName);
+    }
+
+    // The names are informational because Agents trust only the pin. Windows accepts computer names with
+    // national letters, which become IDN A-labels; a name that has no DNS form never blocks the certificate.
+    public static (string HostName, string? FullyQualifiedName) ComputerNames(string hostName, string domainName)
+    {
+        var host = AsciiDnsName(hostName.Trim().TrimEnd('.'));
+        if (host is null) return (FallbackHostName, null);
+        var domain = domainName.Trim().Trim('.');
+        return (host, domain.Length == 0 ? null : AsciiDnsName(hostName.Trim().TrimEnd('.') + "." + domain));
+    }
+
+    private static string? AsciiDnsName(string value)
+    {
+        try
+        {
+            var ascii = value.All(char.IsAscii) ? value : new IdnMapping().GetAscii(value);
+            return IsDnsName(ascii) ? ascii : null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     public static (DateTimeOffset NotBefore, DateTimeOffset NotAfter) Validity(DateTimeOffset now)

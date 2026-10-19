@@ -39,7 +39,7 @@ public sealed class LocalNetworkViewModel : INotifyPropertyChanged, IDisposable
                 if (!_status.Enabled) return "Off. This installation is local to this computer; Agents on other computers cannot connect.";
                 return _status.Listening
                     ? "On. Agents on other computers in this local network connect to Core over HTTPS."
-                    : "Configured, but Core is not listening on the local network because its certificate is unavailable.";
+                    : "Configured, but Core is not listening on the local network: its certificate is unavailable or another program uses its port.";
             }
         }
     }

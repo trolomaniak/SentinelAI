@@ -206,7 +206,9 @@ internal static class LocalNetworkHosting
                 return;
             }
 
-            kestrel.ListenAnyIP(options.Port, listen =>
+            // Every IPv4 interface: Agents use IPv4 addresses, and Windows keeps separate IPv4 and IPv6 wildcard ports,
+            // so Core holds the IPv4 port itself and no program started later can take Agent traffic.
+            kestrel.Listen(IPAddress.Any, options.Port, listen =>
             {
                 listen.Protocols = HttpProtocols.Http1;
                 listen.UseHttps(new HttpsConnectionAdapterOptions
@@ -236,30 +238,13 @@ internal static class LocalNetworkHosting
         });
     }
 
-    // ListenAnyIP takes IPv6 any with IPv4 mapped where the host has IPv6. Windows keeps separate IPv4 and IPv6 wildcard
-    // ports, so a program holding only the IPv4 port would leave Kestrel's bind working while every Agent (they use
-    // IPv4 addresses) reached that program. Each family is therefore bound and released on its own.
+    // Binds the IPv4 port the way Kestrel will and releases it at once.
     internal static bool PortAvailable(int port)
     {
         try
         {
             using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             Bind(socket, new IPEndPoint(IPAddress.Any, port));
-        }
-        catch (SocketException)
-        {
-            return false;
-        }
-
-        try
-        {
-            using var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = true };
-            Bind(socket, new IPEndPoint(IPAddress.IPv6Any, port));
-            return true;
-        }
-        catch (SocketException exception) when (exception.SocketErrorCode is SocketError.AddressFamilyNotSupported or SocketError.ProtocolNotSupported)
-        {
-            // Without IPv6 Kestrel binds IPv4 any, which is free.
             return true;
         }
         catch (SocketException)

@@ -29,7 +29,7 @@ function New-Fixture {
         Bundle = (Join-Path $root 'Bundle'); Key = (Join-Path $root 'public.pem'); Service = $null;
         Events = [Collections.Generic.List[string]]::new(); ScArguments = [Collections.Generic.List[object]]::new(); Listeners = @();
         FailPrepare = $false; FailRegister = $false; FailStart = $false; FailHealth = $false; BusyListener = $false;
-        BusyNetwork = $false; CertificatePresent = $true; HealthPort = $null }
+        BusyNetwork = $false; CertificatePresent = $true; HealthPort = $null; ExcludedRanges = @() }
     foreach ($path in @($state.Code,$state.Data,$state.Bundle)) { [void][IO.Directory]::CreateDirectory($path) }
     [IO.File]::WriteAllText($state.Key, 'synthetic public trust fixture')
     [IO.File]::WriteAllText((Join-Path $state.Code 'SentinelAI.Core.exe'), 'verified-core-fixture')
@@ -106,6 +106,7 @@ function New-Fixture {
             if ($script:TestState.BusyNetwork) { throw 'The local-network port is occupied.' }
         }
         function script:Test-CoreServiceCertificate { param($Sha256); $script:TestState.CertificatePresent -and $Sha256 -ceq ('D' * 64) }
+        function script:Get-CoreServiceExcludedPortRanges { $script:TestState.ExcludedRanges }
     } $state
     # Receipt/configuration helper internals execute in their nested Pilot module.
     $pilotModule = $module.NestedModules | Where-Object Name -eq 'PilotInstaller'
@@ -280,8 +281,8 @@ try {
     Assert-Test (Test-CoreServiceListener -Origin ([Uri]'http://[::1]:5017') -Service $service) 'Exact IPv6 service-owned loopback listener was rejected.'
     $fixture.State.Listeners += [pscustomobject]@{ LocalAddress = '127.0.0.1'; OwningProcess = 1818 }
     Assert-Test (-not (Test-CoreServiceListener -Origin ([Uri]'http://localhost:5017') -Service $service)) 'Mixed owned/foreign localhost listeners passed ownership.'
-    # The central role: the local-network port must be free before Core starts, and health requires that
-    # listener whenever Core's certificate exists. A local-only installation never probes or requires it.
+    # The central role: the local-network port must be free before a new central service is registered, and health
+    # requires that listener whenever Core's certificate exists. A local-only installation never probes or requires it.
     $fixture = New-Fixture
     Invoke-Action $fixture | Out-Null
     Assert-Test (-not ($fixture.State.Events | Where-Object { $_ -like 'probe-network-*' }) -and $fixture.State.HealthPort -eq 0) 'A local-only Core probed or required the local-network listener.'
@@ -295,6 +296,13 @@ try {
     $fixture = New-Fixture -LocalNetwork; $fixture.State.BusyNetwork = $true
     Assert-Rejected { Invoke-Action $fixture } 'Core installation accepted an occupied local-network port.'
     Assert-Test (-not $fixture.State.Events.Contains('register') -and $null -eq $fixture.State.Service) 'An occupied local-network port changed SCM.'
+    # An existing central service restarts even when another program took the port: Core then serves loopback only.
+    $fixture = New-Fixture -LocalNetwork
+    Invoke-Action $fixture | Out-Null
+    $fixture.State.Events.Clear(); $fixture.State.BusyNetwork = $true
+    Invoke-Action $fixture 'Restart' | Out-Null
+    Assert-Test ($fixture.State.Service.State -eq 'Running' -and $fixture.State.HealthPort -eq 5443 -and
+        -not $fixture.State.Events.Contains('probe-network-5443')) 'A taken local-network port stopped an existing Core service.'
     foreach ($network in @(@{ LocalNetworkPort = '5444'; LocalNetworkCertificateSha256 = 'D' * 64 }, @{ LocalNetworkPort = '5443'; LocalNetworkCertificateSha256 = 'd' * 64 },
         @{ LocalNetworkPort = '5443' }, @{ LocalNetworkCertificateSha256 = 'D' * 64 }, @{ LocalNetworkPort = '5443'; LocalNetworkCertificateSha256 = 'D' * 64; LocalNetworkAddress = '0.0.0.0' })) {
         $fixture = New-Fixture
@@ -314,6 +322,22 @@ try {
         $fixture.State.Listeners = @($case.Listeners | ForEach-Object { [pscustomobject]$_ })
         Assert-Test ((Test-CoreServiceLocalNetworkListener -Port 5443 -Service $service) -eq $case.Expected) 'Local-network listener ownership was misjudged.'
     }
+    # Health waives the listener only while another program holds the port or Windows reserved it.
+    foreach ($case in @(@{ Listeners = @(); Ranges = @(); Expected = $false }, @{ Listeners = @(@{ LocalAddress = '0.0.0.0'; OwningProcess = 1717 }); Ranges = @(); Expected = $false },
+        @{ Listeners = @(@{ LocalAddress = '0.0.0.0'; OwningProcess = 1818 }); Ranges = @(); Expected = $true },
+        @{ Listeners = @(@{ LocalAddress = '0.0.0.0'; OwningProcess = 1717 }, @{ LocalAddress = '::'; OwningProcess = 1818 }); Ranges = @(); Expected = $true },
+        @{ Listeners = @(); Ranges = @(@{ Start = 5400; End = 5499 }); Expected = $true }, @{ Listeners = @(); Ranges = @(@{ Start = 5443; End = 5443 }); Expected = $true },
+        @{ Listeners = @(); Ranges = @(@{ Start = 5444; End = 5543 }, @{ Start = 5300; End = 5442 }); Expected = $false })) {
+        $fixture.State.Listeners = @($case.Listeners | ForEach-Object { [pscustomobject]$_ })
+        $fixture.State.ExcludedRanges = @($case.Ranges | ForEach-Object { [pscustomobject]$_ })
+        Assert-Test ((& $fixture.Module { param($service) Test-CoreServiceLocalNetworkPortUnusable -Port 5443 -Service $service } $service) -eq $case.Expected) 'An unusable local-network port was misjudged.'
+    }
+    $fixture.State.ExcludedRanges = @()
+    # netsh output in any display language: only the data lines carry two port numbers.
+    $ranges = @(ConvertFrom-CoreServiceExcludedPortRanges -Lines @('', 'Protocol tcp Port Exclusion Ranges', '', 'Start Port    End Port', '----------    --------',
+        '      5357        5357', '     50000       50059     *', '', '* - Administered port exclusions.', 'Zakresy wykluczeń portów protokołu tcp 1 2 3'))
+    Assert-Test ($ranges.Count -eq 2 -and $ranges[0].Start -eq 5357 -and $ranges[0].End -eq 5357 -and $ranges[1].Start -eq 50000 -and $ranges[1].End -eq 50059) 'Windows excluded port ranges were misread.'
+    Assert-Test (@(ConvertFrom-CoreServiceExcludedPortRanges -Lines @((New-Object Management.Automation.ErrorRecord((New-Object Exception('5443 5443')), 'native', 'NotSpecified', $null)))).Count -eq 0) 'A netsh error line was read as an excluded range.'
 
     # The owned firewall rule: inbound TCP 5443 for Core's program, LocalSubnet, Domain and Private only.
     $module = $fixture.Module

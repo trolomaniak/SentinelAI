@@ -155,7 +155,8 @@ internal static class LocalNetworkSettingsTests
             "Settings did not show Core's addresses, port and exact fingerprint.");
         client.Next = new(LocalNetworkRequestOutcome.Success, new LocalNetworkStatus(true, false, 5443, Pin, "SYNTHETIC-CORE", null, ["10.0.0.5"]));
         await model.RefreshAsync();
-        Ensure(model.AccessText.Contains("not listening", StringComparison.Ordinal) && model.FingerprintText == Pin && model.ComputerNameText == "SYNTHETIC-CORE",
+        Ensure(model.AccessText.Contains("not listening", StringComparison.Ordinal) && model.AccessText.Contains("certificate", StringComparison.Ordinal) &&
+               model.AccessText.Contains("another program uses its port", StringComparison.Ordinal) && model.FingerprintText == Pin && model.ComputerNameText == "SYNTHETIC-CORE",
             "Settings hid that Core's local-network listener is unavailable.");
         client.Next = new(LocalNetworkRequestOutcome.Success, new LocalNetworkStatus(false, false, null, null, "SYNTHETIC-CORE", null, []));
         await model.RefreshAsync();

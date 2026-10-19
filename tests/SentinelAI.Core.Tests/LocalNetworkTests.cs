@@ -173,6 +173,31 @@ internal static class LocalNetworkTests
             "A computer without a DNS domain received an invented FQDN.");
         foreach (var name in new[] { "", "bad name", "-leading", "trailing-", "a..b", new string('a', 64) })
             Reject(() => LocalNetworkCertificateProvisioning.CreateRequest(key, name, null), "Core's certificate accepted an invalid DNS name.");
+
+        // Computer names: Windows accepts national letters and underscores; the names are informational and
+        // never block the certificate, so they become IDN A-labels or the fixed fallback name.
+        foreach (var (host, domain, expectedHost, expectedFqdn) in new (string, string, string, string?)[]
+        {
+            ("SYNTHETIC-CORE", "corp.example.", "SYNTHETIC-CORE", "SYNTHETIC-CORE.corp.example"),
+            ("synthetic_core", "", "synthetic_core", null),
+            ("Ksi\u0119gowo\u015b\u0107", "", "xn--ksigowo-c5a1nq1a", null),
+            ("B\u00fcro-PC", "corp.example", "xn--bro-pc-3ya", "xn--bro-pc-3ya.corp.example"),
+            ("B?ro-PC", "corp.example", LocalNetworkCertificateProvisioning.FallbackHostName, null),
+            ("B\ufffdro-PC", "", LocalNetworkCertificateProvisioning.FallbackHostName, null),
+            ("", "corp.example", LocalNetworkCertificateProvisioning.FallbackHostName, null),
+            ("synthetic-core", "bad domain", "synthetic-core", null)
+        })
+        {
+            var computer = LocalNetworkCertificateProvisioning.ComputerNames(host, domain);
+            Check(string.Equals(computer.HostName, expectedHost, StringComparison.OrdinalIgnoreCase) &&
+                  string.Equals(computer.FullyQualifiedName, expectedFqdn, StringComparison.OrdinalIgnoreCase),
+                $"Core's certificate names for a computer named '{host}' were {computer.HostName} and {computer.FullyQualifiedName}.");
+            using var named = LocalNetworkCertificateProvisioning.CreateRequest(key, computer.HostName, computer.FullyQualifiedName)
+                .CreateSelfSigned(notBefore, notAfter);
+            Check(named.Extensions.OfType<X509SubjectAlternativeNameExtension>().Single().EnumerateDnsNames().First()
+                    .Equals(computer.HostName, StringComparison.OrdinalIgnoreCase),
+                "Core's certificate does not carry the computer's DNS name.");
+        }
         Check(LocalNetworkCertificate.Sha256(certificate) == Convert.ToHexString(SHA256.HashData(certificate.RawData)) &&
               LocalNetworkCertificate.IsSha256(LocalNetworkCertificate.Sha256(certificate)),
             "The exported pin is not the uppercase SHA-256 of the raw certificate.");
@@ -216,6 +241,9 @@ internal static class LocalNetworkTests
         var loopback = new Uri(app.Urls.Single(url => url.StartsWith("http://", StringComparison.Ordinal)));
         Check(loopback.IsLoopback && app.Urls.Count == 2 && app.Urls.Any(url => url.StartsWith("https://", StringComparison.Ordinal) &&
               url.EndsWith(":" + port, StringComparison.Ordinal)), "Core did not bind loopback HTTP and the local-network HTTPS listener.");
+        // Core holds the IPv4 wildcard port itself, so a program started later cannot take the Agents' traffic.
+        Check(app.Urls.Any(url => url == $"https://0.0.0.0:{port}") && !LocalNetworkHosting.PortAvailable(port),
+            "Another program could take the local-network IPv4 port while Core listens.");
         using var local = new HttpClient(new HttpClientHandler { UseProxy = false }) { BaseAddress = loopback, Timeout = TimeSpan.FromSeconds(10) };
         using var network = PinnedClient(new Uri($"https://127.0.0.1:{port}/"), pin);
         var token = await LoginAsync(local, username, password);
@@ -350,31 +378,26 @@ internal static class LocalNetworkTests
     // Another program holding the local-network port after a restart leaves the loopback origin and local monitoring running.
     private static async Task VerifyOccupiedPortAsync(string directory, X509Certificate2 certificate, string username, string password)
     {
-        foreach (var address in Socket.OSSupportsIPv6 ? new[] { IPAddress.Any, IPAddress.IPv6Any } : [IPAddress.Any])
+        var holder = new TcpListener(IPAddress.Any, 0);
+        holder.Start();
+        try
         {
-            var holder = new TcpListener(address, 0);
-            if (address.Equals(IPAddress.IPv6Any)) holder.Server.DualMode = true;
-            holder.Start();
-            try
-            {
-                var port = ((IPEndPoint)holder.LocalEndpoint).Port;
-                Check(!LocalNetworkHosting.PortAvailable(port), "The local-network port probe missed a port another program holds.");
-                await using var app = BuildCore(Path.Combine(directory, address.AddressFamily.ToString()), port,
-                    LocalNetworkCertificate.Sha256(certificate), new FixedSource(certificate));
-                await app.StartAsync();
-                Check(app.Urls.Count == 1, "Core opened the local-network listener on a port another program holds.");
-                using var local = new HttpClient(new HttpClientHandler { UseProxy = false }) { BaseAddress = new Uri(app.Urls.Single()) };
-                var token = await LoginAsync(local, username, password);
-                using var view = await GetAsync(local, "/api/admin/local-network", token);
-                using var json = JsonDocument.Parse(await view.Content.ReadAsStringAsync());
-                Check(json.RootElement.GetProperty("enabled").GetBoolean() && !json.RootElement.GetProperty("listening").GetBoolean(),
-                    "Desktop could not see that the local-network port is unavailable.");
-                await app.StopAsync();
-            }
-            finally
-            {
-                holder.Stop();
-            }
+            var port = ((IPEndPoint)holder.LocalEndpoint).Port;
+            Check(!LocalNetworkHosting.PortAvailable(port), "The local-network port probe missed a port another program holds.");
+            await using var app = BuildCore(directory, port, LocalNetworkCertificate.Sha256(certificate), new FixedSource(certificate));
+            await app.StartAsync();
+            Check(app.Urls.Count == 1, "Core opened the local-network listener on a port another program holds.");
+            using var local = new HttpClient(new HttpClientHandler { UseProxy = false }) { BaseAddress = new Uri(app.Urls.Single()) };
+            var token = await LoginAsync(local, username, password);
+            using var view = await GetAsync(local, "/api/admin/local-network", token);
+            using var json = JsonDocument.Parse(await view.Content.ReadAsStringAsync());
+            Check(json.RootElement.GetProperty("enabled").GetBoolean() && !json.RootElement.GetProperty("listening").GetBoolean(),
+                "Desktop could not see that the local-network port is unavailable.");
+            await app.StopAsync();
+        }
+        finally
+        {
+            holder.Stop();
         }
 
         var free = FreePort();
