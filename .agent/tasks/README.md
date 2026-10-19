@@ -7,6 +7,17 @@ Development sequence:
 `016 → 017 → 018 → 019 → 020 → 021 → 022 → 023 → 024 → 025 → 026 → 027 → 028 → 029 → 030 → 031 → 032 → 033 → 034 → 035 → 036 → 037 → 038 → 039 → 040 → 041 → 042 → 043 → 044 → 045`
 
 Each task is intentionally scoped to normally produce one branch and one Pull Request.
+
+## Pilot MVP track
+
+On 2026-10-19 the owner decided to build a free pilot MVP for first companies before TASK-030 (see `docs/MVP.md`):
+
+`MVP-1 → MVP-2 → MVP-3 → MVP-4`, then the sequence continues from TASK-030.
+
+- `MVP-1` — Central Core on the Local Network
+- `MVP-2` — Agent Installer, Enrollment Codes and Agent Uninstall
+- `MVP-3` — Pilot License Key
+- `MVP-4` — Pilot Documentation and Release Checklist
 Do not start the next task before the current Definition of Done is satisfied unless parallel work is explicitly approved.
 
 - `TASK-016` — Native Desktop Foundation

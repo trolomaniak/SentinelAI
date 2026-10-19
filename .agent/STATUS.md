@@ -531,7 +531,7 @@ Security and privacy requirements: no passwords, recovery keys, browser history,
 
 ## Next task
 
-TASK-029 is merged (PR #36 at `685f0c7`) and the Setup ownership-scan race fix is merged (PR #37 at `4980dfe`). The bounded Updater preparation and CI stall diagnostics are on `claude/pensive-newton-i2nk7s` for review; their Windows probe results decide the next stall fix. TASK-030 (Vulnerability and Patch Management) is next in the sequence but is not started; it can consume the stored installed-application list and Windows Update results. Owner decisions pending: Security channel read access for the installed LocalService Agent (from TASK-027; no telemetry source needed a grant on the Windows Server runner, and client editions remain to be measured), an installed-endpoint switch for collection, SCM recovery actions with a per-service SID on the Agent data directory, and identity beyond SIDs. The original TASK-015 console Agent uninstall/reinstall scenario and the earlier draft release transfer remain separate outstanding work.
+The owner decided on 2026-10-19 to build the pilot MVP before TASK-030: MVP-1 (central Core on the local network), MVP-2 (Agent installer, enrollment codes and uninstall), MVP-3 (pilot license key) and MVP-4 (pilot documentation and release), in that order. See `docs/MVP.md`, `.agent/tasks/MVP-*.md` and the 2026-10-19 entry in `.agent/DECISIONS.md`. MVP-1 is next and is not started. The Setup stall follow-up is in PR #38 on `claude/pensive-newton-i2nk7s`, which also adds these task definitions. TASK-030 (Vulnerability and Patch Management) follows the MVP track and is not started.
 
 ## Last verified commit
 

@@ -208,3 +208,16 @@
 - Do not add a deadline to the in-process restore or repair transaction. A call blocked inside Windows (file flush, create or close, a filter driver, CNG) cannot be interrupted in-process, and abandoning the transaction thread would release the operation lease while a late journal write could still start rollback. If evidence shows such a block, move the deployment extraction into a separate, killable Updater process instead.
 - Diagnose intermittent CI stalls with fixed-category probes taken while the process is stuck (two samples of process, staging, Defender and disk counters), not with memory dumps: the Setup host and worker hold the synthetic administrator password and the one-use enrollment token. Probe output is numbers and allowlisted words only.
 - Do not raise the 300 s `setup-windows` install limit or the 900 s lifecycle limit yet. The first probes, on passing runs, show Setup's work I/O-bound on the runner's system disk (the install finished at about 250 s of 300 s), which corrects the earlier reading of these failures as stalls. Measure the install again without write-through first.
+
+## 2026-10-19 — Pilot MVP before TASK-030
+
+Owner decisions for a free pilot with first companies (details in `docs/MVP.md` and `.agent/tasks/MVP-*.md`):
+
+- Build the MVP track MVP-1 to MVP-4 before TASK-030. Vulnerability and patch management waits for pilot feedback.
+- Deployment model: one central Core per company and Agents on the other computers in the local network. This defines the product; a single-computer installation is not the pilot target.
+- Windows 10 22H2 and Windows 11 x64 for both roles; Linux later.
+- TLS between Agent and Core: TLS 1.3 by default, TLS 1.2 only when Windows lacks TLS 1.3, and only ECDHE with AES-GCM suites, enforced by Core on the local-network listener.
+- Agent trusts the central Core's own certificate only by its exact SHA-256 fingerprint, delivered with the enrollment code. No certificate authority is installed on company computers, because its key would let the Core computer impersonate any HTTPS site to them.
+- Pilot licensing is a free, signed, offline pilot key for a chosen period, with no endpoint limit and no license server. After expiry monitoring continues, Desktop asks the company to get in touch and offers uninstallation. The local security baseline is never disabled.
+- No code signing for the pilot because of its cost. SmartScreen warnings are documented, and installers are offered as downloads with SHA-256 checksums rather than e-mail attachments.
+- Customer documentation: four documents, for the business and for IT, in Polish and English.
