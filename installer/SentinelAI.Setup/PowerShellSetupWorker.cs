@@ -49,6 +49,9 @@ internal sealed class PowerShellSetupWorker(string workDirectory, SetupMetadata 
             await process.StandardInput.BaseStream.FlushAsync(deadline.Token).ConfigureAwait(false);
             process.StandardInput.Close(); CryptographicOperations.ZeroMemory(input);
             await process.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
+            // An exited worker's output is already buffered; a descendant still holding the inherited pipes
+            // (an Updater the worker could not release) must fail this step, not hold Setup to its deadline.
+            await Task.WhenAll(output, errors).WaitAsync(TimeSpan.FromSeconds(5), deadline.Token).ConfigureAwait(false);
             var state = await output.ConfigureAwait(false); var errorOutput = await errors.ConfigureAwait(false);
             if (errorOutput || process.ExitCode != 0) throw new InvalidDataException("Installation step failed.");
             return state;

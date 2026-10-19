@@ -199,3 +199,25 @@
   - The .NET access-control read that `Get-Acl` wraps.
   - The native link count, which opens the entry with `FILE_READ_ATTRIBUTES` only. Windows applies no sharing check to that access, so a file a service holds with `FileShare.None` is still inspected. The open uses `FILE_FLAG_OPEN_REPARSE_POINT`, so it never opens a link target.
 - Root-cause fix in the scan rather than retrying the post-commit `lifecycle-cleanup` call: the same race also reached `lifecycle-context`, `lifecycle-stop` and `lifecycle-health`. A retried cleanup would have left those rollbacks in place.
+
+## 2026-10-18 — Bounded Updater preparation and CI stall probes
+
+- Bound the out-of-process Updater `prepare` twice: the Updater stops itself after 5 minutes (exit code 2, partial output and private copy removed), and its PowerShell caller kills it after 330 s and never waits unbounded for end of output; the Setup host likewise waits at most 5 s for end of output once its worker has exited. A stall must fail the step closed, before anything installed changes, instead of hanging Setup until the worker's 10-minute kill. Verification, ownership and output checks are unchanged.
+- Size the limit for slow healthy hardware, not for the fastest disk. A first 90 s limit would have failed a 5,400 rpm disk on every attempt, and the CI probes measured 60–75 s per Core preparation inside Setup on the runner's system disk. On CI the 300 s install wait still ends a stalled install first; the probes and the descendant cleanup cover that case.
+- Extract package files without write-through and keep the existing flush to disk after each file. Write-through forced every block (about 6,300 writes for Core, each also updating NTFS metadata) to stable storage, but a partially written file is discarded on failure or recovery anyway, so only the per-file flush gives durability. Files are still on stable storage before the journal or receipt records them. Receipt and journal files keep write-through. With 14 ms per forced write, Core preparation drops from more than 90 s to 7 s.
+- Do not add a deadline to the in-process restore or repair transaction. A call blocked inside Windows (file flush, create or close, a filter driver, CNG) cannot be interrupted in-process, and abandoning the transaction thread would release the operation lease while a late journal write could still start rollback. If evidence shows such a block, move the deployment extraction into a separate, killable Updater process instead.
+- Diagnose intermittent CI stalls with fixed-category probes taken while the process is stuck (two samples of process, staging, Defender and disk counters), not with memory dumps: the Setup host and worker hold the synthetic administrator password and the one-use enrollment token. Probe output is numbers and allowlisted words only.
+- Do not raise the 300 s `setup-windows` install limit or the 900 s lifecycle limit yet. The first probes, on passing runs, show Setup's work I/O-bound on the runner's system disk (the install finished at about 250 s of 300 s), which corrects the earlier reading of these failures as stalls. Measure the install again without write-through first.
+
+## 2026-10-19 — Pilot MVP before TASK-030
+
+Owner decisions for a free pilot with first companies (details in `docs/MVP.md` and `.agent/tasks/MVP-*.md`):
+
+- Build the MVP track MVP-1 to MVP-4 before TASK-030. Vulnerability and patch management waits for pilot feedback.
+- Deployment model: one central Core per company and Agents on the other computers in the local network. This defines the product; a single-computer installation is not the pilot target.
+- Windows 10 22H2 and Windows 11 x64 for both roles; Linux later.
+- TLS between Agent and Core: TLS 1.3 by default, TLS 1.2 only when Windows lacks TLS 1.3, and only ECDHE with AES-GCM suites, enforced by Core on the local-network listener.
+- Agent trusts the central Core's own certificate only by its exact SHA-256 fingerprint, delivered with the enrollment code. No certificate authority is installed on company computers, because its key would let the Core computer impersonate any HTTPS site to them.
+- Pilot licensing is a free, signed, offline pilot key for a chosen period, with no endpoint limit and no license server. After expiry monitoring continues, Desktop asks the company to get in touch and offers uninstallation. The local security baseline is never disabled.
+- No code signing for the pilot because of its cost. SmartScreen warnings are documented, and installers are offered as downloads with SHA-256 checksums rather than e-mail attachments.
+- Customer documentation: four documents, for the business and for IT, in Polish and English.

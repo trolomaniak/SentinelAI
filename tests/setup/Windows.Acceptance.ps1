@@ -122,11 +122,14 @@ $activeProcess = $null; $activeRoot = $null; $client = $null; $accessToken = $nu
 $pendingOuter = $null; $pendingChild = $null
 $installationStarted = $false
 $installationCompleted = $false
+$acceptancePassed = $false
 $manualShortcutOpened = $false
 $poisonedCaller = Join-Path ([IO.Path]::GetTempPath()) ('sentinelai-setup-untrusted-' + [Guid]::NewGuid().ToString('N'))
 $poisonedExtraction = Join-Path $poisonedCaller 'runtime-cache'
 $poisonedTemp = Join-Path $poisonedCaller 'temp'
 
+# CI-only, fixed-category probes of Setup steps that stop making visible progress.
+. (Join-Path $PSScriptRoot 'HangProbe.ps1')
 function Assert-SetupAcceptance([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
     $script:assertionCount++
@@ -281,7 +284,49 @@ function Assert-SetupChildArguments {
         Assert-SetupAcceptance (-not $record.CommandLine.Contains('SENTINELAI_BOOTSTRAP_')) 'A running Setup child command contains bootstrap credential configuration.'
     }
 }
-function Get-SetupService([string]$Name) { return Get-CimInstance -ClassName Win32_Service -Filter ("Name='" + $Name + "'") }
+function Get-SetupService([string]$Name) { return Get-CimInstance -ClassName Win32_Service -Filter ("Name='" + $Name + "'") -OperationTimeoutSec 15 }
+function Stop-SetupDescendantProcesses([object[]]$Roots) {
+    # After a failure, the Setup worker and its Updater outlive the killed host and race the
+    # cleanup. Stop every descendant created after its parent (no reused PIDs), deepest first,
+    # and report counts only: no names beyond fixed categories, no command lines or paths.
+    try {
+        $records = @(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 15)
+        $byParent = @{}
+        foreach ($record in $records) {
+            $key = [int]$record.ParentProcessId
+            if (-not $byParent.ContainsKey($key)) { $byParent[$key] = New-Object 'System.Collections.Generic.List[object]' }
+            $byParent[$key].Add($record)
+        }
+        $queue = New-Object 'System.Collections.Generic.Queue[object]'
+        foreach ($root in @($Roots | Where-Object { $null -ne $_ })) {
+            $self = @($records | Where-Object { [int]$_.ProcessId -eq $root.Id })
+            $created = if ($self.Count -eq 1) { $self[0].CreationDate } else { try { $root.StartTime } catch { $null } }
+            if ($null -ne $created) { $queue.Enqueue([pscustomobject]@{ Id = $root.Id; Created = $created; Depth = 0 }) }
+        }
+        $found = New-Object 'System.Collections.Generic.List[object]'
+        $seen = New-Object 'System.Collections.Generic.HashSet[int]'
+        while ($queue.Count -gt 0) {
+            $parent = $queue.Dequeue()
+            if (-not $byParent.ContainsKey($parent.Id)) { continue }
+            foreach ($child in $byParent[$parent.Id]) {
+                if ($null -eq $child.CreationDate -or $child.CreationDate -lt $parent.Created -or -not $seen.Add([int]$child.ProcessId)) { continue }
+                $entry = [pscustomobject]@{ Id = [int]$child.ProcessId; Name = [string]$child.Name; Created = $child.CreationDate; Depth = $parent.Depth + 1 }
+                $found.Add($entry); $queue.Enqueue($entry)
+            }
+        }
+        $counts = @{ powershell = 0; conhost = 0; updater = 0; other = 0 }
+        foreach ($entry in $found) {
+            switch -Exact ($entry.Name.ToLowerInvariant()) {
+                'powershell.exe' { $counts.powershell++ } 'conhost.exe' { $counts.conhost++ }
+                'sentinelai.updater.exe' { $counts.updater++ } default { $counts.other++ }
+            }
+        }
+        foreach ($entry in @($found | Sort-Object -Property Depth -Descending)) {
+            try { Stop-Process -Id $entry.Id -Force -ErrorAction Stop } catch { }
+        }
+        Write-Host ('SetupOrphans: Powershell={0}; Conhost={1}; Updater={2}; Other={3}' -f $counts.powershell, $counts.conhost, $counts.updater, $counts.other)
+    } catch { Write-Host 'SetupOrphans: ProbeFailed=True' }
+}
 function Get-SetupFailureSummary {
     # Only exact known public UI literals and fixed presence flags may enter CI
     # diagnostics. Never include native error text, exceptions, stdin or secrets.
@@ -552,7 +597,7 @@ try {
             if (-not [string]::IsNullOrWhiteSpace($errorText.Current.Name)) { throw (Get-SetupFailureSummary) }
         }
         $finished = Test-SetupControl 'SetupFinishedText' $false
-        if (-not $finished) { Start-Sleep -Milliseconds 100 }
+        if (-not $finished) { Invoke-SetupHangWatch; Start-Sleep -Milliseconds 100 }
     }
     # A hang reports the visible stage and bounded service/enrollment state instead of a bare timeout.
     if (-not $finished) { throw (Get-SetupTimeoutSummary) }
@@ -792,9 +837,11 @@ try {
         $InstallationContext.Value = [pscustomobject]@{ Username = $username; Password = $password; EndpointId = $endpointId }
     }
     $installationCompleted = $true
+    $acceptancePassed = $true
     [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount; Installation = $programRoot; DesktopShortcutFallback = $manualShortcutOpened;
         NativeSetup = 'Single native EXE, private CLR, unused caller caches, protected layout, administrator, services, enrollment, Desktop sign-in and nonmutating maintenance detection' }
 } finally {
+    if (-not $acceptancePassed) { Stop-SetupDescendantProcesses @($setupOuter, $setup, $rerunOuter, $rerun) }
     foreach ($process in @($desktop, $rerun, $setup, $rerunOuter, $setupOuter)) {
         if ($null -ne $process) {
             try { if (-not $process.HasExited) { $process.Kill(); [void]$process.WaitForExit(10000) } } finally { $process.Dispose() }
@@ -804,19 +851,25 @@ try {
     # exact SCM identity checks reject unknown registrations; install itself was
     # exclusively performed by the actual Setup executable above.
     try {
-        if ($installationStarted -and -not ($PreserveInstallation -and $installationCompleted)) {
-            $installer = Join-Path $repositoryRoot 'installer/pilot'
-            Import-Module (Join-Path $installer 'PilotInstaller.psm1') -Force -DisableNameChecking
-            try {
-                if ($null -ne (Get-SetupService 'SentinelAIAgent')) {
-                    Invoke-PilotInstall -Component UninstallAgent -CodeDirectory $agentCode -DataDirectory $agentData -TimeoutSeconds 60 | Out-Null
+        try {
+            if ($installationStarted -and -not ($PreserveInstallation -and $installationCompleted)) {
+                $installer = Join-Path $repositoryRoot 'installer/pilot'
+                Import-Module (Join-Path $installer 'PilotInstaller.psm1') -Force -DisableNameChecking
+                try {
+                    if ($null -ne (Get-SetupService 'SentinelAIAgent')) {
+                        Invoke-PilotInstall -Component UninstallAgent -CodeDirectory $agentCode -DataDirectory $agentData -TimeoutSeconds 60 | Out-Null
+                    }
+                } finally {
+                    if ($null -ne (Get-SetupService 'SentinelAICore')) {
+                        & (Join-Path $installer 'Manage-SentinelAICoreService.ps1') -Action Uninstall -CodeDirectory $coreCode -DataDirectory $coreData -TimeoutSeconds 60 | Out-Null
+                    }
                 }
-            } finally {
-                if ($null -ne (Get-SetupService 'SentinelAICore')) {
-                    & (Join-Path $installer 'Manage-SentinelAICoreService.ps1') -Action Uninstall -CodeDirectory $coreCode -DataDirectory $coreData -TimeoutSeconds 60 | Out-Null
-                }
+                Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAIAgent') -and $null -eq (Get-SetupService 'SentinelAICore')) 'An owned acceptance service remained registered after cleanup.'
             }
-            Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAIAgent') -and $null -eq (Get-SetupService 'SentinelAICore')) 'An owned acceptance service remained registered after cleanup.'
+        } catch {
+            # A cleanup failure after a failed acceptance must never replace the failure being reported.
+            if ($acceptancePassed) { throw }
+            Write-Host 'SetupCleanup: Failed=True; the original acceptance failure is reported instead.'
         }
     } finally {
         if ($null -ne $client) { $client.Dispose() }

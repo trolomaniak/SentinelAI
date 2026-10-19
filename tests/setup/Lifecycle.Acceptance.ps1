@@ -27,6 +27,7 @@ $context = $null; $coreProcess = $null; $agentProcess = $null; $client = $null; 
 $nativeSqlite = Join-Path ([Environment]::GetFolderPath('Windows')) 'System32\winsqlite3.dll'
 $databasePath = Join-Path $coreData 'sentinelai.db'
 $lifecycleHosts = New-Object 'System.Collections.Generic.List[object]'
+$lifecyclePassed = $false
 $baseline = $null
 
 if ($null -eq ('SentinelAI.Setup.Lifecycle.Sqlite' -as [type])) {
@@ -306,6 +307,7 @@ function Invoke-LifecycleSetup([string]$Executable, [string]$Action, [bool]$Expe
     ([Windows.Automation.InvokePattern](Find-SetupControl 'SetupLifecycleButton').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)).Invoke()
     Wait-SetupAcceptance { -not (Test-SetupControl 'SetupLifecycleButton') } 'Lifecycle did not begin its explicit operation.'
     $script:observedUnhealthyRunning = $false
+    Reset-LifecycleHangWatch
     $observation = [pscustomobject]@{ Phase = 'poll-child' }
     try { Wait-SetupAcceptance {
         $observation.Phase = 'poll-child'
@@ -337,10 +339,15 @@ function Invoke-LifecycleSetup([string]$Executable, [string]$Action, [bool]$Expe
             return $true
         }
         $observation.Phase = 'poll-wait'
+        Invoke-LifecycleHangWatch $launch.Host $operationElapsed.Elapsed.TotalSeconds
         return $false
     } 'Native lifecycle operation did not complete within its deadline.' $script:TimeoutSeconds
     } catch {
-        $diagnostics = Get-LifecycleFailureDiagnostics $observation $operationElapsed.Elapsed.TotalSeconds ([string]$_.Exception.Message)
+        $failure = $_
+        if ($observation.Phase -ceq 'poll-wait' -and -not $launch.Host.HasExited) {
+            try { [void](Invoke-SetupProcessProbe 'Host' $launch.Host.Id 'deadline') } catch { Write-Host 'SetupHangProbe: Role=Host; Probe=Unavailable' }
+        }
+        $diagnostics = Get-LifecycleFailureDiagnostics $observation $operationElapsed.Elapsed.TotalSeconds ([string]$failure.Exception.Message)
         throw ('Native lifecycle ' + $Action + ' failed. ' + $diagnostics + ' ' + (Get-SetupFailureSummary))
     }
     if ($ExpectFailure) { Assert-SetupAcceptance $script:observedUnhealthyRunning 'Signed unhealthy candidate never reached actual SCM Running for health verification.' }
@@ -406,8 +413,10 @@ try {
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $dataRoot)) 'Explicit confirmed data removal retained owned application data.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $shortcutRoot) -and
         $null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Explicit removal recreated code, shortcuts or services.'
+    $lifecyclePassed = $true
     [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount; NativeLifecycle = 'Fresh 1.0.0, upgrade 1.1.0, actual signed unhealthy 1.2.0 rollback, damaged-file repair, default retained-data uninstall, identity-preserving restore and explicit confirmed removal' }
 } finally {
+    if (-not $lifecyclePassed) { Stop-SetupDescendantProcesses @($lifecycleHosts | ForEach-Object { $_.Outer; $_.Host }) }
     foreach ($launch in $lifecycleHosts) {
         foreach ($process in @($launch.Host, $launch.Outer)) {
             try { if (-not $process.HasExited) { $process.Kill(); [void]$process.WaitForExit(10000) } } finally { $process.Dispose() }

@@ -6,9 +6,18 @@ namespace SentinelAI.Updater;
 /// <summary>Operator-controlled local verification, staging and fresh code preparation; never starts services or downloads code.</summary>
 public static class UpdaterCommand
 {
-    public static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error)
+    // A local package prepares in seconds, and in well under a minute on a slow disk; a stalled
+    // installer step fails closed long before Setup's ten-minute worker limit.
+    internal static readonly TimeSpan PrepareDeadline = TimeSpan.FromMinutes(5);
+    internal const int DeadlineExitCode = 2;
+
+    public static Task<int> RunAsync(string[] args, TextWriter output, TextWriter error) =>
+        RunAsync(args, output, error, PrepareDeadline);
+
+    internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, TimeSpan prepareDeadline)
     {
         string? temporary = null;
+        using var deadline = new CancellationTokenSource();
         try
         {
             if (args.Length == 1 && args[0] == "--help")
@@ -19,6 +28,7 @@ public static class UpdaterCommand
             var allowed = new[] { "manifest", "package", "public-key", "key-id", "environment", "channel", "artifact-id", "installed-version" };
             var command = args.FirstOrDefault();
             if (command is not ("verify" or "stage" or "prepare")) throw new ArgumentException();
+            if (command == "prepare") deadline.CancelAfter(prepareDeadline);
             var options = Parse(args, command is "stage" or "prepare" ? [.. allowed, "output"] : allowed);
             var manifest = await ReadBoundedAsync(options["manifest"], 8192);
             var publicKey = System.Text.Encoding.UTF8.GetString(await ReadBoundedAsync(options["public-key"], 16384));
@@ -53,12 +63,13 @@ public static class UpdaterCommand
                 RejectLinks(temporary);
                 destination = Path.Combine(temporary, "verified.zip");
             }
-            await UpdateArtifactVerifier.CopyAndVerifyAsync(options["package"], destination, verified);
+            await UpdateArtifactVerifier.CopyAndVerifyAsync(options["package"], destination, verified, deadline.Token);
             if (preparedDirectory is not null)
             {
-                await PackageExtractor.ExtractAsync(destination, preparedDirectory, expectedExecutable!);
+                await PackageExtractor.ExtractAsync(destination, preparedDirectory, expectedExecutable!, deadline.Token);
                 try
                 {
+                    deadline.Token.ThrowIfCancellationRequested();
                     if (Directory.EnumerateFileSystemEntries(preparedDirectory, "*", SearchOption.AllDirectories)
                         .Any(path => Path.GetFileName(path).Equals(TransactionalUpdater.ReceiptFileName, StringComparison.OrdinalIgnoreCase)))
                         throw new InvalidDataException();
@@ -76,6 +87,11 @@ public static class UpdaterCommand
                 channel = verified.Manifest.Channel, environment = verified.Manifest.Environment
             }));
             return 0;
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            await error.WriteLineAsync("Update preparation did not finish within its time limit.");
+            return DeadlineExitCode;
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or
                                          UpdateValidationException or System.Security.Cryptography.CryptographicException or JsonException)

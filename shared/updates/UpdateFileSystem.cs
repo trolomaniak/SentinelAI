@@ -63,13 +63,13 @@ internal static class UpdateFileSystem
         else Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
-    internal static FileStream CreatePrivateFile(string path)
+    internal static FileStream CreatePrivateFile(string path, bool writeThrough = true)
     {
         RejectReparseAncestors(path);
         var options = new FileStreamOptions
         {
             Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None,
-            Options = FileOptions.Asynchronous | FileOptions.WriteThrough
+            Options = writeThrough ? FileOptions.Asynchronous | FileOptions.WriteThrough : FileOptions.Asynchronous
         };
         if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         return new FileStream(path, options);

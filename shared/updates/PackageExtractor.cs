@@ -103,7 +103,9 @@ public static class PackageExtractor
                 UpdateFileSystem.RejectReparseAncestors(destination);
                 if (directory) { Directory.CreateDirectory(destination); continue; }
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                await using var output = UpdateFileSystem.CreatePrivateFile(destination);
+                // Each file is flushed to disk before the next one; writing every block through as well
+                // multiplied forced writes (and NTFS metadata updates) without adding durability.
+                await using var output = UpdateFileSystem.CreatePrivateFile(destination, writeThrough: false);
                 using var input = entry.Open();
                 long actualEntry = 0;
                 int read;
