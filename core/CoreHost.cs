@@ -339,7 +339,7 @@ public static class CoreHost
                     return Results.BadRequest();
                 }
 
-                var attempt = await enrollments.TryEnrollAsync(request, cancellationToken);
+                var attempt = await enrollments.TryEnrollAsync(request, cancellationToken, LocalNetworkRoutes.IsLocalNetworkRequest(context));
                 return attempt.Outcome switch
                 {
                     EnrollmentOutcome.Enrolled => Results.Ok(attempt.Response),
@@ -787,7 +787,13 @@ public static class CoreHost
                     return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
 
-                return await enrollments.RemoveEndpointAsync(endpointId, cancellationToken) ? Results.NoContent() : Results.NotFound();
+                return await enrollments.RemoveEndpointAsync(endpointId, cancellationToken) switch
+                {
+                    EndpointRemoval.Removed => Results.NoContent(),
+                    // The central computer's own Agent enrolled over loopback and could never enroll again.
+                    EndpointRemoval.CentralComputer => Results.Conflict(),
+                    _ => Results.NotFound()
+                };
             })
             .RequireAuthorization();
 

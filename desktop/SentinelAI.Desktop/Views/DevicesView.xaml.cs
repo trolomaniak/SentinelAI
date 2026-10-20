@@ -9,7 +9,32 @@ namespace SentinelAI.Desktop.Views;
 
 public partial class DevicesView : UserControl
 {
-    public DevicesView() => InitializeComponent();
+    // The endpoint whose removal the open confirmation is for: it never carries over to another device.
+    private Guid? _removalArmedFor;
+
+    public DevicesView()
+    {
+        InitializeComponent();
+        DataContextChanged += (_, e) =>
+        {
+            if (e.OldValue is DevicesViewModel previous) previous.PropertyChanged -= OnModelChanged;
+            if (e.NewValue is DevicesViewModel next) next.PropertyChanged += OnModelChanged;
+            DisarmRemoval();
+        };
+    }
+
+    // The view model notifies from its own continuations; the view changes only on its dispatcher.
+    private void OnModelChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => OnModelChanged(sender, e))); return; }
+        if (_removalArmedFor is { } armed && Model?.Detail?.EndpointId != armed) DisarmRemoval();
+    }
+
+    private void DisarmRemoval()
+    {
+        _removalArmedFor = null;
+        RemoveComputerConfirmation.Visibility = Visibility.Collapsed;
+    }
 
     private DevicesViewModel? Model => DataContext as DevicesViewModel;
     private ComputerEnrollmentViewModel? Enrollment => (Window.GetWindow(this) as MainWindow)?.ComputerEnrollment;
@@ -26,7 +51,13 @@ public partial class DevicesView : UserControl
 
     private void OnCopyCodes(object sender, RoutedEventArgs e)
     {
-        if (Enrollment is { IssuedCodesText.Length: > 0 } enrollment) Clipboard.SetText(enrollment.IssuedCodesText);
+        if (Enrollment is not { IssuedCodesText.Length: > 0 } enrollment) return;
+        // The codes are secrets: keep them out of Windows clipboard history and cloud clipboard sync.
+        var data = new DataObject(DataFormats.UnicodeText, enrollment.IssuedCodesText);
+        foreach (var format in new[] { "CanIncludeInClipboardHistory", "CanUploadToCloudClipboard" })
+            data.SetData(format, new MemoryStream(BitConverter.GetBytes(0)));
+        data.SetData("ExcludeClipboardContentFromMonitorProcessing", new MemoryStream(BitConverter.GetBytes(0)));
+        Clipboard.SetDataObject(data, copy: true);
     }
 
     // One small ".sentinelai-enroll" file per code in a folder the administrator chooses.
@@ -51,14 +82,20 @@ public partial class DevicesView : UserControl
         if (sender is FrameworkElement { Tag: Guid id } && Enrollment is { } enrollment) await enrollment.RevokeAsync(id);
     }
 
-    private void OnRemoveComputer(object sender, RoutedEventArgs e) => RemoveComputerConfirmation.Visibility = Visibility.Visible;
+    private void OnRemoveComputer(object sender, RoutedEventArgs e)
+    {
+        if (Model?.Detail is not { } detail) return;
+        _removalArmedFor = detail.EndpointId;
+        RemoveComputerConfirmation.Visibility = Visibility.Visible;
+    }
 
-    private void OnCancelRemoveComputer(object sender, RoutedEventArgs e) => RemoveComputerConfirmation.Visibility = Visibility.Collapsed;
+    private void OnCancelRemoveComputer(object sender, RoutedEventArgs e) => DisarmRemoval();
 
     private async void OnConfirmRemoveComputer(object sender, RoutedEventArgs e)
     {
-        RemoveComputerConfirmation.Visibility = Visibility.Collapsed;
-        if (Model is not { Detail: { } detail } model || Enrollment is not { } enrollment) return;
+        var armed = _removalArmedFor;
+        DisarmRemoval();
+        if (Model is not { Detail: { } detail } model || detail.EndpointId != armed || Enrollment is not { } enrollment) return;
         if (!await enrollment.RemoveComputerAsync(detail.EndpointId)) return;
         model.CloseDetail();
         PageScroller.ScrollToTop();
@@ -100,7 +137,7 @@ public partial class DevicesView : UserControl
 
     private void OnBack(object sender, RoutedEventArgs e)
     {
-        RemoveComputerConfirmation.Visibility = Visibility.Collapsed;
+        DisarmRemoval();
         Model?.CloseDetail();
         PageScroller.ScrollToTop();
     }

@@ -16,6 +16,7 @@ public sealed record UnusedCodeRow(Guid Id, string ExpiresText);
 public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDisposable
 {
     public const string SecretNotice = "Each code enrolls one computer and is a secret. Give it only to the person installing SentinelAI Agent on that computer.";
+    public const string CentralComputerNotice = "This is the central computer's own Agent, which is part of the SentinelAI installation. It cannot be removed here.";
     public const string AddressAdvice = "Agents keep using the address in their code. Prefer the computer name, or give this computer a fixed IP address.";
     public static readonly IReadOnlyList<int> CountChoices = Enumerable.Range(1, 50).ToArray();
     public static readonly IReadOnlyList<ValidityChoice> ValidityChoices =
@@ -102,6 +103,8 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
                 _errorText = "";
             }
         }
+        // Sign-out, session expiry or disposal canceled the request; its generation is already stale.
+        catch (OperationCanceledException) { }
         finally { End(generation); }
     }
 
@@ -132,6 +135,7 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
                     : "The codes could not be created. Try again.";
             }
         }
+        catch (OperationCanceledException) { return; }
         finally { End(generation); }
         if (IsCurrent(generation)) await LoadUnusedAsync().ConfigureAwait(false);
     }
@@ -150,6 +154,7 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
                 _errorText = outcome is ComputerEnrollmentOutcome.Success or ComputerEnrollmentOutcome.NotFound ? "" : "The code could not be revoked. Try again.";
             }
         }
+        catch (OperationCanceledException) { return; }
         finally { End(generation); }
         if (IsCurrent(generation)) await LoadUnusedAsync().ConfigureAwait(false);
     }
@@ -166,10 +171,13 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
             {
                 if (generation != _generation) return false;
                 var removed = outcome is ComputerEnrollmentOutcome.Success or ComputerEnrollmentOutcome.NotFound;
-                _errorText = removed ? "" : "The computer could not be removed. Try again.";
+                _errorText = removed ? ""
+                    : outcome == ComputerEnrollmentOutcome.Conflict ? CentralComputerNotice
+                    : "The computer could not be removed. Try again.";
                 return removed;
             }
         }
+        catch (OperationCanceledException) { return false; }
         finally { End(generation); }
     }
 
@@ -220,6 +228,7 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
                 _statusText = _unused.Count == 0 ? "No unused codes." : $"{_unused.Count.ToString(CultureInfo.CurrentCulture)} unused codes.";
             }
         }
+        catch (OperationCanceledException) { }
         finally { End(generation); }
     }
 

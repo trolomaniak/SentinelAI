@@ -18,6 +18,9 @@ internal sealed record EnrollmentCode(string Address, int Port, string Certifica
     public const string FileExtension = ".sentinelai-enroll";
     public const int MaximumTextLength = 512;
     public const int MaximumFileBytes = 4096;
+    // DNS allows 253 characters, but the longest code must stay within MaximumTextLength with a line break: a
+    // 180-character address gives 489 characters.
+    public const int MaximumAddressLength = 180;
     private const string Prefix = "SAI1-";
     private const byte Version = 1;
     private const int ChecksumLength = 4;
@@ -93,7 +96,7 @@ internal sealed record EnrollmentCode(string Address, int Port, string Certifica
     }
 
     public static bool IsAddress(string? value) =>
-        value is { Length: > 0 and <= 253 } &&
+        value is { Length: > 0 and <= MaximumAddressLength } &&
         (IPAddress.TryParse(value, out var address) ? address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork &&
                                                      address.ToString() == value
                                                    : IsDnsName(value));

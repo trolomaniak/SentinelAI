@@ -148,6 +148,9 @@ function Invoke-AgentSetup([string[]]$Arguments, [string]$Executable = $script:A
     $process = [Diagnostics.Process]::Start($start)
     try {
         if (-not $process.WaitForExit($script:TimeoutSeconds * 1000)) { $process.Kill(); throw 'Agent Setup did not finish in time.' }
+        # Options and the code file's name only: never the code.
+        $shown = @($Arguments | ForEach-Object { if ($_.StartsWith('/')) { $_ } else { [IO.Path]::GetFileName($_) } }) -join ' '
+        Write-Host ('AgentSetup: ' + [IO.Path]::GetFileName($Executable) + ' ' + $shown + ' -> exit ' + $process.ExitCode)
         return $process.ExitCode
     } finally { $process.Dispose() }
 }

@@ -25,6 +25,8 @@ public sealed record EnrollmentAttempt(EnrollmentOutcome Outcome, EnrollmentResp
 }
 
 // MVP-2 enrollment codes: each carries one token with an identifier so unused codes can be listed and revoked.
+public enum EndpointRemoval { Removed, NotFound, CentralComputer }
+
 public sealed record IssuedEnrollmentCode(Guid Id, string Token, DateTimeOffset ExpiresUtc);
 public sealed record UnusedEnrollmentCode(Guid Id, DateTimeOffset CreatedUtc, DateTimeOffset ExpiresUtc);
 
@@ -73,6 +75,9 @@ public sealed class EnrollmentStore(AdminStore admins)
         await AddColumnAsync(connection, transaction, "EnrollmentTokens", "CreatedUtcTicks", "INTEGER", cancellationToken);
         await AddColumnAsync(connection, transaction, "EnrollmentTokens", "RevokedUtcTicks", "INTEGER", cancellationToken);
         await AddColumnAsync(connection, transaction, "EndpointEnrollments", "RemovedUtcTicks", "INTEGER", cancellationToken);
+        // 1 when the Agent enrolled over the local-network listener, 0 over loopback (the central computer's own Agent);
+        // NULL for enrollments from before MVP-2, which are treated as the central computer's own.
+        await AddColumnAsync(connection, transaction, "EndpointEnrollments", "EnrolledOverLocalNetwork", "INTEGER", cancellationToken);
         await using (var index = connection.CreateCommand())
         {
             index.Transaction = transaction;
@@ -190,17 +195,35 @@ public sealed class EnrollmentStore(AdminStore admins)
     }
 
     // "Remove computer": the endpoint's Agent credential stops authenticating and the endpoint leaves the device,
-    // risk and report views. Its stored history is kept.
-    public async Task<bool> RemoveEndpointAsync(Guid endpointId, CancellationToken cancellationToken = default)
+    // risk and report views. Its stored history is kept. The central computer's own Agent, which enrolled over
+    // loopback, is never removed: nothing could enroll it again.
+    public async Task<EndpointRemoval> RemoveEndpointAsync(Guid endpointId, CancellationToken cancellationToken = default)
     {
-        if (endpointId == Guid.Empty) return false;
+        if (endpointId == Guid.Empty) return EndpointRemoval.NotFound;
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        await using var update = connection.CreateCommand();
-        update.CommandText = "UPDATE EndpointEnrollments SET RemovedUtcTicks = $now WHERE EndpointId = $endpointId AND RemovedUtcTicks IS NULL;";
-        update.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.UtcDateTime.Ticks);
-        update.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
-        return await update.ExecuteNonQueryAsync(cancellationToken) == 1;
+        using var transaction = connection.BeginTransaction(deferred: false);
+        await using (var query = connection.CreateCommand())
+        {
+            query.Transaction = transaction;
+            query.CommandText = "SELECT EnrolledOverLocalNetwork FROM EndpointEnrollments WHERE EndpointId = $endpointId AND RemovedUtcTicks IS NULL;";
+            query.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
+            var channel = await query.ExecuteScalarAsync(cancellationToken);
+            if (channel is null) return EndpointRemoval.NotFound;
+            if (channel is not 1L) return EndpointRemoval.CentralComputer;
+        }
+
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = "UPDATE EndpointEnrollments SET RemovedUtcTicks = $now WHERE EndpointId = $endpointId AND RemovedUtcTicks IS NULL;";
+            update.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.UtcDateTime.Ticks);
+            update.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
+            if (await update.ExecuteNonQueryAsync(cancellationToken) != 1) return EndpointRemoval.NotFound;
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return EndpointRemoval.Removed;
     }
 
     public async Task<CoreIdentity> GetCoreIdentityAsync(CancellationToken cancellationToken = default)
@@ -247,9 +270,11 @@ public sealed class EnrollmentStore(AdminStore admins)
         return new EnrollmentTokenResponse(token, expires, identity.CoreInstallationId, identity.OrganizationId);
     }
 
+    /// <param name="overLocalNetwork">The request arrived on the local-network listener, not on loopback.</param>
     public async Task<EnrollmentAttempt> TryEnrollAsync(
         EnrollmentRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool overLocalNetwork = false)
     {
         if (request.InstallationId == Guid.Empty || !TryDecodeSecret(request.EnrollmentToken, out var tokenBytes))
         {
@@ -309,9 +334,10 @@ public sealed class EnrollmentStore(AdminStore admins)
             enrollmentInsert.Transaction = transaction;
             enrollmentInsert.CommandText = """
                 INSERT INTO EndpointEnrollments
-                    (InstallationId, EndpointId, CoreInstallationId, OrganizationId, CredentialHash)
-                VALUES ($installationId, $endpointId, $coreInstallationId, $organizationId, $credentialHash);
+                    (InstallationId, EndpointId, CoreInstallationId, OrganizationId, CredentialHash, EnrolledOverLocalNetwork)
+                VALUES ($installationId, $endpointId, $coreInstallationId, $organizationId, $credentialHash, $overLocalNetwork);
                 """;
+            enrollmentInsert.Parameters.AddWithValue("$overLocalNetwork", overLocalNetwork ? 1 : 0);
             enrollmentInsert.Parameters.AddWithValue("$installationId", installationId);
             enrollmentInsert.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
             enrollmentInsert.Parameters.AddWithValue("$coreInstallationId", coreInstallationId);

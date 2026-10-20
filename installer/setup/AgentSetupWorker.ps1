@@ -64,7 +64,8 @@ function Install-AgentSetupInstallation {
         $policy = @{ BundleDirectory = $bundle; PublicKeyPath = $root; KeyId = $Request.keyId; Environment = 'development'; Channel = $Request.channel }
         Write-SetupProgress 'validate'
         if ((Get-AgentSetupState $locations).Kind -cne 'Fresh') { throw 'Existing installation.' }
-        foreach ($path in @($locations.CodeRoot, $locations.DataRoot)) { Assert-PilotTrustedPath -Path ([IO.Path]::GetDirectoryName($path)) }
+        # The roots do not exist yet: this checks every existing ancestor with the ancestor rules (ProgramData lets Users create names).
+        foreach ($path in @($locations.CodeRoot, $locations.DataRoot)) { Assert-PilotTrustedPath -Path $path }
         $changing = $true
         Write-SetupProgress 'updater'
         Ensure-PilotProtectedParent -Path $locations.CodeRoot

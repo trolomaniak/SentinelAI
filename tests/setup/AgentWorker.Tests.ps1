@@ -84,7 +84,8 @@ $script:receiptFails = $false; $script:receipt = $null; $script:service = $null
 $script:events = New-Object 'System.Collections.Generic.List[string]'
 $script:fail = ''; $script:fresh = $true; $script:rollbackFails = $false
 function Get-AgentSetupState { param($Locations); return @{ Kind = $(if ($script:fresh) { 'Fresh' } else { 'Installed' }); Version = '' } }
-function Assert-PilotTrustedPath { param($Path,[switch]$Tree,[switch]$AllowServiceWrite) }
+$script:trustedPaths = New-Object 'System.Collections.Generic.List[string]'
+function Assert-PilotTrustedPath { param($Path,[switch]$Tree,[switch]$AllowServiceWrite); $script:trustedPaths.Add($Path) }
 function Ensure-PilotProtectedParent { param($Path); $script:events.Add('code-root') }
 function Install-SetupAuxiliaryCode {
     param($Source,$Destination,$Executable,[switch]$PublicRead)
@@ -128,6 +129,11 @@ function Invoke-AgentInstallTest {
     return $failed
 }
 Assert-AgentTest (-not (Invoke-AgentInstallTest)) 'install succeeds'
+# The product roots themselves are checked (their existing ancestors then get the ancestor rules); never the shared
+# Program Files or ProgramData folders as targets, which grant standard users file creation.
+Assert-AgentTest ($script:trustedPaths -ccontains $locations.CodeRoot -and $script:trustedPaths -ccontains $locations.DataRoot -and
+    -not ($script:trustedPaths -ccontains [IO.Path]::GetDirectoryName($locations.CodeRoot)) -and
+    -not ($script:trustedPaths -ccontains [IO.Path]::GetDirectoryName($locations.DataRoot))) 'the product roots are checked as targets, not their shared parents'
 Assert-AgentTest (($script:events -join ',') -ceq 'code-root,updater,installer,setup-data,receipt,receipt,apps,install-Agent') 'install order'
 Assert-AgentTest (($script:output -join ',') -ceq 'PROGRESS|validate,PROGRESS|updater,PROGRESS|apps,PROGRESS|agent,DONE') 'install progress protocol'
 $script:fail = 'updater'

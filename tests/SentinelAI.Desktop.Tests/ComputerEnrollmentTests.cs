@@ -175,6 +175,30 @@ internal static partial class LocalNetworkSettingsTests
         client.RemoveOutcome = ComputerEnrollmentOutcome.Unavailable;
         Ensure(!await model.RemoveComputerAsync(Guid.NewGuid()) && model.ErrorText.Contains("could not be removed", StringComparison.Ordinal),
             "Remove computer hid a failure.");
+        client.RemoveOutcome = ComputerEnrollmentOutcome.Conflict;
+        Ensure(!await model.RemoveComputerAsync(Guid.NewGuid()) && model.ErrorText == ComputerEnrollmentViewModel.CentralComputerNotice,
+            "Remove computer did not explain that the central computer's own Agent stays.");
+        client.RemoveOutcome = ComputerEnrollmentOutcome.Success;
+
+        // Sign-out or session expiry while a request is running cancels it: no exception reaches the view's handlers.
+        foreach (var stage in new[] { "options", "issue", "unused", "revoke", "remove" })
+        {
+            var hanging = new FakeEnrollment { HangOn = stage };
+            using var pending = new ComputerEnrollmentViewModel(hanging);
+            if (stage is "issue" or "revoke" or "remove" or "unused") { hanging.HangOn = null; await pending.LoadAsync(); hanging.HangOn = stage; }
+            Task operation = stage switch
+            {
+                "options" => pending.LoadAsync(),
+                "issue" or "unused" => pending.IssueAsync(),
+                "revoke" => pending.RevokeAsync(Guid.NewGuid()),
+                _ => pending.RemoveComputerAsync(Guid.NewGuid())
+            };
+            await hanging.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            pending.Clear();
+            var threw = false;
+            try { await operation.WaitAsync(TimeSpan.FromSeconds(10)); } catch (OperationCanceledException) { threw = true; }
+            Ensure(!threw && !pending.IsBusy && pending.IssuedCodes.Count == 0 && pending.ErrorText == "", "A canceled " + stage + " request escaped or left state behind.");
+        }
 
         model.Clear();
         Ensure(model.IssuedCodes.Count == 0 && model.IssuedCodesText == "" && !model.IsAvailable && model.Addresses.Count == 0, "Sign-out kept the issued codes.");
@@ -217,32 +241,47 @@ internal static partial class LocalNetworkSettingsTests
         internal bool LocalOnly;
         internal bool Expire;
         internal ComputerEnrollmentOutcome RemoveOutcome = ComputerEnrollmentOutcome.Success;
+        // A request that never answers until it is canceled, as a slow Core would.
+        internal string? HangOn;
+        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private async Task<T> HangAsync<T>(string stage, Func<T> result, CancellationToken cancellationToken)
+        {
+            if (HangOn != stage) return result();
+            Entered.TrySetResult();
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return result();
+        }
 
         public Task<ComputerEnrollmentResult<ComputerEnrollmentOptions>> GetEnrollmentOptionsAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(new ComputerEnrollmentResult<ComputerEnrollmentOptions>(ComputerEnrollmentOutcome.Success, LocalOnly
+            HangAsync("options", () => new ComputerEnrollmentResult<ComputerEnrollmentOptions>(ComputerEnrollmentOutcome.Success, LocalOnly
                 ? new ComputerEnrollmentOptions(false, false, null, null, [])
                 : new ComputerEnrollmentOptions(true, true, 5443, "central-pc",
-                    [new("central-pc", true, true), new("10.0.0.5", false, true)])));
+                    [new("central-pc", true, true), new("10.0.0.5", false, true)])), cancellationToken);
 
-        public Task<ComputerEnrollmentResult<IReadOnlyList<IssuedComputerCode>>> IssueCodesAsync(int count, int validityHours, string address, CancellationToken cancellationToken)
+        public Task<ComputerEnrollmentResult<IReadOnlyList<IssuedComputerCode>>> IssueCodesAsync(int count, int validityHours, string address, CancellationToken cancellationToken) =>
+            HangAsync("issue", () => Issue(count, validityHours, address), cancellationToken);
+
+        private ComputerEnrollmentResult<IReadOnlyList<IssuedComputerCode>> Issue(int count, int validityHours, string address)
         {
             Issued = (count, validityHours, address);
             var codes = Enumerable.Range(1, count).Select(index => new IssuedComputerCode(Guid.NewGuid(), Code(address, index), DateTimeOffset.UtcNow.AddHours(validityHours))).ToArray();
             _unused.AddRange(codes.Select(code => new UnusedComputerCode(code.Id, DateTimeOffset.UtcNow, code.ExpiresUtc)));
-            return Task.FromResult(new ComputerEnrollmentResult<IReadOnlyList<IssuedComputerCode>>(ComputerEnrollmentOutcome.Success, codes));
+            return new ComputerEnrollmentResult<IReadOnlyList<IssuedComputerCode>>(ComputerEnrollmentOutcome.Success, codes);
         }
 
         public Task<ComputerEnrollmentResult<IReadOnlyList<UnusedComputerCode>>> GetUnusedCodesAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(new ComputerEnrollmentResult<IReadOnlyList<UnusedComputerCode>>(ComputerEnrollmentOutcome.Success, _unused.ToArray()));
+            HangAsync("unused", () => new ComputerEnrollmentResult<IReadOnlyList<UnusedComputerCode>>(ComputerEnrollmentOutcome.Success, _unused.ToArray()), cancellationToken);
 
-        public Task<ComputerEnrollmentOutcome> RevokeCodeAsync(Guid id, CancellationToken cancellationToken)
+        public Task<ComputerEnrollmentOutcome> RevokeCodeAsync(Guid id, CancellationToken cancellationToken) => HangAsync("revoke", () =>
         {
-            if (Expire) return Task.FromResult(ComputerEnrollmentOutcome.Unauthenticated);
+            if (Expire) return ComputerEnrollmentOutcome.Unauthenticated;
             Revoked.Add(id);
             _unused.RemoveAll(code => code.Id == id);
-            return Task.FromResult(ComputerEnrollmentOutcome.Success);
-        }
+            return ComputerEnrollmentOutcome.Success;
+        }, cancellationToken);
 
-        public Task<ComputerEnrollmentOutcome> RemoveComputerAsync(Guid endpointId, CancellationToken cancellationToken) => Task.FromResult(RemoveOutcome);
+        public Task<ComputerEnrollmentOutcome> RemoveComputerAsync(Guid endpointId, CancellationToken cancellationToken) =>
+            HangAsync("remove", () => RemoveOutcome, cancellationToken);
     }
 }

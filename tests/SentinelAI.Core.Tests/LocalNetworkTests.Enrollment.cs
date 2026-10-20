@@ -64,6 +64,15 @@ internal static partial class LocalNetworkTests
         Check(!EnrollmentCode.TryParse(null, out _) && !EnrollmentCode.TryParse("SAI1-" + new string('0', EnrollmentCode.MaximumTextLength), out _) &&
               !EnrollmentCode.TryParseFile(new byte[EnrollmentCode.MaximumFileBytes + 1], out _) && !EnrollmentCode.TryParseFile([0xFF, 0xFE], out _),
             "An oversized or malformed code was accepted.");
+        // The longest address still gives a code that parses as pasted text and as a file with a line break.
+        var longest = new string('a', 63) + "." + new string('b', 63) + "." + new string('c', EnrollmentCode.MaximumAddressLength - 128);
+        var longestCode = new EnrollmentCode(longest, 65535, SyntheticPin, SyntheticToken);
+        var longestText = longestCode.Encode();
+        Check(longest.Length == EnrollmentCode.MaximumAddressLength && longestText.Length + 2 <= EnrollmentCode.MaximumTextLength &&
+              EnrollmentCode.TryParseFile(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(longestText + "\r\n")).ToArray(), out var longestParsed) &&
+              longestParsed == longestCode && !EnrollmentCode.IsAddress(longest + "d"),
+            "The longest address did not give a parseable code, or a longer one was accepted.");
+        Reject(() => new EnrollmentCode(longest + "d", 5443, SyntheticPin, SyntheticToken).Encode(), "An address too long for a code was encoded.");
         var code = new EnrollmentCode("192.168.1.20", 5443, SyntheticPin, SyntheticToken);
         Check(code.CoreUrl == new Uri("https://192.168.1.20:5443") && !code.ToString().Contains(SyntheticToken, StringComparison.Ordinal),
             "The code did not name Core's HTTPS origin, or its text form exposed the token.");
@@ -179,6 +188,20 @@ internal static partial class LocalNetworkTests
         using (var overNetwork = await SendAsync(network, HttpMethod.Delete, $"/api/admin/devices/{identity.EndpointId:D}", token))
             Check(overNetwork.StatusCode == HttpStatusCode.NotFound, "Core served Remove computer over the local-network listener.");
         Check(await HeartbeatAsync() == HttpStatusCode.Unauthorized, "A removed computer could still report.");
+
+        // The central computer's own Agent enrolls over loopback: it can never be removed, so it keeps reporting.
+        var localInstallation = Guid.NewGuid();
+        using (var localEnrolled = await local.PostAsJsonAsync("/api/agent/enroll", new EnrollmentRequest(localInstallation, codes[3]!.EnrollmentToken)))
+        {
+            Check(localEnrolled.StatusCode == HttpStatusCode.OK, "The central computer's Agent could not enroll over loopback.");
+            var localIdentity = (await localEnrolled.Content.ReadFromJsonAsync<EnrollmentResponse>())!;
+            using (var refused = await SendAsync(local, HttpMethod.Delete, $"/api/admin/devices/{localIdentity.EndpointId:D}", token))
+                Check(refused.StatusCode == HttpStatusCode.Conflict, "Core removed the central computer's own Agent.");
+            using var heartbeat = new HttpRequestMessage(HttpMethod.Post, "/api/agent/heartbeat") { Content = JsonContent.Create(new HeartbeatRequest(localInstallation)) };
+            heartbeat.Headers.Authorization = new AuthenticationHeaderValue("SentinelAgent", $"{localIdentity.EndpointId:D}.{localIdentity.AgentCredential}");
+            using var reported = await local.SendAsync(heartbeat);
+            Check(reported.StatusCode == HttpStatusCode.OK, "Refusing to remove the central computer's Agent stopped its reports.");
+        }
         using (var listed = await GetAsync(local, "/api/admin/devices", token))
             Check(!(await listed.Content.ReadAsStringAsync()).Contains(identity.EndpointId.ToString("D"), StringComparison.OrdinalIgnoreCase),
                 "A removed computer was still listed.");
