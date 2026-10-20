@@ -351,6 +351,31 @@ public static class CoreHost
             .RequireRateLimiting("enrollment")
             .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
 
+        // MVP-2: the Agent Setup asks whether its code can still enroll before it changes anything. Never consumes it.
+        app.MapPost("/api/agent/enrollment-check", async (
+                EnrollmentCheckRequest? request,
+                HttpContext context,
+                EnrollmentStore enrollments,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (request?.EnrollmentToken is not { Length: 64 })
+                {
+                    return Results.BadRequest();
+                }
+
+                return await enrollments.IsTokenUsableAsync(request.EnrollmentToken, cancellationToken)
+                    ? Results.NoContent() : Results.StatusCode(StatusCodes.Status410Gone);
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting("enrollment")
+            .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
         app.MapPost("/api/agent/inventory", async (
                 InventoryReport? report,
                 HttpContext context,
@@ -672,6 +697,97 @@ public static class CoreHost
 
                 var result = await risk.FindAsync(endpointId, cancellationToken);
                 return result is null ? Results.NotFound() : Results.Ok(result);
+            })
+            .RequireAuthorization();
+
+        // MVP-2 "Add computers": addresses a code may carry, batches of one-use codes, unused codes and revocation.
+        app.MapGet("/api/admin/enrollment-options", async (HttpContext context, LocalNetworkState localNetwork, CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                return Results.Ok(await EnrollmentCodeOptions.BuildAsync(localNetwork, cancellationToken));
+            })
+            .RequireAuthorization();
+
+        app.MapPost("/api/admin/enrollment-codes", async (
+                EnrollmentCodeRequest? request,
+                HttpContext context,
+                LocalNetworkState localNetwork,
+                EnrollmentStore enrollments,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                if (request is null || request.Count is < 1 or > EnrollmentStore.MaximumCodesPerBatch ||
+                    request.ValidityHours < EnrollmentStore.MinimumCodeLifetime.TotalHours ||
+                    request.ValidityHours > EnrollmentStore.MaximumCodeLifetime.TotalHours)
+                {
+                    return Results.BadRequest();
+                }
+
+                var options = await EnrollmentCodeOptions.BuildAsync(localNetwork, cancellationToken);
+                if (!options.Available || localNetwork.Options is not { } network)
+                {
+                    return Results.Conflict();
+                }
+
+                if (request.Address is null || !options.Addresses.Any(address => address.Value == request.Address))
+                {
+                    return Results.BadRequest();
+                }
+
+                var issued = await enrollments.IssueCodesAsync(request.Count, TimeSpan.FromHours(request.ValidityHours), cancellationToken);
+                return Results.Ok(new EnrollmentCodeBatch(issued.Select(code => new EnrollmentCodeItem(code.Id,
+                    new SentinelAI.Enrollment.EnrollmentCode(request.Address, network.Port, network.CertificateSha256, code.Token).Encode(),
+                    code.ExpiresUtc)).ToArray()));
+            })
+            .RequireAuthorization()
+            .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+        app.MapGet("/api/admin/enrollment-codes", async (HttpContext context, EnrollmentStore enrollments, CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                return Results.Ok(new UnusedEnrollmentCodes(await enrollments.ListUnusedCodesAsync(cancellationToken)));
+            })
+            .RequireAuthorization();
+
+        app.MapDelete("/api/admin/enrollment-codes/{id:guid}", async (
+                Guid id, HttpContext context, EnrollmentStore enrollments, CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                return await enrollments.RevokeCodeAsync(id, cancellationToken) ? Results.NoContent() : Results.NotFound();
+            })
+            .RequireAuthorization();
+
+        // "Remove computer": revokes the endpoint's Agent credential and hides it; its history is kept.
+        app.MapDelete("/api/admin/devices/{endpointId:guid}", async (
+                Guid endpointId, HttpContext context, EnrollmentStore enrollments, CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                return await enrollments.RemoveEndpointAsync(endpointId, cancellationToken) ? Results.NoContent() : Results.NotFound();
             })
             .RequireAuthorization();
 

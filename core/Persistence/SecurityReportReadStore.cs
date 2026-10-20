@@ -64,9 +64,9 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
         await using var query = connection.CreateCommand();
         query.Transaction = transaction;
         query.CommandText = """
-            SELECT (SELECT COUNT(*) FROM EndpointEnrollments),
+            SELECT (SELECT COUNT(*) FROM EndpointEnrollments WHERE RemovedUtcTicks IS NULL),
                 (SELECT COUNT(*) FROM TrackedAlerts AS a
-                 INNER JOIN EndpointEnrollments AS e ON e.EndpointId = a.EndpointId);
+                 INNER JOIN EndpointEnrollments AS e ON e.EndpointId = a.EndpointId AND e.RemovedUtcTicks IS NULL);
             """;
         await using var reader = await query.ExecuteReaderAsync(cancellationToken);
         await reader.ReadAsync(cancellationToken);
@@ -105,6 +105,7 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
             LEFT JOIN Devices AS d ON d.InstallationId = e.InstallationId
             LEFT JOIN EndpointInventories AS i ON i.EndpointId = e.EndpointId
             LEFT JOIN EndpointSecurityTelemetry AS t ON t.EndpointId = e.EndpointId
+            WHERE e.RemovedUtcTicks IS NULL
             ORDER BY e.EndpointId;
             """;
         await using var reader = await query.ExecuteReaderAsync(cancellationToken);
@@ -145,7 +146,7 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
                     MIN(CASE WHEN h.Status = 'resolved' THEN h.SequenceId END) AS FirstResolutionSequence
                 FROM AlertStatusHistory AS h
                 INNER JOIN TrackedAlerts AS a ON a.AlertId = h.AlertId
-                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = a.EndpointId
+                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = a.EndpointId AND e.RemovedUtcTicks IS NULL
                 WHERE h.ChangedUtcTicks >= $from AND h.ChangedUtcTicks < $to
                 GROUP BY h.AlertId
             )
@@ -157,7 +158,7 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
                     WHERE later.AlertId = a.AlertId AND later.SequenceId > p.FirstResolutionSequence
                     AND later.PreviousStatus = 'resolved' AND later.Status <> 'resolved')
             FROM TrackedAlerts AS a
-            INNER JOIN EndpointEnrollments AS e ON e.EndpointId = a.EndpointId
+            INNER JOIN EndpointEnrollments AS e ON e.EndpointId = a.EndpointId AND e.RemovedUtcTicks IS NULL
             LEFT JOIN period_history AS p ON p.AlertId = a.AlertId
             ORDER BY a.EndpointId, a.AlertId;
             """;

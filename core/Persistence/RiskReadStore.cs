@@ -200,7 +200,7 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
                 SELECT e.EndpointId, i.CollectedUtcTicks, i.ReportJson
                 FROM EndpointEnrollments AS e
                 LEFT JOIN EndpointInventories AS i ON i.EndpointId = e.EndpointId
-                WHERE ($endpointId IS NULL OR e.EndpointId = $endpointId)
+                WHERE e.RemovedUtcTicks IS NULL AND ($endpointId IS NULL OR e.EndpointId = $endpointId)
                 ORDER BY e.EndpointId;
                 """;
             query.Parameters.AddWithValue("$endpointId", endpointId?.ToString("D") ?? (object)DBNull.Value);
@@ -222,7 +222,7 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
             query.CommandText = $"""
                 SELECT t.EndpointId, {TelemetryState.Columns}
                 FROM EndpointSecurityTelemetry AS t
-                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = t.EndpointId
+                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = t.EndpointId AND e.RemovedUtcTicks IS NULL
                 WHERE ($endpointId IS NULL OR t.EndpointId = $endpointId);
                 """;
             query.Parameters.AddWithValue("$endpointId", endpointId?.ToString("D") ?? (object)DBNull.Value);
@@ -240,7 +240,7 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
             query.CommandText = """
                 SELECT s.EndpointId, s.Channel, s.State, s.ReceivedUtcTicks
                 FROM SecurityEventSources AS s
-                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = s.EndpointId
+                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = s.EndpointId AND e.RemovedUtcTicks IS NULL
                 WHERE ($endpointId IS NULL OR s.EndpointId = $endpointId);
                 """;
             query.Parameters.AddWithValue("$endpointId", endpointId?.ToString("D") ?? (object)DBNull.Value);
@@ -259,7 +259,7 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
                 SELECT a.AlertId, a.EndpointId, a.RuleId, a.Title, a.Severity, a.Status,
                     a.LastObservedUtcTicks, a.Reason
                 FROM TrackedAlerts AS a
-                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = a.EndpointId
+                INNER JOIN EndpointEnrollments AS e ON e.EndpointId = a.EndpointId AND e.RemovedUtcTicks IS NULL
                 WHERE ($endpointId IS NULL OR a.EndpointId = $endpointId)
                 ORDER BY a.EndpointId, a.AlertId;
                 """;

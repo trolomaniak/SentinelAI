@@ -26,7 +26,7 @@ using SentinelAI.Hosting;
 
 // MVP-1: Core's local-network listener (TLS gate, Agent-only routes, certificate, admin view).
 // Certificates are generated per run; no real customer data is used.
-internal static class LocalNetworkTests
+internal static partial class LocalNetworkTests
 {
     private static int assertions;
 
@@ -36,6 +36,7 @@ internal static class LocalNetworkTests
         VerifyTlsPolicy();
         VerifyRoutes();
         VerifyCertificateRequest();
+        VerifyEnrollmentCodeFormat();
         var root = Path.Combine(Path.GetTempPath(), $"sentinelai-local-network-{Guid.NewGuid():N}");
         var originalUsername = Environment.GetEnvironmentVariable("SENTINELAI_BOOTSTRAP_USERNAME");
         var originalPassword = Environment.GetEnvironmentVariable("SENTINELAI_BOOTSTRAP_PASSWORD");
@@ -47,6 +48,7 @@ internal static class LocalNetworkTests
             await VerifyListenerAsync(Path.Combine(root, "listener"), certificate, username, password);
             await VerifyUnavailableCertificateAsync(Path.Combine(root, "missing"), username, password);
             await VerifyOccupiedPortAsync(Path.Combine(root, "occupied"), certificate, username, password);
+            await VerifyEnrollmentCodesAsync(Path.Combine(root, "codes"), certificate, username, password);
             await VerifyLocalOnlyAsync(Path.Combine(root, "local-only"), username, password);
             if (OperatingSystem.IsWindows() && IsElevated())
                 await VerifyMachineCertificateAsync(Path.Combine(root, "machine"), username, password);
@@ -133,7 +135,7 @@ internal static class LocalNetworkTests
 
     private static void VerifyRoutes()
     {
-        foreach (var path in new[] { "/api/agent/enroll", "/api/agent/heartbeat", "/api/agent/inventory", "/api/agent/security-events",
+        foreach (var path in new[] { "/api/agent/enroll", "/api/agent/enrollment-check", "/api/agent/heartbeat", "/api/agent/inventory", "/api/agent/security-events",
                      "/api/agent/security-telemetry", "/API/Agent/Heartbeat" })
             Check(LocalNetworkRoutes.IsAllowed("POST", path), "The local-network listener refused an Agent route.");
         foreach (var (method, path) in new (string, string?)[]
@@ -413,6 +415,7 @@ internal static class LocalNetworkTests
         await app.StartAsync();
         using var local = new HttpClient(new HttpClientHandler { UseProxy = false }) { BaseAddress = new Uri(app.Urls.Single()) };
         var token = await LoginAsync(local, username, password);
+        await VerifyLocalOnlyEnrollmentCodesAsync(local, token);
         using var view = await GetAsync(local, "/api/admin/local-network", token);
         using var json = JsonDocument.Parse(await view.Content.ReadAsStringAsync());
         var root = json.RootElement;

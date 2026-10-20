@@ -157,7 +157,7 @@ internal static class LocalNetworkRoutes
     // routes stay on the loopback listener.
     private static readonly string[] AgentPaths =
     [
-        "/api/agent/enroll", "/api/agent/heartbeat", "/api/agent/inventory",
+        "/api/agent/enroll", "/api/agent/enrollment-check", "/api/agent/heartbeat", "/api/agent/inventory",
         "/api/agent/security-events", "/api/agent/security-telemetry"
     ];
 
@@ -259,5 +259,68 @@ internal static class LocalNetworkHosting
         if (!OperatingSystem.IsWindows()) socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         socket.Bind(endpoint);
         socket.Listen(1);
+    }
+}
+
+internal sealed record EnrollmentCheckRequest(string? EnrollmentToken);
+internal sealed record EnrollmentCodeRequest(int Count, int ValidityHours, string? Address);
+internal sealed record EnrollmentCodeItem(Guid Id, string Code, DateTimeOffset ExpiresUtc);
+internal sealed record EnrollmentCodeBatch(IReadOnlyList<EnrollmentCodeItem> Codes);
+internal sealed record UnusedEnrollmentCodes(IReadOnlyList<SentinelAI.Core.Persistence.UnusedEnrollmentCode> Codes);
+internal sealed record EnrollmentAddress(string Value, string Kind, bool Resolves);
+
+// The addresses an enrollment code may carry: the central computer's DNS names (recommended when they resolve to one
+// of its IPv4 addresses) and its active IPv4 addresses. Codes need the local-network listener to be configured.
+internal sealed record EnrollmentCodeOptions(bool Available, bool Listening, int? Port, string? RecommendedAddress,
+    IReadOnlyList<EnrollmentAddress> Addresses)
+{
+    private static readonly TimeSpan ResolveTimeout = TimeSpan.FromSeconds(2);
+
+    public static async Task<EnrollmentCodeOptions> BuildAsync(LocalNetworkState state, CancellationToken cancellationToken)
+    {
+        if (state.Options is not { } options) return new EnrollmentCodeOptions(false, false, null, null, []);
+        var view = LocalNetworkView.From(state);
+        var addresses = new List<EnrollmentAddress>();
+        foreach (var name in new[] { view.FullyQualifiedName, view.HostName })
+        {
+            var ascii = AsciiName(name);
+            if (ascii is null || addresses.Any(address => string.Equals(address.Value, ascii, StringComparison.OrdinalIgnoreCase))) continue;
+            addresses.Add(new EnrollmentAddress(ascii, "name", await ResolvesToAsync(ascii, view.Addresses, cancellationToken)));
+        }
+
+        addresses.AddRange(view.Addresses.Where(SentinelAI.Enrollment.EnrollmentCode.IsAddress).Select(address => new EnrollmentAddress(address, "ipv4", true)));
+        var recommended = addresses.FirstOrDefault(address => address.Kind == "name" && address.Resolves) ??
+                          addresses.FirstOrDefault(address => address.Kind == "ipv4");
+        return new EnrollmentCodeOptions(true, state.Listening, options.Port, recommended?.Value, addresses);
+    }
+
+    private static string? AsciiName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        try
+        {
+            var ascii = name.All(char.IsAscii) ? name : new IdnMapping().GetAscii(name);
+            return SentinelAI.Enrollment.EnrollmentCode.IsAddress(ascii) && !IPAddress.TryParse(ascii, out _) ? ascii : null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<bool> ResolvesToAsync(string name, IReadOnlyList<string> local, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(ResolveTimeout);
+        try
+        {
+            var resolved = await Dns.GetHostAddressesAsync(name, AddressFamily.InterNetwork, timeout.Token);
+            return resolved.Any(address => local.Contains(address.ToString()));
+        }
+        catch (Exception exception) when (exception is SocketException or OperationCanceledException or ArgumentException)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return false;
+        }
     }
 }
