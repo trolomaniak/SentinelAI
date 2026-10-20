@@ -7,5 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="../../shared/contracts/SentinelAI.Contracts.csproj" />
     <ProjectReference Include="../../scoring/SentinelAI.Scoring.csproj" />
+    <Compile Include="../../shared/enrollment/EnrollmentCode.cs" Link="EnrollmentCode.cs" />
+    <InternalsVisibleTo Include="SentinelAI.Desktop.Tests" />
   </ItemGroup>
 </Project>

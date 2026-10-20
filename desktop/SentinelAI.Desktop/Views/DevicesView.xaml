@@ -47,6 +47,83 @@
                         </Style.Triggers>
                     </Style>
                 </StackPanel.Style>
+                <Expander x:Name="AddComputersExpander" Header="Add computers" Margin="0,0,0,16" Expanded="OnAddComputersExpanded"
+                          DataContext="{Binding ComputerEnrollment, RelativeSource={RelativeSource AncestorType=Window}}"
+                          AutomationProperties.AutomationId="AddComputersExpander" AutomationProperties.Name="Add computers">
+                    <Expander.Style>
+                        <Style TargetType="Expander">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Expander.Style>
+                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Create one enrollment code per computer. On each computer, run SentinelAI-Agent-Setup.exe and paste its code or open its code file."
+                                       TextWrapping="Wrap" Margin="0,0,0,8" />
+                            <TextBlock Text="{x:Static devices:ComputerEnrollmentViewModel.SecretNotice}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       AutomationProperties.AutomationId="EnrollmentCodeSecretNotice" />
+                            <TextBlock Text="{x:Static devices:ComputerEnrollmentViewModel.AddressAdvice}" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                       AutomationProperties.AutomationId="AddComputersStatus" AutomationProperties.LiveSetting="Polite" />
+                            <WrapPanel>
+                                <StackPanel Width="300" Margin="0,0,12,8">
+                                    <TextBlock Text="Address in the code" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{Binding Addresses}" DisplayMemberPath="DisplayText" SelectedItem="{Binding SelectedAddress, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsAvailable}" AutomationProperties.AutomationId="EnrollmentAddress" AutomationProperties.Name="Address in the code" />
+                                </StackPanel>
+                                <StackPanel Width="110" Margin="0,0,12,8">
+                                    <TextBlock Text="Computers" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{x:Static devices:ComputerEnrollmentViewModel.CountChoices}" SelectedItem="{Binding Count, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsAvailable}" AutomationProperties.AutomationId="EnrollmentCodeCount" AutomationProperties.Name="Number of computers" />
+                                </StackPanel>
+                                <StackPanel Width="140" Margin="0,0,12,8">
+                                    <TextBlock Text="Valid for" Margin="0,0,0,4" />
+                                    <ComboBox ItemsSource="{x:Static devices:ComputerEnrollmentViewModel.ValidityChoices}" DisplayMemberPath="DisplayText"
+                                              SelectedItem="{Binding Validity, Mode=TwoWay}" IsEnabled="{Binding IsAvailable}"
+                                              AutomationProperties.AutomationId="EnrollmentValidity" AutomationProperties.Name="Valid for" />
+                                </StackPanel>
+                                <Button Content="Create codes" Click="OnCreateCodes" IsEnabled="{Binding CanIssue}" VerticalAlignment="Bottom" Margin="0,0,8,8"
+                                        AutomationProperties.AutomationId="CreateEnrollmentCodesButton" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap"
+                                       AutomationProperties.AutomationId="AddComputersError" AutomationProperties.LiveSetting="Assertive" />
+                            <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IssuedCodesText}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <TextBlock Text="New codes (shown only now)" FontWeight="SemiBold" Margin="0,12,0,4" />
+                                <TextBlock Text="{Binding IssuedCodesText}" FontFamily="Consolas" TextWrapping="Wrap" Margin="0,0,0,8"
+                                           AutomationProperties.AutomationId="IssuedEnrollmentCodes" AutomationProperties.Name="New enrollment codes" />
+                                <WrapPanel>
+                                    <Button Content="Copy codes" Click="OnCopyCodes" Margin="0,0,8,8" AutomationProperties.AutomationId="CopyEnrollmentCodesButton" />
+                                    <Button Content="Save codes as files" Click="OnSaveCodes" Margin="0,0,8,8" AutomationProperties.AutomationId="SaveEnrollmentCodesButton" />
+                                </WrapPanel>
+                            </StackPanel>
+                            <TextBlock Text="Unused codes" FontWeight="SemiBold" Margin="0,12,0,4" />
+                            <ItemsControl ItemsSource="{Binding UnusedCodes}" AutomationProperties.AutomationId="UnusedEnrollmentCodes">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <WrapPanel Margin="0,0,0,4">
+                                            <TextBlock Text="{Binding ExpiresText}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                            <Button Content="Revoke" Tag="{Binding Id}" Click="OnRevokeCode"
+                                                    AutomationProperties.AutomationId="{Binding Id, StringFormat='RevokeEnrollmentCode_{0}'}"
+                                                    AutomationProperties.Name="Revoke code" />
+                                        </WrapPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                </Expander>
                 <StackPanel x:Name="ListToolbar">
                     <WrapPanel Margin="0,0,0,8">
                         <StackPanel Width="220" Margin="0,0,12,8">
@@ -213,6 +290,34 @@
                                        AutomationProperties.AutomationId="DeviceTelemetryStatus" />
                             <ItemsControl ItemsSource="{Binding Detail.TelemetryFacts}" ItemTemplate="{StaticResource DeviceFactTemplate}"
                                           AutomationProperties.AutomationId="DeviceTelemetryFacts" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,16,0,0"
+                            DataContext="{Binding ComputerEnrollment, RelativeSource={RelativeSource AncestorType=Window}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="Remove computer" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8" />
+                            <TextBlock Text="Removing a computer stops its Agent from reporting and hides it here. Its history is kept. Uninstall SentinelAI Agent on that computer as well."
+                                       TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,12" />
+                            <Button x:Name="RemoveComputerButton" Content="Remove computer" Click="OnRemoveComputer" HorizontalAlignment="Left"
+                                    AutomationProperties.AutomationId="RemoveComputerButton" />
+                            <StackPanel x:Name="RemoveComputerConfirmation" Visibility="Collapsed" Margin="0,12,0,0" AutomationProperties.AutomationId="RemoveComputerConfirmation">
+                                <TextBlock Text="Remove this computer? Its Agent stops reporting until it is enrolled again with a new code." TextWrapping="Wrap" Margin="0,0,0,8" />
+                                <WrapPanel>
+                                    <Button Content="Remove" Click="OnConfirmRemoveComputer" Margin="0,0,8,8" AutomationProperties.AutomationId="ConfirmRemoveComputerButton" />
+                                    <Button Content="Cancel" Click="OnCancelRemoveComputer" Margin="0,0,8,8" AutomationProperties.AutomationId="CancelRemoveComputerButton" />
+                                </WrapPanel>
+                            </StackPanel>
+                            <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap"
+                                       AutomationProperties.AutomationId="RemoveComputerError" AutomationProperties.LiveSetting="Assertive" />
                         </StackPanel>
                     </Border>
                 </StackPanel>

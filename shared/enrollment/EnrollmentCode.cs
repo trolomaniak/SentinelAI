@@ -13,7 +13,7 @@ namespace SentinelAI.Enrollment;
 // Text form: "SAI1-" followed by Crockford Base32 groups of five characters. The decoded bytes are
 // version (1) | port (2, big-endian) | pin (32) | token (32) | address length (1) | ASCII address | checksum (4),
 // where the checksum is the first four bytes of SHA-256 over "SAIE" and everything before it.
-public sealed record EnrollmentCode(string Address, int Port, string CertificateSha256, string EnrollmentToken)
+internal sealed record EnrollmentCode(string Address, int Port, string CertificateSha256, string EnrollmentToken)
 {
     public const string FileExtension = ".sentinelai-enroll";
     public const int MaximumTextLength = 512;

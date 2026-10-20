@@ -1,6 +1,8 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using Microsoft.Win32;
 using SentinelAI.Desktop.Foundation;
 
 namespace SentinelAI.Desktop.Views;
@@ -10,6 +12,58 @@ public partial class DevicesView : UserControl
     public DevicesView() => InitializeComponent();
 
     private DevicesViewModel? Model => DataContext as DevicesViewModel;
+    private ComputerEnrollmentViewModel? Enrollment => (Window.GetWindow(this) as MainWindow)?.ComputerEnrollment;
+
+    private async void OnAddComputersExpanded(object sender, RoutedEventArgs e)
+    {
+        if (Enrollment is { } enrollment) await enrollment.LoadAsync();
+    }
+
+    private async void OnCreateCodes(object sender, RoutedEventArgs e)
+    {
+        if (Enrollment is { } enrollment) await enrollment.IssueAsync();
+    }
+
+    private void OnCopyCodes(object sender, RoutedEventArgs e)
+    {
+        if (Enrollment is { IssuedCodesText.Length: > 0 } enrollment) Clipboard.SetText(enrollment.IssuedCodesText);
+    }
+
+    // One small ".sentinelai-enroll" file per code in a folder the administrator chooses.
+    private void OnSaveCodes(object sender, RoutedEventArgs e)
+    {
+        if (Enrollment is not { IssuedCodes.Count: > 0 } enrollment) return;
+        var dialog = new OpenFolderDialog { Title = "Choose a folder for the enrollment code files" };
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+        try
+        {
+            EnrollmentCodeFiles.Write(dialog.FolderName, enrollment.IssuedCodes);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(Window.GetWindow(this), "The code files could not be saved there. Choose another folder.", "SentinelAI",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async void OnRevokeCode(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: Guid id } && Enrollment is { } enrollment) await enrollment.RevokeAsync(id);
+    }
+
+    private void OnRemoveComputer(object sender, RoutedEventArgs e) => RemoveComputerConfirmation.Visibility = Visibility.Visible;
+
+    private void OnCancelRemoveComputer(object sender, RoutedEventArgs e) => RemoveComputerConfirmation.Visibility = Visibility.Collapsed;
+
+    private async void OnConfirmRemoveComputer(object sender, RoutedEventArgs e)
+    {
+        RemoveComputerConfirmation.Visibility = Visibility.Collapsed;
+        if (Model is not { Detail: { } detail } model || Enrollment is not { } enrollment) return;
+        if (!await enrollment.RemoveComputerAsync(detail.EndpointId)) return;
+        model.CloseDetail();
+        PageScroller.ScrollToTop();
+        await model.RefreshAsync();
+    }
 
     private async void OnRefresh(object sender, RoutedEventArgs e)
     {
@@ -46,6 +100,7 @@ public partial class DevicesView : UserControl
 
     private void OnBack(object sender, RoutedEventArgs e)
     {
+        RemoveComputerConfirmation.Visibility = Visibility.Collapsed;
         Model?.CloseDetail();
         PageScroller.ScrollToTop();
     }
