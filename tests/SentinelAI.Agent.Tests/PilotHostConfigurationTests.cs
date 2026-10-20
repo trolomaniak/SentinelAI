@@ -48,12 +48,22 @@ internal static class PilotHostConfigurationTests
             "{\"urls\":\"http://127.0.0.1:5000\",\"SentinelAI\":{\"DataDirectory\":\"relative\"}}",
             validCore.Replace("\"DataDirectory\":", "\"Password\":\"Test-Only-Sensitive\",\"DataDirectory\":"),
             validCore.Replace("\"DataDirectory\":", "\"DataDirectory\":false,\"Other\":"),
-            "{\"urls\":\"http://127.0.0.1:5000\"}", new string(' ', 16 * 1024 + 1)
+            "{\"urls\":\"http://127.0.0.1:5000\"}", new string(' ', 16 * 1024 + 1),
+            // The local-network listener needs its port and certificate pin together, both exact.
+            validCore.Replace("\"DataDirectory\":", "\"LocalNetworkPort\":\"5443\",\"DataDirectory\":"),
+            validCore.Replace("\"DataDirectory\":", "\"LocalNetworkCertificateSha256\":\"" + new string('A', 64) + "\",\"DataDirectory\":"),
+            validCore.Replace("\"DataDirectory\":", "\"LocalNetworkPort\":5443,\"LocalNetworkCertificateSha256\":\"" + new string('A', 64) + "\",\"DataDirectory\":"),
+            validCore.Replace("\"DataDirectory\":", "\"LocalNetworkPort\":\"5443\",\"LocalNetworkCertificateSha256\":\"" + new string('a', 64) + "\",\"DataDirectory\":"),
+            validCore.Replace("\"DataDirectory\":", "\"LocalNetworkPort\":\"5000\",\"LocalNetworkCertificateSha256\":\"" + new string('A', 64) + "\",\"DataDirectory\":"),
+            validCore.Replace("\"DataDirectory\":", "\"LocalNetworkPort\":\"5443\",\"LocalNetworkCertificateSha256\":\"" + new string('A', 64) + "\",\"LocalNetworkAddress\":\"0.0.0.0\",\"DataDirectory\":")
         })
         {
             File.WriteAllText(path, malformed);
             Reject(() => { using var host = CoreHost.Build(["--config", path]); }, "Core accepted an unsafe pilot configuration.");
         }
+        File.WriteAllText(path, validCore.Replace("\"DataDirectory\":",
+            "\"LocalNetworkPort\":\"5443\",\"LocalNetworkCertificateSha256\":\"" + new string('A', 64) + "\",\"DataDirectory\":"));
+        using (var central = CoreHost.Build(["--config", path])) Check(central is not null, "Core rejected the central local-network configuration.");
         foreach (var malformed in new[]
         {
             validAgent.Replace("\"CoreUrl\":", "\"EnrollmentToken\":\"Test-Only-Sensitive\",\"CoreUrl\":"),

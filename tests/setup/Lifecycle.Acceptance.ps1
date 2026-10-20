@@ -128,6 +128,20 @@ function Open-LifecycleCore {
     $license = Invoke-SetupCoreRequest '/api/admin/license' 'GET' $null $script:accessToken | ConvertFrom-Json
     Assert-SetupAcceptance ($license.mode -ceq 'SAFE_MODE') 'The development lifecycle changed the retained local license mode.'
 }
+function Assert-LifecycleLocalNetwork {
+    # Core keeps serving Agents on the local network with the same pinned certificate and owned firewall rule.
+    Assert-SetupAcceptance ((Get-SetupLocalNetworkPin) -ceq $script:lifecyclePin) 'Lifecycle changed the certificate pin Agents trust.'
+    Assert-SetupLocalNetworkCertificate $script:lifecyclePin
+    Assert-SetupFirewallRule | Out-Null
+    Assert-SetupLocalNetworkListener
+    $view = Get-SetupLocalNetworkView
+    Assert-SetupAcceptance ($view.listening -eq $true -and [string]$view.certificateSha256 -ceq $script:lifecyclePin) 'Core did not serve its retained certificate on the local network.'
+    $response = (Invoke-SetupLocalNetworkRequest ([string]@($view.addresses)[0]) $script:lifecyclePin 3072 'GET' '/api/health' $null $null)[3]
+    Assert-SetupAcceptance ($response.StartsWith('HTTP/1.1 404', [StringComparison]::Ordinal)) 'The local-network listener did not answer with the pinned certificate.'
+}
+function Assert-LifecycleNoFirewallRule {
+    Assert-SetupAcceptance (@(Get-NetFirewallRule -Name $script:firewallRuleName -ErrorAction SilentlyContinue).Count -eq 0) 'Uninstall left the Core firewall rule.'
+}
 function Read-LifecyclePreservedState {
     $sqlite = [SentinelAI.Setup.Lifecycle.Sqlite]::Snapshot($script:nativeSqlite, $script:databasePath)
     $hashes = @{}
@@ -362,11 +376,19 @@ try {
     Open-LifecycleCore
     $baseline = Read-LifecyclePreservedState
     Assert-LifecycleVersion '1.0.0' -AllowLegacy
+    $lifecyclePin = Get-SetupLocalNetworkPin
+    $lifecycleKeyName = $null
+    foreach ($certificate in @(Get-SetupLocalNetworkCertificate $lifecyclePin)) {
+        $key = [Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPrivateKey($certificate)
+        try { $lifecycleKeyName = $key.Key.KeyName } finally { $key.Dispose(); $certificate.Dispose() }
+    }
+    Assert-LifecycleLocalNetwork
     $since = [DateTimeOffset]::UtcNow
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Upgrade'
     Open-LifecycleCore; Wait-ExactEndpoint $endpointId $since
     Assert-LifecycleVersion '1.1.0'; Assert-LifecyclePreserved
     Assert-LifecycleAcls
+    Assert-LifecycleLocalNetwork
     $healthyCode = Read-LifecycleCodeFingerprint
     $since = [DateTimeOffset]::UtcNow
     Invoke-LifecycleSetup $UnhealthyExecutablePath 'Upgrade' $true
@@ -374,6 +396,7 @@ try {
     Assert-LifecycleVersion '1.1.0'; Assert-LifecyclePreserved
     Assert-SetupAcceptance ((Read-LifecycleCodeFingerprint) -ceq $healthyCode) 'Health-failed upgrade did not restore the exact previous whole deployment.'
     Assert-LifecycleAcls
+    Assert-LifecycleLocalNetwork
 
     # Damage only proven, fixture-owned program files. Persistent directories,
     # identities and protected configuration are untouched by fault injection.
@@ -388,17 +411,23 @@ try {
         $damaged[$path] = Read-SetupStateDigest $path
         Remove-Item -LiteralPath $path -Force
     }
+    # A removed firewall rule is part of what repair restores.
+    Remove-NetFirewallRule -Name $firewallRuleName
     $since = [DateTimeOffset]::UtcNow
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Repair'
     Open-LifecycleCore; Wait-ExactEndpoint $endpointId $since
     Assert-LifecycleVersion '1.1.0'; Assert-LifecyclePreserved
     foreach ($path in $damaged.Keys) { Assert-SetupAcceptance ((Read-SetupStateDigest $path) -ceq $damaged[$path]) 'Repair did not restore an actual damaged program assembly.' }
     Assert-LifecycleAcls
+    Assert-LifecycleLocalNetwork
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall'
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Uninstall retained an owned service registration.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $shortcutRoot)) 'Uninstall retained owned code or Start Menu shortcuts.'
     Assert-SetupAcceptance (Test-Path -LiteralPath $databasePath -PathType Leaf) 'Default uninstall deleted security history.'
     Assert-LifecyclePreserved
+    # Uninstall removes the firewall rule; retained data keeps the certificate every Agent pins.
+    Assert-LifecycleNoFirewallRule
+    Assert-SetupLocalNetworkCertificate $lifecyclePin
     # Explicit restore reuses the same protected administrator, enrollment and
     # LocalService DPAPI identity; it cannot re-enroll or reset retained history.
     $since = [DateTimeOffset]::UtcNow
@@ -406,15 +435,22 @@ try {
     Open-LifecycleCore; Wait-ExactEndpoint $endpointId $since
     Assert-LifecycleVersion '1.1.0'; Assert-LifecyclePreserved
     Assert-LifecycleAcls
+    Assert-LifecycleLocalNetwork
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall'
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Restored services were not removed by a subsequent owned uninstall.'
     Assert-LifecyclePreserved
+    Assert-LifecycleNoFirewallRule
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall' $false $true
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $dataRoot)) 'Explicit confirmed data removal retained owned application data.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $shortcutRoot) -and
         $null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Explicit removal recreated code, shortcuts or services.'
+    # Confirmed data removal deletes Core's certificate and its machine key; no rule remains.
+    Assert-LifecycleNoFirewallRule
+    Assert-SetupAcceptance (@(Get-SetupLocalNetworkCertificate $lifecyclePin).Count -eq 0 -and -not [string]::IsNullOrEmpty($lifecycleKeyName) -and
+        -not [Security.Cryptography.CngKey]::Exists($lifecycleKeyName, [Security.Cryptography.CngProvider]::MicrosoftSoftwareKeyStorageProvider,
+            [Security.Cryptography.CngKeyOpenOptions]::MachineKey)) 'Confirmed data removal left Core''s certificate or private key.'
     $lifecyclePassed = $true
-    [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount; NativeLifecycle = 'Fresh 1.0.0, upgrade 1.1.0, actual signed unhealthy 1.2.0 rollback, damaged-file repair, default retained-data uninstall, identity-preserving restore and explicit confirmed removal' }
+    [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount; NativeLifecycle = 'Fresh 1.0.0 central installation, upgrade 1.1.0, actual signed unhealthy 1.2.0 rollback, damaged-file and firewall-rule repair, default retained-data uninstall, identity- and certificate-preserving restore and explicit confirmed removal' }
 } finally {
     if (-not $lifecyclePassed) { Stop-SetupDescendantProcesses @($lifecycleHosts | ForEach-Object { $_.Outer; $_.Host }) }
     foreach ($launch in $lifecycleHosts) {

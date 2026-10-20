@@ -53,9 +53,17 @@ public static class CoreHost
             builder.WebHost.UseUrls(pilot.Values["urls"]!);
         }
 
-        // An explicit URL or Kestrel configuration can enable HTTPS or another interface.
-        // Without one, the local API is reachable only from this machine.
-        if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
+        // The central role adds one HTTPS listener for Agents on the local network next to the
+        // loopback HTTP listener. Otherwise an explicit URL or Kestrel configuration can enable
+        // HTTPS or another interface, and without one the API is reachable only from this machine.
+        var localNetwork = LocalNetworkOptions.Load(builder.Configuration);
+        builder.Services.AddSingleton(new LocalNetworkState(localNetwork));
+        builder.Services.AddSingleton<ILocalNetworkCertificateSource, MachineStoreCertificateSource>();
+        if (localNetwork is not null)
+        {
+            LocalNetworkHosting.Configure(builder, localNetwork);
+        }
+        else if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
         {
             builder.WebHost.UseUrls("http://127.0.0.1:5000");
         }
@@ -199,6 +207,21 @@ public static class CoreHost
         var fallbackHash = app.Services.GetRequiredService<IPasswordHasher<AdminRecord>>()
             .HashPassword(fallbackAdmin, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
 
+        // The local-network listener serves the Agent routes only. This runs first, so the dashboard,
+        // health, authentication and administrator routes never answer there.
+        app.Use(async (context, next) =>
+        {
+            if (LocalNetworkRoutes.IsLocalNetworkRequest(context) &&
+                !LocalNetworkRoutes.IsAllowed(context.Request.Method, context.Request.Path.Value))
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            await next(context);
+        });
+
         var dashboardDirectory = Path.Combine(AppContext.BaseDirectory, "dashboard");
         if (Directory.Exists(dashboardDirectory))
         {
@@ -296,7 +319,8 @@ public static class CoreHost
                     device.HealthStatus));
             })
             .AllowAnonymous()
-            .RequireRateLimiting("heartbeat");
+            .RequireRateLimiting("heartbeat")
+            .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
 
         app.MapPost("/api/agent/enroll", async (
                 EnrollmentRequest? request,
@@ -324,7 +348,8 @@ public static class CoreHost
                 };
             })
             .AllowAnonymous()
-            .RequireRateLimiting("enrollment");
+            .RequireRateLimiting("enrollment")
+            .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
 
         app.MapPost("/api/agent/inventory", async (
                 InventoryReport? report,
@@ -512,6 +537,16 @@ public static class CoreHost
             {
                 context.Response.Headers.CacheControl = "no-store";
                 return Results.Ok(new { username = user.Identity?.Name, role = "administrator" });
+            })
+            .RequireAuthorization();
+
+        // Addresses, port and certificate fingerprint an administrator compares with an Agent's pin.
+        app.MapGet("/api/admin/local-network", (HttpContext context, LocalNetworkState localNetwork) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                return IsLocalOrHttps(context)
+                    ? (IResult)Results.Ok(LocalNetworkView.From(localNetwork))
+                    : Results.StatusCode(StatusCodes.Status403Forbidden);
             })
             .RequireAuthorization();
 

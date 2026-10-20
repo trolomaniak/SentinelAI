@@ -19,6 +19,11 @@ public partial class SettingsView : UserControl
         if (Model is { CanRenew: true } model) await model.RenewAsync();
     }
 
+    private async void OnRefreshLocalNetwork(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this) is MainWindow { LocalNetwork: { CanRefresh: true } model }) await model.RefreshAsync();
+    }
+
     private async void OnRefreshDesktopSettings(object sender, RoutedEventArgs e)
     {
         if (Window.GetWindow(this) is not MainWindow window) return;

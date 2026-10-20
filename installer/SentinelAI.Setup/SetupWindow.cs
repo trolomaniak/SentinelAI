@@ -17,6 +17,7 @@ public sealed class SetupWindow : Window
     private readonly PasswordBox _password = new() { MaxLength = 1024 };
     private readonly PasswordBox _confirmation = new() { MaxLength = 1024 };
     private readonly StackPanel _credentials = new() { Visibility = Visibility.Collapsed };
+    private readonly CheckBox _localNetwork = new() { Content = "Allow Agents on other computers in this local network to connect", IsChecked = true, Margin = new Thickness(0, 4, 0, 4) };
     private readonly StackPanel _maintenance = new() { Visibility = Visibility.Collapsed };
     private readonly ComboBox _action = new() { MinHeight = 30 };
     private readonly CheckBox _preserveData = new() { Content = "Keep security history and protected configuration", IsChecked = true, Margin = new Thickness(0, 12, 0, 8) };
@@ -46,6 +47,8 @@ public sealed class SetupWindow : Window
         panel.Children.Add(new TextBlock { Text = "SentinelAI Setup", FontSize = 26, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 14) });
         panel.Children.Add(new TextBlock { Text = "Administrator elevation is required and was requested before this window opened. Setup checks the protected local deployment before offering installation, repair, upgrade or uninstall. Repair and upgrade preserve security history, identity and protected configuration.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) });
         AutomationProperties.SetAutomationId(_version, "SetupInstallationVersion"); panel.Children.Add(_version);
+        AutomationProperties.SetAutomationId(_localNetwork, "SetupLocalNetworkAccess"); _credentials.Children.Add(_localNetwork);
+        _credentials.Children.Add(new TextBlock { Text = "This computer becomes the company's central SentinelAI computer. Core accepts Agents over HTTPS on port 5443 with its own certificate, which Agents trust only by its SHA-256 fingerprint shown in Desktop Settings. Windows Firewall allows that port only from the local subnet on Domain and Private networks, never on Public networks. Clear this option to keep the installation local to this computer only.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) });
         AddField(_credentials, "Administrator username", _username, "SetupAdministratorUsername");
         AddField(_credentials, "Administrator password (12–1024 characters)", _password, "SetupAdministratorPassword");
         AddField(_credentials, "Confirm administrator password", _confirmation, "SetupAdministratorConfirmPassword");
@@ -121,7 +124,7 @@ public sealed class SetupWindow : Window
             Array.Clear(password); Array.Clear(confirmation); _password.Clear(); _confirmation.Clear();
             ShowError("Enter a valid username and matching password with 12–1024 characters."); return;
         }
-        Array.Clear(confirmation); var username = _username.Text.Trim();
+        Array.Clear(confirmation); var username = _username.Text.Trim(); var localNetworkAccess = _localNetwork.IsChecked == true;
         _password.Clear(); _confirmation.Clear(); _username.Clear();
         _attempted = true; _working = true; SetInputs(false); _error.Visibility = Visibility.Collapsed;
         _progress.Text = "Validating installation files...";
@@ -132,10 +135,13 @@ public sealed class SetupWindow : Window
             using var core = new WindowsCoreServices(); using var administrator = core.CreateAdministratorSetupClient();
             var worker = new PowerShellSetupWorker(_work, _installation.Metadata, progress);
             var issuer = new SetupEnrollmentIssuer(core);
-            await SetupWorkflow.InstallAsync(worker, administrator, issuer, username, password, progress, _lifetime.Token);
+            var localNetwork = localNetworkAccess ? new WindowsLocalNetworkCertificate() : null;
+            await SetupWorkflow.InstallAsync(worker, administrator, issuer, localNetwork, username, password, progress, _lifetime.Token);
             _progress.Text = "Installation finished.";
             Application.Current.Properties["ExitCode"] = 0;
-            _finished.Text = "SentinelAI installation completed. Open Desktop and sign in with the administrator account you created.";
+            _finished.Text = localNetworkAccess
+                ? "SentinelAI installation completed. Open Desktop and sign in with the administrator account you created. Settings shows the local-network addresses, port and certificate fingerprint for Agents."
+                : "SentinelAI installation completed. Open Desktop and sign in with the administrator account you created.";
             _finished.Visibility = Visibility.Visible; _open.Visibility = Visibility.Visible;
             BringResultIntoView(_finished);
         }
@@ -200,7 +206,7 @@ public sealed class SetupWindow : Window
     private void SetInputs(bool enabled)
     {
         var fresh = enabled && !_working && !_attempted && _state?.Kind == SetupInstallationKind.Fresh;
-        _username.IsEnabled = fresh; _password.IsEnabled = fresh; _confirmation.IsEnabled = fresh; _install.IsEnabled = fresh;
+        _username.IsEnabled = fresh; _password.IsEnabled = fresh; _confirmation.IsEnabled = fresh; _install.IsEnabled = fresh; _localNetwork.IsEnabled = fresh;
         UpdateMaintenanceInputs();
     }
     private void UpdateMaintenanceInputs()

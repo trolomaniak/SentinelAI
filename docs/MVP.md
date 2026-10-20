@@ -21,6 +21,17 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 | Pilot end | Monitoring continues; Desktop asks the company to get in touch and offers uninstallation | MVP-3 |
 | Documentation | For the business and for IT, in Polish and English, plus a release script with checksums and a two-computer test checklist | MVP-4 |
 
+## Central Core (MVP-1)
+
+- Setup installs the central computer with local-network access enabled by default; **Allow Agents on other computers in this local network to connect** can be cleared for a local-only installation.
+- Core serves Agents on HTTPS port **5443** with its own certificate (ECDSA P-256, 10 years, the computer's DNS name and FQDN) in `LocalMachine\My`; its private key is usable only by Core's service account, SYSTEM and Administrators. The local Desktop keeps `http://127.0.0.1:5000`.
+- The local-network listener serves only the Agent routes (enrollment, heartbeat, inventory and posture, security events, endpoint telemetry); administrator, authentication and Desktop routes are refused there.
+- TLS: TLS 1.3 whenever both computers support it, TLS 1.2 only when one is Windows 10, and on TLS 1.2 only ECDHE with AES-GCM; Core aborts any other negotiated connection.
+- Trust: an Agent trusts Core only by the exact SHA-256 fingerprint of its certificate; no certificate authority is installed anywhere. Desktop Settings shows the addresses, port and fingerprint; MVP-2's enrollment codes carry them.
+- Windows Firewall: one owned inbound rule for Core's program, TCP 5443, from the local subnet on the Domain and Private profiles only. A network classified as **Public** blocks Agents; set the company network to **Private**.
+- Upgrade and repair keep the certificate (Agents pin it) and restore the firewall rule; uninstall removes the rule; confirmed data removal deletes the certificate and key.
+- Details, the manual Windows 10 check and limitations: [Setup](SETUP.md#central-computer-and-the-local-network).
+
 ## Decisions and known limitations
 
 - The installers are not code-signed for the pilot because of the cost. Windows SmartScreen warns on first run. Smart App Control or a company antivirus/EDR may block unsigned programs. Do not attach the installer to e-mails: link to a download page over HTTPS that publishes SHA-256 checksums, or install together with the company.

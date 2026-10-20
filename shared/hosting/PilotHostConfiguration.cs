@@ -11,6 +11,11 @@ internal sealed record PilotHostConfiguration(string[] Arguments, Dictionary<str
         "CoreUrl", "DataDirectory", "CoreCertificateSha256", "HeartbeatInterval",
         "RetryDelay", "MaxRetryDelay", "EnrollmentTokenFile"
     };
+    // Core's local-network listener is enabled by its port and certificate pin together.
+    private static readonly HashSet<string> CoreKeys = new(StringComparer.Ordinal)
+    {
+        "DataDirectory", "LocalNetworkPort", "LocalNetworkCertificateSha256"
+    };
 
     public static PilotHostConfiguration Read(string[] arguments, bool agent)
     {
@@ -61,7 +66,7 @@ internal sealed record PilotHostConfiguration(string[] Arguments, Dictionary<str
                     foreach (var member in property.Value.EnumerateObject())
                     {
                         if (!members.Add(member.Name) ||
-                            (agent ? !AgentKeys.Contains(member.Name) : member.Name != "DataDirectory")) throw Invalid();
+                            !(agent ? AgentKeys : CoreKeys).Contains(member.Name)) throw Invalid();
                         var value = ReadString(member.Value);
                         if (member.Name is "DataDirectory" or "EnrollmentTokenFile")
                         {
@@ -75,7 +80,9 @@ internal sealed record PilotHostConfiguration(string[] Arguments, Dictionary<str
             }
 
             if (agent ? !values.ContainsKey("Agent:CoreUrl") || !values.ContainsKey("Agent:DataDirectory")
-                      : !values.ContainsKey("urls") || !values.ContainsKey("SentinelAI:DataDirectory")) throw Invalid();
+                      : !values.ContainsKey("urls") || !values.ContainsKey("SentinelAI:DataDirectory") ||
+                        values.ContainsKey("SentinelAI:LocalNetworkPort") != values.ContainsKey("SentinelAI:LocalNetworkCertificateSha256"))
+                throw Invalid();
             return new([], values);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or ArgumentException)

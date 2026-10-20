@@ -24,7 +24,7 @@ Installation re-verifies the signed package and exact installed code, existing p
 
 ## Identity and storage
 
-The fixed account is the virtual account `NT SERVICE\SentinelAICore`, not an administrator. Windows manages its password and service logon. The installer needs elevation for SCM and NTFS ACL changes; Core itself needs no administrator, interactive logon, debug or shutdown privilege. Virtual accounts may authenticate to domain resources as the machine account; this workflow configures only loopback and does not enable ambient outbound authentication or provision domain access. Privileged local administrators remain trusted.
+The fixed account is the virtual account `NT SERVICE\SentinelAICore`, not an administrator. Windows manages its password and service logon. The installer needs elevation for SCM and NTFS ACL changes; Core itself needs no administrator, interactive logon, debug or shutdown privilege. Virtual accounts may authenticate to domain resources as the machine account; this workflow does not enable ambient outbound authentication or provision domain access. In the central role installed by Setup, the account can also read (use, not export) Core's local-network certificate key, which Core needs to serve Agents over HTTPS ([central computer](SETUP.md#central-computer-and-the-local-network)). Privileged local administrators remain trusted.
 
 | Location | Service access | Purpose |
 | --- | --- | --- |

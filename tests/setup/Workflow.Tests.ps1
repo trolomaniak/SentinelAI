@@ -15,8 +15,10 @@ function Reject-SetupTest([scriptblock]$Operation, [string]$Label) {
 $syntheticToken = '0123456789abcdef' * 4
 function New-SetupTestRequest([string]$Action = 'prepare-core') {
     [pscustomobject]@{ action = $Action; workDirectory = Join-Path ([IO.Path]::GetTempPath()) 'synthetic-setup-worker';
-        keyId = 'dev-setup-test'; channel = 'pilot'; enrollmentToken = $(if ($Action -eq 'complete') { $syntheticToken } else { '' }); version = '1.0.0'; preserveData = 'true' }
+        keyId = 'dev-setup-test'; channel = 'pilot'; enrollmentToken = $(if ($Action -eq 'complete') { $syntheticToken } else { '' }); version = '1.0.0'; preserveData = 'true'
+        localNetworkCertificateSha256 = '' }
 }
+$syntheticPin = 'AB' * 32
 Assert-SetupRequest (New-SetupTestRequest)
 Assert-SetupRequest (New-SetupTestRequest 'complete')
 Assert-SetupRequest (New-SetupTestRequest 'start-core')
@@ -85,6 +87,19 @@ foreach ($action in @('prepare-core','start-core','complete','inspect','lifecycl
     $request = New-SetupTestRequest $action; $request.preserveData = 'false'
     Reject-SetupTest { Assert-SetupRequest $request } 'data deletion forbidden outside explicit uninstall'
 }
+# Only the fresh Core preparation carries the public SHA-256 of the certificate the Setup host created.
+$request = New-SetupTestRequest; $request.localNetworkCertificateSha256 = $syntheticPin
+Assert-SetupRequest (Read-PilotStrictJson -Json ($request | ConvertTo-Json -Compress)); $script:checks++
+foreach ($pin in @($null, 0, ('ab' * 32), ('A' * 63), ('A' * 65), ('G' * 64), (' ' + ('A' * 63)))) {
+    $request = New-SetupTestRequest; $request.localNetworkCertificateSha256 = $pin
+    Reject-SetupTest { Assert-SetupRequest $request } 'local-network pin is an exact uppercase SHA-256 string'
+}
+foreach ($action in @('start-core','complete','inspect','lifecycle-start','lifecycle-health','uninstall')) {
+    $request = New-SetupTestRequest $action; $request.localNetworkCertificateSha256 = $syntheticPin
+    Reject-SetupTest { Assert-SetupRequest $request } 'only fresh Core preparation receives a certificate pin'
+}
+$request = New-SetupTestRequest; $request.PSObject.Properties.Remove('localNetworkCertificateSha256')
+Reject-SetupTest { Assert-SetupRequest $request } 'the local-network field is mandatory on the wire'
 foreach ($version in @('01.0.0','1.0','-1.0.0','1.0.0-beta','65536.0.0',$null,123)) {
     $request = New-SetupTestRequest; $request.version = $version
     Reject-SetupTest { Assert-SetupRequest $request } 'unsupported setup version'
@@ -102,6 +117,9 @@ $script:existing = $null
 $script:agentService = $null
 $script:coreService = $null
 $script:failAgent = $false
+$script:firewallRule = $null
+$script:certificatePresent = $true
+$script:network = $null
 $script:locations = @{}
 foreach ($name in @('CoreCode','CoreData','AgentCode','AgentData','DesktopCode','UpdaterCode','SetupData','Menu')) {
     $script:locations[$name] = Join-Path ([IO.Path]::GetTempPath()) ('synthetic-setup-' + $name)
@@ -113,9 +131,17 @@ function Assert-PilotTrustedPath { param($Path,[switch]$Tree); }
 function Test-Path { param($LiteralPath); return $LiteralPath -eq $script:existing }
 function Get-PilotService { $script:agentService }
 function Get-CoreService { $script:coreService }
+function Get-CoreServiceFirewallRule { $script:firewallRule }
+function Test-CoreServiceCertificate { param($Sha256); [void]$script:events.Add('certificate-' + $Sha256.Substring(0, 4)); $script:certificatePresent }
+function Get-CoreServiceLocalNetwork { param($DataDirectory); $script:network }
+function Set-CoreServiceFirewallRule {
+    param($ExecutablePath,$Port)
+    Assert-SetupTest ($ExecutablePath -ceq (Join-Path $script:locations.CoreCode 'SentinelAI.Core.exe') -and $Port -eq 5443) 'firewall rule scoped to installed Core and its port'
+    [void]$script:events.Add('firewall')
+}
 function Invoke-PilotInstall {
-    param($Component,$BundleDirectory,$PublicKeyPath,$KeyId,$Environment,$Channel,$CodeDirectory,$DataDirectory,$AdminCredential,$TimeoutSeconds,$EnrollmentToken)
-    [void]$script:events.Add('install-' + $Component)
+    param($Component,$BundleDirectory,$PublicKeyPath,$KeyId,$Environment,$Channel,$CodeDirectory,$DataDirectory,$AdminCredential,$TimeoutSeconds,$EnrollmentToken,$LocalNetworkCertificateSha256)
+    [void]$script:events.Add('install-' + $Component + $(if ($LocalNetworkCertificateSha256) { ':' + $LocalNetworkCertificateSha256.Substring(0, 4) } else { '' }))
     Assert-SetupTest ($Environment -ceq 'development' -and $Channel -ceq 'pilot' -and $KeyId -ceq 'dev-setup-test') 'fixed package policy'
     Assert-SetupTest (-not $PublicKeyPath.StartsWith($BundleDirectory + [IO.Path]::DirectorySeparatorChar)) 'independent trust resource'
     if ($Component -eq 'Agent') {
@@ -151,15 +177,34 @@ Reject-SetupTest { Assert-SetupFreshTargets $script:locations } 'existing Agent 
 $script:agentService = $null; $script:coreService = [pscustomobject]@{ Name = 'SentinelAICore' }
 Reject-SetupTest { Assert-SetupFreshTargets $script:locations } 'existing Core service preserved'
 $script:coreService = $null
+$script:firewallRule = [pscustomobject]@{ Name = 'SentinelAI-Core-LocalNetwork' }
+Reject-SetupTest { Assert-SetupFreshTargets $script:locations } 'existing Core firewall rule preserved'
+$script:firewallRule = $null
 $output = @(Invoke-SetupInstallation (New-SetupTestRequest))
-Assert-SetupTest (($script:events -join ',') -ceq 'install-Core') 'prepare installs only Core'
+Assert-SetupTest (($script:events -join ',') -ceq 'install-Core') 'local-only prepare installs only Core'
 Assert-SetupTest (($output -join ',') -ceq 'PROGRESS|validate,PROGRESS|core,DONE') 'prepare protocol'
 $script:events.Clear()
+$request = New-SetupTestRequest; $request.localNetworkCertificateSha256 = $syntheticPin
+$output = @(Invoke-SetupInstallation $request)
+Assert-SetupTest (($script:events -join ',') -ceq 'certificate-ABAB,install-Core:ABAB') 'central prepare checks the created certificate and configures its pin'
+$script:events.Clear(); $script:certificatePresent = $false
+Reject-SetupTest { Invoke-SetupInstallation $request } 'central prepare refuses a pin without its machine certificate'
+Assert-SetupTest (($script:events -join ',') -ceq 'certificate-ABAB') 'a missing certificate stops before Core is installed'
+$script:events.Clear(); $script:certificatePresent = $true
 $output = @(Invoke-SetupInstallation (New-SetupTestRequest 'start-core'))
-Assert-SetupTest (($script:events -join ',') -ceq 'core-service-Install') 'start stage installs only Core service'
+Assert-SetupTest (($script:events -join ',') -ceq 'core-service-Install') 'local-only start installs only Core service'
 Assert-SetupTest (($output -join ',') -ceq 'PROGRESS|validate,PROGRESS|services,DONE') 'Core start protocol'
+$script:events.Clear(); $script:network = [pscustomobject]@{ Port = 5443; CertificateSha256 = $syntheticPin }
+$output = @(Invoke-SetupInstallation (New-SetupTestRequest 'start-core'))
+Assert-SetupTest (($script:events -join ',') -ceq 'core-service-Install,firewall') 'central start adds the firewall rule after healthy Core'
+Assert-SetupTest (($output -join ',') -ceq 'PROGRESS|validate,PROGRESS|services,PROGRESS|network,DONE') 'central Core start protocol'
+$script:events.Clear(); $script:network = $null
+$script:firewallRule = [pscustomobject]@{ Name = 'SentinelAI-Core-LocalNetwork' }
+Reject-SetupTest { Invoke-SetupInstallation (New-SetupTestRequest 'start-core') } 'start refuses a firewall rule it did not add'
 $script:events.Clear()
 $script:coreService = [pscustomobject]@{ Name = 'SentinelAICore'; State = 'Running' }
+# The central start phase added the owned rule; completion must not treat it as foreign state.
+$script:firewallRule = [pscustomobject]@{ Name = 'SentinelAI-Core-LocalNetwork' }
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('sentinelai-setup-tests-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory((Join-Path $fixture 'trust'))

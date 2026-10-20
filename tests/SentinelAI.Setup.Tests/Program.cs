@@ -120,7 +120,8 @@ try
     var count = SetupWorkflow.WriteWorkerRequest(buffer, "complete", "C:\\ProgramData\\SentinelAI-Setup\\0123456789abcdef0123456789abcdef", metadata, oneUseToken.AsSpan());
     Ensure(count <= 8192 && buffer[count - 1] == '\n', "Worker input is one bounded JSON line");
     using var document = JsonDocument.Parse(buffer.AsMemory(0, count - 1));
-    Ensure(document.RootElement.EnumerateObject().Select(field => field.Name).SequenceEqual(new[] { "action", "workDirectory", "keyId", "channel", "enrollmentToken", "version", "preserveData" }), "Worker has exact seven fields without administrator credentials");
+    Ensure(document.RootElement.EnumerateObject().Select(field => field.Name).SequenceEqual(new[] { "action", "workDirectory", "keyId", "channel", "enrollmentToken", "version", "preserveData", "localNetworkCertificateSha256" }), "Worker has exact eight fields without administrator credentials");
+    Ensure(document.RootElement.GetProperty("localNetworkCertificateSha256").GetString() == "", "Only Core preparation carries a certificate fingerprint");
     Ensure(document.RootElement.EnumerateObject().All(field => field.Value.ValueKind == JsonValueKind.String), "Strict worker grammar uses string values only");
     Ensure(document.RootElement.GetProperty("version").GetString() == metadata.Version && document.RootElement.GetProperty("preserveData").GetString() == "true", "Fresh installation has an explicit candidate version and preserves data");
     Ensure(document.RootElement.GetProperty("enrollmentToken").GetString() == oneUseToken, "Complete uses one-use token only");
@@ -129,7 +130,7 @@ try
         count = SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\ProgramData\\SentinelAI-Setup\\0123456789abcdef0123456789abcdef", metadata, ReadOnlySpan<char>.Empty);
         using var request = JsonDocument.Parse(buffer.AsMemory(0, count - 1));
         Ensure(request.RootElement.GetProperty("action").GetString() == action && request.RootElement.GetProperty("enrollmentToken").ValueKind == JsonValueKind.String && request.RootElement.GetProperty("enrollmentToken").GetString() == "", "Preparing and starting Core use the strict parser's empty credential-free string");
-        Ensure(request.RootElement.EnumerateObject().Count() == 7, "All worker actions use the same exact fields");
+        Ensure(request.RootElement.EnumerateObject().Count() == 8, "All worker actions use the same exact fields");
         await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, oneUseToken.AsSpan()); return Task.CompletedTask; }, "No premature enrollment token");
     }
     foreach (var invalid in new[] { "", new string('a', 63), new string('a', 65), new string('g', 64), new string('ａ', 64), oneUseToken[..63] + "\n", oneUseToken[..63] + " " })
@@ -148,10 +149,22 @@ try
         count = SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, ReadOnlySpan<char>.Empty);
         using var request = JsonDocument.Parse(buffer.AsMemory(0, count - 1));
         Ensure(request.RootElement.GetProperty("action").GetString() == action && request.RootElement.GetProperty("enrollmentToken").GetString() == "", "Lifecycle phases are credential-free fixed actions");
-        Ensure(request.RootElement.EnumerateObject().Count() == 7 && request.RootElement.EnumerateObject().All(field => field.Value.ValueKind == JsonValueKind.String), "Lifecycle request obeys the exact string-only grammar");
+        Ensure(request.RootElement.EnumerateObject().Count() == 8 && request.RootElement.EnumerateObject().All(field => field.Value.ValueKind == JsonValueKind.String), "Lifecycle request obeys the exact string-only grammar");
         await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, oneUseToken.AsSpan()); return Task.CompletedTask; }, "Maintenance never accepts a fresh enrollment token");
         if (action != "uninstall")
             await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, ReadOnlySpan<char>.Empty, false); return Task.CompletedTask; }, "Only an uninstall request can explicitly remove data");
+    }
+    // The central role: only the fresh Core preparation carries the public SHA-256 of Core's certificate.
+    var pin = new string('E', 64);
+    count = SetupWorkflow.WriteWorkerRequest(buffer, "prepare-core", "C:\\safe", metadata, ReadOnlySpan<char>.Empty, localNetworkCertificateSha256: pin);
+    using (var central = JsonDocument.Parse(buffer.AsMemory(0, count - 1)))
+        Ensure(central.RootElement.GetProperty("localNetworkCertificateSha256").GetString() == pin, "Core preparation carries the exact certificate fingerprint");
+    foreach (var action in new[] { "start-core", "inspect", "lifecycle-start", "lifecycle-health", "uninstall" })
+        await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, action, "C:\\safe", metadata, ReadOnlySpan<char>.Empty, localNetworkCertificateSha256: pin); return Task.CompletedTask; }, "Only Core preparation receives a certificate fingerprint");
+    foreach (var invalid in new[] { new string('e', 64), new string('E', 63), new string('E', 65), new string('G', 64), new string('Ｅ', 64), " " + new string('E', 63) })
+    {
+        Ensure(!SetupWorkflow.ValidCertificateSha256(invalid), "Only an exact uppercase SHA-256 is a certificate fingerprint");
+        await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, "prepare-core", "C:\\safe", metadata, ReadOnlySpan<char>.Empty, localNetworkCertificateSha256: invalid); return Task.CompletedTask; }, "A malformed certificate fingerprint never reaches PowerShell");
     }
     count = SetupWorkflow.WriteWorkerRequest(buffer, "uninstall", "C:\\safe", metadata, ReadOnlySpan<char>.Empty, false);
     using var removal = JsonDocument.Parse(buffer.AsMemory(0, count - 1));
@@ -160,7 +173,7 @@ try
         await Reject(() => { SetupWorkflow.WriteWorkerRequest(buffer, "inspect", "C:\\safe", metadata with { Version = version }, ReadOnlySpan<char>.Empty); return Task.CompletedTask; }, "Unsupported candidate version never reaches PowerShell");
 }
 finally { CryptographicOperations.ZeroMemory(buffer); }
-foreach (var marker in new[] { "PROGRESS|validate", "PROGRESS|core", "PROGRESS|services", "PROGRESS|agent", "PROGRESS|desktop", "PROGRESS|shortcut" }) Ensure(SetupWorkflow.ProgressFor(marker) is not null, "Fixed progress allowlist");
+foreach (var marker in new[] { "PROGRESS|validate", "PROGRESS|core", "PROGRESS|services", "PROGRESS|network", "PROGRESS|agent", "PROGRESS|desktop", "PROGRESS|shortcut" }) Ensure(SetupWorkflow.ProgressFor(marker) is not null, "Fixed progress allowlist");
 foreach (var marker in new[] { "secret", "PROGRESS|password", "PROGRESS|core\nsecret", "FAILED|internal exception", "" }) Ensure(SetupWorkflow.ProgressFor(marker) is null, "Unknown output never rendered");
 foreach (var name in new[] { "DOTNET_STARTUP_HOOKS", "Dotnet_StartUp_Hooks", "dotnet_additional_deps", "DOTNET_SHARED_STORE", "Dotnet_Bundle_Extract_Base_Dir", "dotnet_root_x64", "CoReClR_Enable_Profiling", "complus_gcstress", "CoR_Profiler_Path_64", "cor_enable_profiling", "SentinelAI_Bootstrap_Password", "SENTINELAI_BOOTSTRAP_USERNAME", "DotNet_Roll_Forward", "DotNet_MultiLevel_Lookup", "DOTNET_DbgEnableMiniDump", "AppDomain_Manager_Type", "devpath", "__compat_layer", "DOTNET_CLI_TELEMETRY_OPTOUT" })
     Ensure(SetupEnvironmentRules.IsExecutionOverride(name), "Execution override is identified independently of Windows environment casing");
@@ -222,29 +235,29 @@ using (var cancelLifecycle = new CancellationTokenSource())
 }
 
 var sequence = new List<string>(); var fake = new FakeWorker(sequence); var administrator = new FakeAdministrator(sequence); var issuer = new FakeIssuer(sequence);
-await SetupWorkflow.InstallAsync(fake, administrator, issuer, " operator ", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None);
+await SetupWorkflow.InstallAsync(fake, administrator, issuer, null, " operator ", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None);
 Ensure(sequence.SequenceEqual(new[] { "prepare", "state", "initialize:operator", "start", "issue:operator", "complete" }), "Administrator bootstrap and Core start precede trusted enrollment issuance and token-only completion");
 Ensure(issuer.Password.Span.SequenceEqual("synthetic-password".AsSpan()), "Only the trusted issuer receives the administrator password after Core is running");
 Ensure(fake.ReceivedToken == oneUseToken && fake.HeldToken.Span.IndexOfAnyExcept('\0') == -1, "Completion receives exactly the enrollment token and workflow clears its mutable storage");
 foreach (var state in Enum.GetValues<AdministratorSetupState>().Where(value => value != AdministratorSetupState.Required))
 {
     sequence.Clear(); administrator = new FakeAdministrator(sequence) { State = state };
-    await Reject(() => SetupWorkflow.InstallAsync(fake, administrator, issuer, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "Unknown/existing administrator refused");
+    await Reject(() => SetupWorkflow.InstallAsync(fake, administrator, issuer, null, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "Unknown/existing administrator refused");
     Ensure(sequence.SequenceEqual(new[] { "prepare", "state" }), "No overwrite or service completion");
 }
 foreach (var result in Enum.GetValues<AdministratorSetupResult>().Where(value => value != AdministratorSetupResult.Created))
 {
     sequence.Clear(); administrator = new FakeAdministrator(sequence) { Result = result };
-    await Reject(() => SetupWorkflow.InstallAsync(fake, administrator, issuer, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "Raced/invalid creation blocks deployment");
+    await Reject(() => SetupWorkflow.InstallAsync(fake, administrator, issuer, null, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "Raced/invalid creation blocks deployment");
     Ensure(sequence.SequenceEqual(new[] { "prepare", "state", "initialize:operator" }), "No service start, credential issuance or completion after bootstrap failure");
 }
 sequence.Clear();
-await Reject(() => SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), issuer, "operator", "short".AsMemory(), new SilentProgress(), CancellationToken.None), "Invalid input rejected before filesystem work");
+await Reject(() => SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), issuer, null, "operator", "short".AsMemory(), new SilentProgress(), CancellationToken.None), "Invalid input rejected before filesystem work");
 Ensure(sequence.Count == 0, "No prepare for invalid credentials");
 foreach (var failure in new[] { "prepare", "start", "issue", "complete" })
 {
     sequence.Clear(); fake = new FakeWorker(sequence) { Failure = failure }; issuer = new FakeIssuer(sequence) { Fail = failure == "issue" };
-    await Reject(() => SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), issuer, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "Failed step blocks subsequent deployment");
+    await Reject(() => SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), issuer, null, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "Failed step blocks subsequent deployment");
     var expected = new[] { "prepare", "state", "initialize:operator", "start", "issue:operator", "complete" };
     var last = Array.IndexOf(expected, failure == "issue" ? "issue:operator" : failure);
     Ensure(sequence.SequenceEqual(expected.Take(last + 1)), "A failing stage cannot continue to later stages");
@@ -253,7 +266,7 @@ foreach (var failure in new[] { "prepare", "start", "issue", "complete" })
 foreach (var malformed in new[] { "", new string('g', 64), new string('a', 63), new string('a', 65) })
 {
     sequence.Clear(); fake = new FakeWorker(sequence); issuer = new FakeIssuer(sequence) { IssuedToken = malformed };
-    await Reject(() => SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), issuer, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "Malformed issuance refuses completion");
+    await Reject(() => SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), issuer, null, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "Malformed issuance refuses completion");
     Ensure(sequence.SequenceEqual(new[] { "prepare", "state", "initialize:operator", "start", "issue:operator" }), "Worker never receives malformed enrollment response");
 }
 foreach (var boundary in new[] { "before", "prepare", "state", "initialize", "start", "issue", "complete" })
@@ -264,12 +277,37 @@ foreach (var boundary in new[] { "before", "prepare", "state", "initialize", "st
     administrator = new FakeAdministrator(sequence) { AfterState = boundary == "state" ? cancellation.Cancel : null, AfterInitialize = boundary == "initialize" ? cancellation.Cancel : null };
     issuer = new FakeIssuer(sequence) { AfterIssue = boundary == "issue" ? cancellation.Cancel : null };
     if (boundary == "before") cancellation.Cancel();
-    try { await SetupWorkflow.InstallAsync(fake, administrator, issuer, "operator", "synthetic-password".AsMemory(), new SilentProgress(), cancellation.Token); throw new InvalidOperationException("Canceled workflow accepted"); }
+    try { await SetupWorkflow.InstallAsync(fake, administrator, issuer, null, "operator", "synthetic-password".AsMemory(), new SilentProgress(), cancellation.Token); throw new InvalidOperationException("Canceled workflow accepted"); }
     catch (OperationCanceledException) { assertions++; }
     var expected = new[] { "prepare", "state", "initialize:operator", "start", "issue:operator", "complete" };
     var last = boundary switch { "before" => -1, "initialize" => 2, "issue" => 4, _ => Array.IndexOf(expected, boundary) };
     Ensure(sequence.SequenceEqual(expected.Take(last + 1)), "Cancellation at each boundary prevents the next credential or installation operation");
     if (boundary == "complete") Ensure(fake.HeldToken.Span.IndexOfAnyExcept('\0') == -1, "Token wiped even when completion is canceled");
+}
+// The central role creates Core's certificate first and passes only its SHA-256 to Core preparation.
+// A certificate whose Core was never prepared is removed; later failures keep it with the partial installation.
+var certificatePin = new string('F', 64);
+sequence.Clear(); fake = new FakeWorker(sequence); var certificates = new FakeCertificate(sequence) { Pin = certificatePin };
+await SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), new FakeIssuer(sequence), certificates, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None);
+Ensure(sequence.SequenceEqual(new[] { "certificate", "prepare:FFFF", "state", "initialize:operator", "start", "issue:operator", "complete" }), "The central installation creates Core's certificate before preparing Core with its pin");
+foreach (var failure in new[] { "prepare", "start", "complete" })
+{
+    sequence.Clear(); fake = new FakeWorker(sequence) { Failure = failure }; certificates = new FakeCertificate(sequence) { Pin = certificatePin };
+    await Reject(() => SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), new FakeIssuer(sequence), certificates, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "A failed central installation is not reported as success");
+    Ensure(sequence.Contains("remove:FFFF") == (failure == "prepare"), "Only an unreferenced certificate is removed after a failure");
+}
+foreach (var malformed in new[] { "", new string('f', 64), new string('F', 63) })
+{
+    sequence.Clear(); fake = new FakeWorker(sequence); certificates = new FakeCertificate(sequence) { Pin = malformed };
+    await Reject(() => SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), new FakeIssuer(sequence), certificates, "operator", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None), "A malformed certificate fingerprint stops installation");
+    Ensure(sequence.SequenceEqual(new[] { "certificate" }), "Core is never prepared with a malformed certificate fingerprint");
+}
+using (var cancellation = new CancellationTokenSource())
+{
+    sequence.Clear(); fake = new FakeWorker(sequence); certificates = new FakeCertificate(sequence) { Pin = certificatePin, AfterCreate = cancellation.Cancel };
+    try { await SetupWorkflow.InstallAsync(fake, new FakeAdministrator(sequence), new FakeIssuer(sequence), certificates, "operator", "synthetic-password".AsMemory(), new SilentProgress(), cancellation.Token); throw new InvalidOperationException("Canceled workflow accepted"); }
+    catch (OperationCanceledException) { assertions++; }
+    Ensure(sequence.SequenceEqual(new[] { "certificate", "remove:FFFF" }), "Cancellation after certificate creation removes the unreferenced certificate");
 }
 assertions += await EnrollmentProtocolTests.RunAsync();
 Console.WriteLine($"Setup foundation: {assertions} assertions passed.");
@@ -295,7 +333,11 @@ sealed class FakeWorker(List<string> sequence) : ISetupWorker
     public string? Failure { get; init; }
     public ReadOnlyMemory<char> HeldToken { get; private set; }
     public string? ReceivedToken { get; private set; }
-    public Task PrepareCoreAsync(CancellationToken token) { token.ThrowIfCancellationRequested(); sequence.Add("prepare"); if (Failure == "prepare") throw new InvalidDataException(); AfterPrepare?.Invoke(); return Task.CompletedTask; }
+    public Task PrepareCoreAsync(string localNetworkCertificateSha256, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested(); sequence.Add(localNetworkCertificateSha256.Length == 0 ? "prepare" : "prepare:" + localNetworkCertificateSha256[..4]);
+        if (Failure == "prepare") throw new InvalidDataException(); AfterPrepare?.Invoke(); return Task.CompletedTask;
+    }
     public Task StartCoreAsync(CancellationToken token) { token.ThrowIfCancellationRequested(); sequence.Add("start"); if (Failure == "start") throw new InvalidDataException(); AfterStart?.Invoke(); return Task.CompletedTask; }
     public Task CompleteAsync(ReadOnlyMemory<char> enrollmentToken, CancellationToken token)
     {
@@ -324,4 +366,11 @@ sealed class FakeIssuer(List<string> sequence) : ISetupEnrollmentIssuer
         token.ThrowIfCancellationRequested(); sequence.Add("issue:" + username); Password = password;
         if (Fail) throw new InvalidDataException(); AfterIssue?.Invoke(); return Task.FromResult(IssuedToken);
     }
+}
+sealed class FakeCertificate(List<string> sequence) : ISetupLocalNetworkCertificate
+{
+    public string Pin { get; init; } = new string('F', 64);
+    public Action? AfterCreate { get; init; }
+    public string Create() { sequence.Add("certificate"); AfterCreate?.Invoke(); return Pin; }
+    public void Remove(string sha256) => sequence.Add("remove:" + sha256[..4]);
 }

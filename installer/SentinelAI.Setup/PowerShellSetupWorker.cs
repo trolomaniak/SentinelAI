@@ -8,7 +8,8 @@ namespace SentinelAI.Setup;
 
 internal sealed class PowerShellSetupWorker(string workDirectory, SetupMetadata metadata, IProgress<string> progress) : ISetupWorker
 {
-    public async Task PrepareCoreAsync(CancellationToken token) => _ = await RunAsync("prepare-core", ReadOnlyMemory<char>.Empty, true, token).ConfigureAwait(false);
+    public async Task PrepareCoreAsync(string localNetworkCertificateSha256, CancellationToken token) =>
+        _ = await RunAsync("prepare-core", ReadOnlyMemory<char>.Empty, true, token, localNetworkCertificateSha256).ConfigureAwait(false);
     public async Task StartCoreAsync(CancellationToken token) => _ = await RunAsync("start-core", ReadOnlyMemory<char>.Empty, true, token).ConfigureAwait(false);
     public async Task CompleteAsync(ReadOnlyMemory<char> enrollmentToken, CancellationToken token) => _ = await RunAsync("complete", enrollmentToken, true, token).ConfigureAwait(false);
 
@@ -18,7 +19,8 @@ internal sealed class PowerShellSetupWorker(string workDirectory, SetupMetadata 
     internal async Task CommandAsync(string action, bool preserveData, CancellationToken token) =>
         _ = await RunAsync(action, ReadOnlyMemory<char>.Empty, preserveData, token).ConfigureAwait(false);
 
-    private async Task<SetupInstallation?> RunAsync(string action, ReadOnlyMemory<char> enrollmentToken, bool preserveData, CancellationToken token)
+    private async Task<SetupInstallation?> RunAsync(string action, ReadOnlyMemory<char> enrollmentToken, bool preserveData, CancellationToken token,
+        string localNetworkCertificateSha256 = "")
     {
         token.ThrowIfCancellationRequested();
         ProtectedStaging.Validate(workDirectory);
@@ -44,7 +46,7 @@ internal sealed class PowerShellSetupWorker(string workDirectory, SetupMetadata 
             var output = ReadProgressAsync(process.StandardOutput.BaseStream, deadline, action == "inspect");
             var errors = ReadErrorsAsync(process.StandardError.BaseStream, deadline);
             ObserveFailure(output); ObserveFailure(errors);
-            var length = SetupWorkflow.WriteWorkerRequest(input, action, workDirectory, metadata, enrollmentToken.Span, preserveData);
+            var length = SetupWorkflow.WriteWorkerRequest(input, action, workDirectory, metadata, enrollmentToken.Span, preserveData, localNetworkCertificateSha256);
             await process.StandardInput.BaseStream.WriteAsync(input.AsMemory(0, length), deadline.Token).ConfigureAwait(false);
             await process.StandardInput.BaseStream.FlushAsync(deadline.Token).ConfigureAwait(false);
             process.StandardInput.Close(); CryptographicOperations.ZeroMemory(input);
@@ -85,7 +87,7 @@ internal sealed class PowerShellSetupWorker(string workDirectory, SetupMetadata 
                 if (text is not null) progress.Report(text);
                 else if (marker == "DONE") done = true;
                 else if (marker.StartsWith("STATE|", StringComparison.Ordinal) && expectState && state is null) state = SetupWorkflow.ParseInstallationState(marker);
-                else if (marker is "FAILED|validate" or "FAILED|core" or "FAILED|services" or "FAILED|agent" or "FAILED|desktop" or "FAILED|shortcut" or "FAILED|inspect" or "FAILED|replace" or "FAILED|health" or "FAILED|rollback" or "FAILED|uninstall") failed = true;
+                else if (marker is "FAILED|validate" or "FAILED|core" or "FAILED|services" or "FAILED|network" or "FAILED|agent" or "FAILED|desktop" or "FAILED|shortcut" or "FAILED|inspect" or "FAILED|replace" or "FAILED|health" or "FAILED|rollback" or "FAILED|uninstall") failed = true;
                 else throw new InvalidDataException();
             }
             if (used != 0 || !done || failed || expectState && state is null) throw new InvalidDataException("Invalid setup response.");

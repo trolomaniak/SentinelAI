@@ -20,6 +20,7 @@ function Assert-Rejected {
     Assert-Test $rejected $Message
 }
 function New-Fixture {
+    param([switch]$LocalNetwork)
     Remove-Module CoreServiceInstaller -ErrorAction SilentlyContinue
     $module = Import-Module $modulePath -Force -DisableNameChecking -PassThru
     $script:fixtureNumber++
@@ -27,11 +28,14 @@ function New-Fixture {
     $state = @{ Root = $root; Code = (Join-Path $root 'Core Code'); Data = (Join-Path $root 'Core Data');
         Bundle = (Join-Path $root 'Bundle'); Key = (Join-Path $root 'public.pem'); Service = $null;
         Events = [Collections.Generic.List[string]]::new(); ScArguments = [Collections.Generic.List[object]]::new(); Listeners = @();
-        FailPrepare = $false; FailRegister = $false; FailStart = $false; FailHealth = $false; BusyListener = $false }
+        FailPrepare = $false; FailRegister = $false; FailStart = $false; FailHealth = $false; BusyListener = $false;
+        BusyNetwork = $false; CertificatePresent = $true; HealthPort = $null; ExcludedRanges = @() }
     foreach ($path in @($state.Code,$state.Data,$state.Bundle)) { [void][IO.Directory]::CreateDirectory($path) }
     [IO.File]::WriteAllText($state.Key, 'synthetic public trust fixture')
     [IO.File]::WriteAllText((Join-Path $state.Code 'SentinelAI.Core.exe'), 'verified-core-fixture')
-    [IO.File]::WriteAllText((Join-Path $state.Data 'pilot-config.json'), (@{ urls = 'http://127.0.0.1:5017'; SentinelAI = @{ DataDirectory = $state.Data } } | ConvertTo-Json -Depth 4))
+    $settings = @{ DataDirectory = $state.Data }
+    if ($LocalNetwork) { $settings.LocalNetworkPort = '5443'; $settings.LocalNetworkCertificateSha256 = 'D' * 64 }
+    [IO.File]::WriteAllText((Join-Path $state.Data 'pilot-config.json'), (@{ urls = 'http://127.0.0.1:5017'; SentinelAI = $settings } | ConvertTo-Json -Depth 4))
     $pilot = @{ format = 'sentinelai-pilot-v1'; component = 'Core'; version = '1.0.0'; codeDirectory = $state.Code;
         dataDirectory = $state.Data; coreUrl = 'http://127.0.0.1:5017'; environment = 'development'; channel = 'pilot'; serviceName = ''; serviceAccountSid = '' }
     [IO.File]::WriteAllText((Join-Path $state.Data 'pilot-installation.json'), ($pilot | ConvertTo-Json -Compress))
@@ -92,9 +96,17 @@ function New-Fixture {
             if ($script:TestState.BusyListener) { throw 'The loopback listener is occupied.' }
         }
         function script:Wait-CoreServiceHealth {
-            $script:TestState.Events.Add('health')
+            param($Origin,$TimeoutSeconds,$LocalNetworkPort)
+            $script:TestState.Events.Add('health'); $script:TestState.HealthPort = $LocalNetworkPort
             if ($script:TestState.FailHealth) { throw 'Synthetic health failure.' }
         }
+        function script:Assert-CoreServiceLocalNetworkPortAvailable {
+            param($Port)
+            $script:TestState.Events.Add('probe-network-' + $Port)
+            if ($script:TestState.BusyNetwork) { throw 'The local-network port is occupied.' }
+        }
+        function script:Test-CoreServiceCertificate { param($Sha256); $script:TestState.CertificatePresent -and $Sha256 -ceq ('D' * 64) }
+        function script:Get-CoreServiceExcludedPortRanges { $script:TestState.ExcludedRanges }
     } $state
     # Receipt/configuration helper internals execute in their nested Pilot module.
     $pilotModule = $module.NestedModules | Where-Object Name -eq 'PilotInstaller'
@@ -269,6 +281,110 @@ try {
     Assert-Test (Test-CoreServiceListener -Origin ([Uri]'http://[::1]:5017') -Service $service) 'Exact IPv6 service-owned loopback listener was rejected.'
     $fixture.State.Listeners += [pscustomobject]@{ LocalAddress = '127.0.0.1'; OwningProcess = 1818 }
     Assert-Test (-not (Test-CoreServiceListener -Origin ([Uri]'http://localhost:5017') -Service $service)) 'Mixed owned/foreign localhost listeners passed ownership.'
+    # The central role: the local-network port must be free before a new central service is registered, and health
+    # requires that listener whenever Core's certificate exists. A local-only installation never probes or requires it.
+    $fixture = New-Fixture
+    Invoke-Action $fixture | Out-Null
+    Assert-Test (-not ($fixture.State.Events | Where-Object { $_ -like 'probe-network-*' }) -and $fixture.State.HealthPort -eq 0) 'A local-only Core probed or required the local-network listener.'
+    $fixture = New-Fixture -LocalNetwork
+    Invoke-Action $fixture | Out-Null
+    Assert-Test ($fixture.State.Events.Contains('probe-network-5443') -and $fixture.State.HealthPort -eq 5443 -and
+        $fixture.State.Events.IndexOf('probe-network-5443') -lt $fixture.State.Events.IndexOf('register')) 'The central Core did not reserve and require its local-network listener.'
+    $fixture.State.Events.Clear(); $fixture.State.CertificatePresent = $false
+    Invoke-Action $fixture 'Restart' | Out-Null
+    Assert-Test ($fixture.State.HealthPort -eq 0 -and -not $fixture.State.Events.Contains('probe-network-5443')) 'Health required a listener whose certificate is missing.'
+    $fixture = New-Fixture -LocalNetwork; $fixture.State.BusyNetwork = $true
+    Assert-Rejected { Invoke-Action $fixture } 'Core installation accepted an occupied local-network port.'
+    Assert-Test (-not $fixture.State.Events.Contains('register') -and $null -eq $fixture.State.Service) 'An occupied local-network port changed SCM.'
+    # An existing central service restarts even when another program took the port: Core then serves loopback only.
+    $fixture = New-Fixture -LocalNetwork
+    Invoke-Action $fixture | Out-Null
+    $fixture.State.Events.Clear(); $fixture.State.BusyNetwork = $true
+    Invoke-Action $fixture 'Restart' | Out-Null
+    Assert-Test ($fixture.State.Service.State -eq 'Running' -and $fixture.State.HealthPort -eq 5443 -and
+        -not $fixture.State.Events.Contains('probe-network-5443')) 'A taken local-network port stopped an existing Core service.'
+    foreach ($network in @(@{ LocalNetworkPort = '5444'; LocalNetworkCertificateSha256 = 'D' * 64 }, @{ LocalNetworkPort = '5443'; LocalNetworkCertificateSha256 = 'd' * 64 },
+        @{ LocalNetworkPort = '5443' }, @{ LocalNetworkCertificateSha256 = 'D' * 64 }, @{ LocalNetworkPort = '5443'; LocalNetworkCertificateSha256 = 'D' * 64; LocalNetworkAddress = '0.0.0.0' })) {
+        $fixture = New-Fixture
+        $settings = @{ DataDirectory = $fixture.State.Data } + $network
+        [IO.File]::WriteAllText((Join-Path $fixture.State.Data 'pilot-config.json'), (@{ urls = 'http://127.0.0.1:5017'; SentinelAI = $settings } | ConvertTo-Json -Depth 4))
+        Assert-Rejected { Invoke-Action $fixture } 'Core service management accepted a changed local-network configuration.'
+        Assert-Test (-not $fixture.State.Events.Contains('register')) 'A changed local-network configuration changed SCM.'
+    }
+
+    # The central listener answers on every interface and only from the Core service process.
+    $service = [pscustomobject]@{ ProcessId = 1717; State = 'Running' }
+    foreach ($case in @(@{ Listeners = @(); Expected = $false }, @{ Listeners = @(@{ LocalAddress = '::'; OwningProcess = 1717 }); Expected = $true },
+        @{ Listeners = @(@{ LocalAddress = '0.0.0.0'; OwningProcess = 1717 }, @{ LocalAddress = '::'; OwningProcess = 1717 }); Expected = $true },
+        @{ Listeners = @(@{ LocalAddress = '::'; OwningProcess = 1818 }); Expected = $false },
+        @{ Listeners = @(@{ LocalAddress = '::'; OwningProcess = 1717 }, @{ LocalAddress = '10.0.0.17'; OwningProcess = 1818 }); Expected = $false },
+        @{ Listeners = @(@{ LocalAddress = '127.0.0.1'; OwningProcess = 1717 }); Expected = $false })) {
+        $fixture.State.Listeners = @($case.Listeners | ForEach-Object { [pscustomobject]$_ })
+        Assert-Test ((Test-CoreServiceLocalNetworkListener -Port 5443 -Service $service) -eq $case.Expected) 'Local-network listener ownership was misjudged.'
+    }
+    # Health waives the listener only while another program holds the port or Windows reserved it.
+    foreach ($case in @(@{ Listeners = @(); Ranges = @(); Expected = $false }, @{ Listeners = @(@{ LocalAddress = '0.0.0.0'; OwningProcess = 1717 }); Ranges = @(); Expected = $false },
+        @{ Listeners = @(@{ LocalAddress = '0.0.0.0'; OwningProcess = 1818 }); Ranges = @(); Expected = $true },
+        @{ Listeners = @(@{ LocalAddress = '0.0.0.0'; OwningProcess = 1717 }, @{ LocalAddress = '::'; OwningProcess = 1818 }); Ranges = @(); Expected = $true },
+        @{ Listeners = @(); Ranges = @(@{ Start = 5400; End = 5499 }); Expected = $true }, @{ Listeners = @(); Ranges = @(@{ Start = 5443; End = 5443 }); Expected = $true },
+        @{ Listeners = @(); Ranges = @(@{ Start = 5444; End = 5543 }, @{ Start = 5300; End = 5442 }); Expected = $false })) {
+        $fixture.State.Listeners = @($case.Listeners | ForEach-Object { [pscustomobject]$_ })
+        $fixture.State.ExcludedRanges = @($case.Ranges | ForEach-Object { [pscustomobject]$_ })
+        Assert-Test ((& $fixture.Module { param($service) Test-CoreServiceLocalNetworkPortUnusable -Port 5443 -Service $service } $service) -eq $case.Expected) 'An unusable local-network port was misjudged.'
+    }
+    $fixture.State.ExcludedRanges = @()
+    # netsh output in any display language: only the data lines carry two port numbers.
+    $ranges = @(ConvertFrom-CoreServiceExcludedPortRanges -Lines @('', 'Protocol tcp Port Exclusion Ranges', '', 'Start Port    End Port', '----------    --------',
+        '      5357        5357', '     50000       50059     *', '', '* - Administered port exclusions.', 'Zakresy wykluczeń portów protokołu tcp 1 2 3'))
+    Assert-Test ($ranges.Count -eq 2 -and $ranges[0].Start -eq 5357 -and $ranges[0].End -eq 5357 -and $ranges[1].Start -eq 50000 -and $ranges[1].End -eq 50059) 'Windows excluded port ranges were misread.'
+    Assert-Test (@(ConvertFrom-CoreServiceExcludedPortRanges -Lines @((New-Object Management.Automation.ErrorRecord((New-Object Exception('5443 5443')), 'native', 'NotSpecified', $null)))).Count -eq 0) 'A netsh error line was read as an excluded range.'
+
+    # The owned firewall rule: inbound TCP 5443 for Core's program, LocalSubnet, Domain and Private only.
+    $module = $fixture.Module
+    $program = 'C:\Program Files\SentinelAI\Core\SentinelAI.Core.exe'
+    & $module {
+        param($program)
+        $script:Firewall = @{ Rule = $null; Created = $null; Removed = 0; Program = $program }
+        function script:New-FirewallTestRule {
+            param($Overrides = @{})
+            $rule = @{ Name = 'SentinelAI-Core-LocalNetwork'; Enabled = 'True'; Direction = 'Inbound'; Action = 'Allow'; Profile = 3; EdgeTraversalPolicy = 'Block';
+                Protocol = 'TCP'; LocalPort = '5443'; RemotePort = 'Any'; RemoteAddress = 'LocalSubnet'; LocalAddress = 'Any'; Program = $script:Firewall.Program }
+            foreach ($key in $Overrides.Keys) { $rule[$key] = $Overrides[$key] }
+            return [pscustomobject]$rule
+        }
+        function script:Get-NetFirewallRule { [CmdletBinding()] param($Name); if ($Name -ceq 'SentinelAI-Core-LocalNetwork') { $script:Firewall.Rule } }
+        function script:Get-NetFirewallPortFilter { param($AssociatedNetFirewallRule); [pscustomobject]@{ Protocol = $AssociatedNetFirewallRule.Protocol; LocalPort = $AssociatedNetFirewallRule.LocalPort; RemotePort = $AssociatedNetFirewallRule.RemotePort } }
+        function script:Get-NetFirewallAddressFilter { param($AssociatedNetFirewallRule); [pscustomobject]@{ RemoteAddress = $AssociatedNetFirewallRule.RemoteAddress; LocalAddress = $AssociatedNetFirewallRule.LocalAddress } }
+        function script:Get-NetFirewallApplicationFilter { param($AssociatedNetFirewallRule); [pscustomobject]@{ Program = $AssociatedNetFirewallRule.Program } }
+        function script:Remove-NetFirewallRule { param($Name); $script:Firewall.Removed++; $script:Firewall.Rule = $null }
+        function script:New-NetFirewallRule {
+            param($Name,$DisplayName,$Description,$Group,$Direction,$Action,$Protocol,$LocalPort,$RemoteAddress,$Profile,$Program,$EdgeTraversalPolicy,$Enabled)
+            $script:Firewall.Created = $PSBoundParameters
+            $script:Firewall.Rule = New-FirewallTestRule @{ Name = $Name; Enabled = [string]$Enabled; Direction = [string]$Direction; Action = [string]$Action;
+                Profile = $(if ((@($Profile) -join ',') -ceq 'Domain,Private') { 3 } else { 7 }); EdgeTraversalPolicy = [string]$EdgeTraversalPolicy;
+                Protocol = [string]$Protocol; LocalPort = [string]$LocalPort; RemoteAddress = [string]$RemoteAddress; Program = $Program }
+        }
+    } $program
+    Assert-Test (-not (& $module { param($program) Test-CoreServiceFirewallRule -Rule $null -ExecutablePath $program -Port 5443 } $program)) 'A missing firewall rule passed verification.'
+    Assert-Test (& $module { param($program) Test-CoreServiceFirewallRule -Rule (New-FirewallTestRule) -ExecutablePath $program -Port 5443 } $program) 'The exact owned firewall rule failed verification.'
+    foreach ($override in @(@{ Enabled = 'False' }, @{ Direction = 'Outbound' }, @{ Action = 'Block' }, @{ Profile = 7 }, @{ Profile = 4 }, @{ Profile = 1 },
+        @{ EdgeTraversalPolicy = 'Allow' }, @{ Protocol = 'UDP' }, @{ LocalPort = '5000' }, @{ LocalPort = @('5443','5000') }, @{ RemotePort = '80' },
+        @{ RemoteAddress = 'Any' }, @{ RemoteAddress = @('LocalSubnet','203.0.113.0/24') }, @{ LocalAddress = '10.0.0.17' }, @{ Program = 'C:\Other\Core.exe' }, @{ Program = 'Any' })) {
+        Assert-Test (-not (& $module { param($program, $override) Test-CoreServiceFirewallRule -Rule (New-FirewallTestRule $override) -ExecutablePath $program -Port 5443 } $program $override)) 'A widened or changed firewall rule passed verification.'
+    }
+    & $module { param($program) Set-CoreServiceFirewallRule -ExecutablePath $program -Port 5443 } $program
+    $created = & $module { $script:Firewall.Created }
+    Assert-Test ($created.Name -ceq 'SentinelAI-Core-LocalNetwork' -and (@($created.Profile) -join ',') -ceq 'Domain,Private' -and $created.RemoteAddress -ceq 'LocalSubnet' -and
+        $created.Direction -ceq 'Inbound' -and $created.Action -ceq 'Allow' -and $created.Protocol -ceq 'TCP' -and [string]$created.LocalPort -ceq '5443' -and
+        $created.Program -ceq $program -and $created.EdgeTraversalPolicy -ceq 'Block' -and $created.Group -ceq 'SentinelAI') 'Setup created a firewall rule other than the owned Domain/Private LocalSubnet rule.'
+    & $module { param($program) $script:Firewall.Created = $null; Set-CoreServiceFirewallRule -ExecutablePath $program -Port 5443 } $program
+    Assert-Test ($null -eq (& $module { $script:Firewall.Created }) -and (& $module { $script:Firewall.Removed }) -eq 0) 'An intact owned rule was recreated.'
+    & $module { $script:Firewall.Rule = New-FirewallTestRule @{ RemoteAddress = 'Any'; Profile = 7 } }
+    & $module { param($program) Set-CoreServiceFirewallRule -ExecutablePath $program -Port 5443 } $program
+    Assert-Test ((& $module { $script:Firewall.Removed }) -eq 1 -and (& $module { param($program) Test-CoreServiceFirewallRule -Rule $script:Firewall.Rule -ExecutablePath $program -Port 5443 } $program)) 'Repair did not restore a widened rule exactly.'
+    & $module { Remove-CoreServiceFirewallRule }
+    Assert-Test ($null -eq (& $module { $script:Firewall.Rule })) 'Uninstall left the owned firewall rule.'
+    & $module { Remove-CoreServiceFirewallRule }
     Write-Output ('Core service portable workflow tests passed: ' + $script:assertionCount + ' assertions.')
 } finally {
     Remove-Module CoreServiceInstaller -ErrorAction SilentlyContinue

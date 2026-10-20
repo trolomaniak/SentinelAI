@@ -51,6 +51,11 @@ function Invoke-NativeAiLicenseSettingsAcceptance {
         Wait-AuthenticationAcceptance { Test-SettingsText 'LicenseMode' $license.mode } 'Native license state differed from Core.'
         Assert-AuthenticationAcceptance (Test-SettingsText 'LicenseFeatures' 'No optional features permitted.') 'Native license features differed from Core.'
         Assert-AuthenticationAcceptance (Test-SettingsText 'SettingsCoreAddress' 'http://127.0.0.1:5000') 'Settings changed the fixed local Core destination.'
+        # This Core has no local-network role; Settings reads that from Core rather than assuming it.
+        $network = Invoke-SettingsApi 'api/admin/local-network'
+        Assert-AuthenticationAcceptance ($network.enabled -eq $false -and $null -eq $network.port -and $null -eq $network.certificateSha256) 'A local-only Core reported a local-network listener.'
+        Wait-AuthenticationAcceptance { Test-SettingsText 'LocalNetworkPort' 'Not applicable' } 'Settings did not show the local-only Core''s local-network role.'
+        Assert-AuthenticationAcceptance (Test-SettingsText 'LocalNetworkFingerprint' 'Not applicable') 'Settings showed a certificate fingerprint for a local-only Core.'
         $preference = Find-AuthenticationControl 'CloudAiRequestsEnabled'
         Assert-AuthenticationAcceptance ($null -ne $preference) 'Native session AI setting was missing.'
         $toggle = [System.Windows.Automation.TogglePattern]$preference.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)

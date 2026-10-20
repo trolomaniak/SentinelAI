@@ -43,22 +43,7 @@ public static class AgentHost
             : new NoPostureChangeSource());
         builder.Services.AddSingleton<PostureMonitor>();
         builder.Services.AddSingleton(provider =>
-        {
-            var options = provider.GetRequiredService<AgentOptions>();
-            var handler = new SocketsHttpHandler
-            {
-                UseProxy = false,
-                AllowAutoRedirect = false
-            };
-            if (options.CoreUrl.Scheme == Uri.UriSchemeHttps)
-            {
-                handler.SslOptions.EnabledSslProtocols = SslProtocols.Tls13;
-                handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
-                    CoreCertificateTrust.IsTrusted(certificate, errors, options.CoreCertificateSha256);
-            }
-
-            return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
-        });
+            new HttpClient(CreateCoreHandler(provider.GetRequiredService<AgentOptions>())) { Timeout = TimeSpan.FromSeconds(10) });
         builder.Services.AddSingleton<AgentEnrollmentClient>();
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<AgentLink>();
@@ -88,21 +73,49 @@ public static class AgentHost
     }
 
     public static IHost Build(string[] args) => CreateBuilder(args).Build();
+
+    public static SocketsHttpHandler CreateCoreHandler(AgentOptions options)
+    {
+        var handler = new SocketsHttpHandler
+        {
+            UseProxy = false,
+            AllowAutoRedirect = false
+        };
+        if (options.CoreUrl.Scheme == Uri.UriSchemeHttps)
+        {
+            // A pinned Core may run on Windows 10, which has no TLS 1.3; TLS 1.3 is still negotiated
+            // whenever both sides support it. Unpinned HTTPS keeps TLS 1.3 only.
+            handler.SslOptions.EnabledSslProtocols = options.CoreCertificateSha256 is null
+                ? SslProtocols.Tls13 : SslProtocols.Tls12 | SslProtocols.Tls13;
+            handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
+                CoreCertificateTrust.IsTrusted(certificate, errors, options.CoreCertificateSha256);
+        }
+
+        return handler;
+    }
 }
 
 public static class CoreCertificateTrust
 {
+    // Owner decision (2026-10-19): with a pin, Core's own certificate is trusted when, and only when,
+    // its exact SHA-256 matches, so chain and name errors are accepted only together with that match.
+    // Without a pin, full chain and name validation applies unchanged.
     public static bool IsTrusted(
         X509Certificate? certificate,
         SslPolicyErrors errors,
         string? expectedSha256)
     {
-        if (certificate is null || errors != SslPolicyErrors.None)
+        if (certificate is null || (errors & SslPolicyErrors.RemoteCertificateNotAvailable) != 0)
         {
             return false;
         }
 
-        return expectedSha256 is null || CryptographicOperations.FixedTimeEquals(
+        if (expectedSha256 is null)
+        {
+            return errors == SslPolicyErrors.None;
+        }
+
+        return CryptographicOperations.FixedTimeEquals(
             SHA256.HashData(certificate.GetRawCertData()),
             Convert.FromHexString(expectedSha256));
     }
