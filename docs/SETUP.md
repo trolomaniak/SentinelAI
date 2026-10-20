@@ -2,6 +2,8 @@
 
 `SentinelAI-Setup.exe` installs and maintains the central SentinelAI installation of a company: Desktop, Core, Agent, the public-only Updater, protected configuration, both Windows services and an all-users Start Menu shortcut. By default Core also serves the Agents on the other computers of the local network (see [central computer and the local network](#central-computer-and-the-local-network)); a clearly labelled option keeps the installation local to one computer. It supports fresh installation, repair, upgrade, explicit recovery and uninstall for the owned default installation. Supported targets are Windows 10 22H2 x64 and Windows 11 x64; Windows Server 2022, which CI uses, keeps working. No SDK, separate .NET installation, browser or manual ZIP extraction is needed on the target. Windows PowerShell 5.1 is part of the supported operating system.
 
+`SentinelAI-Agent-Setup.exe` (MVP-2) installs only the Agent and Updater on the company's other computers and enrolls them with a one-use enrollment code; see [adding computers](#adding-computers-enrollment-codes-and-agent-setup).
+
 The artifact is a development/pilot installer built from source. Obtain the complete executable through a trusted delivery channel. Development manifest signatures authenticate Core/Agent packages; they are not an Authenticode signature for the setup executable. Production signing, release publication and trust distribution require separate operator provisioning.
 
 ## Install
@@ -32,6 +34,8 @@ Maintenance requires the installed key ID, public trust root, environment and ch
 
 Choose the available operation and select **Continue**. Repair and upgrade preserve Core SQLite/security history, administrator and installation identity, endpoint enrollment, Agent DPAPI state, protected configuration, license state and Core's local-network certificate and key, which every Agent pins. Repair and upgrade also restore the owned firewall rule if it was removed or changed. Setup does not create another administrator, re-enroll Agent or sign in to Desktop automatically. An installation keeps its role: an installation that was local-only, including one from before the central role existed, stays local-only.
 
+**Windows Apps.** A completed installation appears as **SentinelAI** in Settings → Apps → Installed apps (and Control Panel → Programs). Its **Uninstall** runs the installed copy of this Setup with `/uninstall`, which opens the maintenance view above with **Uninstall** selected and data kept by default; removing data still requires clearing the checkbox and typing **DELETE**. The full Setup has no quiet mode. Setup keeps that copy in `%ProgramFiles%\SentinelAI Setup\SentinelAI-Setup.exe` (administrator-only writes, Users read), which costs the size of the Setup file on disk; upgrade and repair replace it and the displayed version, and uninstall removes it with the Apps entry, also when data is kept. When Windows Apps started it, the running copy cannot delete itself, so Windows removes it at the next restart.
+
 Uninstall removes the owned services, the owned firewall rule, the complete program-code directory and owned Start Menu shortcut. **Keep security history and protected configuration** defaults to checked. Keeping data also keeps Core's certificate and key, so a restored installation is trusted by the same Agents. To remove the protected installation data too, select **Uninstall**, clear that checkbox and type the exact word **DELETE** in the confirmation field; this also deletes Core's certificate and its private key. Keeping data is distinct from a fresh installation: a later matching Setup recognizes the retained ownership and restores the same identity. Per-user Desktop preferences and the separately retained native bootstrap workspaces are outside this installation-data removal.
 
 ## Transaction and recovery
@@ -55,6 +59,8 @@ If rollback cannot finish, Setup reports failure and retains recovery material. 
 | `%ProgramData%\SentinelAI\Setup` | Pinned public trust key, ownership receipt, retained-installation marker and temporary maintenance receipt snapshot; no administrator password, bearer or enrollment token. |
 | `%ProgramData%\SentinelAI-Setup` | Protected private payload workspaces and the exclusive setup-operation lock; no persistent application state. |
 | Common Start Menu `SentinelAI\SentinelAI.lnk` | Exact installed Desktop target, no credential or startup arguments. |
+| `%ProgramFiles%\SentinelAI Setup\SentinelAI-Setup.exe` | The installed copy of the Setup that installed or last upgraded/repaired the deployment; Users read/execute, administrator/System write. Run by Windows Apps' **Uninstall**. |
+| `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI` | Windows Apps entry: name, version, publisher, location, size and `"…\SentinelAI-Setup.exe" /uninstall`. |
 | `LocalMachine\My`, certificate **SentinelAI Core local network** | Core's own local-network TLS certificate (public). Its non-exportable machine key is usable only by Core's service account (read), SYSTEM and Administrators. Central role only. |
 | Windows Firewall rule `SentinelAI-Core-LocalNetwork` | Inbound TCP 5443 for `SentinelAI.Core.exe` from LocalSubnet on the Domain and Private profiles. Central role only. |
 
@@ -64,7 +70,7 @@ Under LocalService, the Agent collects the selected System, PowerShell and Defen
 
 ## Central computer and the local network
 
-The pilot runs one central installation per company on an always-on Windows computer; every other computer runs only the Agent and reports to it over the local network ([pilot MVP](MVP.md)). Agent installers and enrollment codes for those computers follow in MVP-2.
+The pilot runs one central installation per company on an always-on Windows computer; every other computer runs only the Agent and reports to it over the local network ([pilot MVP](MVP.md)). Those computers are added with enrollment codes and `SentinelAI-Agent-Setup.exe` ([adding computers](#adding-computers-enrollment-codes-and-agent-setup)).
 
 - **Listener.** Core keeps the loopback HTTP listener `http://127.0.0.1:5000` for the local Desktop and Agent and adds one HTTPS listener on the fixed port **5443** on every IPv4 interface. That listener serves only the Agent routes: enrollment, heartbeat, inventory (including posture changes), security events and endpoint telemetry (`POST /api/agent/*`). Administrator, authentication, health, dashboard and Desktop routes answer `404` there, also with a valid administrator bearer. Desktop stays on the central computer.
 - **TLS policy** (owner decision of 2026-10-19). Core enables TLS 1.2 and TLS 1.3 on that listener, so TLS 1.3 is negotiated whenever both computers support it and TLS 1.2 only when one side is Windows 10, whose SChannel has no TLS 1.3. Windows has no per-application cipher suite policy, so Core reads each connection's negotiated protocol and cipher suite (`ITlsHandshakeFeature`) and aborts it before any HTTP request unless it is TLS 1.3 with AES-GCM or TLS 1.2 with ECDHE key exchange and AES-GCM. TLS 1.1 and lower are never enabled.
@@ -76,6 +82,59 @@ The pilot runs one central installation per company on an always-on Windows comp
 - **Missing certificate.** If the configured certificate is no longer in `LocalMachine\My`, Core keeps serving the local Desktop and Agent on loopback, logs that the local-network listener is disabled and Settings shows it as not listening. Setup's health checks then do not require the local-network listener. Agents pin the certificate, so it cannot be replaced without re-enrolling them.
 - **Port in use.** If another program holds TCP 5443 when Core starts (for example after a restart), or Windows has reserved it in an excluded port range (`netsh interface ipv4 show excludedportrange protocol=tcp`), Core likewise keeps serving loopback, logs that the listener is disabled because the port is in use and Settings shows it as not listening. Free the port and restart the SentinelAI Core service. While Core listens, it holds the IPv4 port itself, so a program started later cannot take it. A fresh central installation refuses a port that is already taken; repair, upgrade and recovery are not blocked by it and their health checks rest on the loopback origin while another program holds the port.
 - **Local only.** Clearing the option creates no certificate, no firewall rule and no local-network listener; Core then listens only at `http://127.0.0.1:5000`, as before MVP-1.
+
+## Adding computers: enrollment codes and Agent Setup
+
+MVP-2 adds the company's other computers. The administrator creates one enrollment code per computer in Desktop on the central computer, and the person installing a computer runs `SentinelAI-Agent-Setup.exe` with that code. The central computer must be installed with local-network access ([above](#central-computer-and-the-local-network)).
+
+### Enrollment codes in Desktop
+
+Desktop → **Devices** → **Add computers** creates 1–50 codes at a time, valid for 1 hour, 8 hours, 24 hours (default), 3 days or 7 days. Choose the address Agents use to reach Core: the computer's name when it resolves (recommended), or one of its IPv4 addresses, which should then be fixed (a DHCP reservation or a static address), because Agents keep using the address in their code. **Copy** puts the codes on the clipboard, one per line; **Save** writes one `.sentinelai-enroll` file per code into a chosen folder. The codes are shown only until the next batch, sign-out or session expiry. The list below shows every unused code with its expiry; **Revoke** makes one unusable. Core refuses expired, used and revoked codes.
+
+Each code is a secret: it enrolls exactly one computer, and Desktop and Core never log it. Give each code only to the person installing that computer, over a trusted channel. A code holds Core's address, the HTTPS port, the SHA-256 pin of Core's certificate and one enrollment token, in a versioned text form with a checksum, for example `SAI1-` followed by about 130 Base32 characters in groups of five. Pasted codes may contain spaces, line breaks and lower-case letters; a typing error is detected by the checksum. Core stores only a hash of each token; a code is valid for at most 7 days.
+
+**Remove computer** in a computer's details (with a confirmation) revokes that computer's credential, so its Agent can no longer report, and hides it from Devices, risk and reports; its history is kept. Uninstall the Agent on that computer separately. Removing a computer never affects the central computer's own Agent.
+
+### Agent Setup
+
+`SentinelAI-Agent-Setup.exe` uses the same native wrapper, protected staging and signed package verification as the full Setup, but carries only the signed Agent package and the Updater, so it is much smaller. Run it on the computer to add and approve administrator elevation; no SentinelAI administrator credential is needed on that computer.
+
+1. Paste the code, or select **Open code file…** and choose the `.sentinelai-enroll` file. Select **Install SentinelAI Agent**.
+2. Before it changes anything, Setup connects to Core at the address in the code, trusts it only by the pin in the code (the Agent's own trust rule) and asks Core whether the code can still enroll (`POST /api/agent/enrollment-check`, which never consumes it). An unreachable Core, a different certificate, or an expired, used or revoked code stops Setup with nothing changed; the token is never sent to a computer with a different certificate.
+3. Setup installs the Updater, its own installed copy and the Windows Apps entry, then the Agent as the `SentinelAIAgent` service (automatic start, `NT AUTHORITY\LocalService`) configured with `Agent:CoreUrl` and `Agent:CoreCertificateSha256` from the code. The token reaches the Agent only through the protected one-use handoff file, never through process arguments or environment variables.
+4. Setup reports success only after the Agent stored the identity Core returned for the token. If Core does not acknowledge the enrollment in time, or any step fails, Setup removes everything it created.
+
+**Silent installation:** `SentinelAI-Agent-Setup.exe /quiet /codefile <path>`, run elevated (for example from a deployment tool or an administrator PowerShell). Options are case-insensitive; a relative path is resolved against the caller's folder. No window or message appears; the exit code reports the result:
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Installed and enrolled, or uninstalled. |
+| 1 | Interactive Setup closed before completing an operation; after a refusal it ends with that refusal's code. |
+| 2 | Invalid command line. Accepted: no options, `/quiet /codefile <path>`, `/uninstall`, `/uninstall /quiet`. |
+| 3 | The code or code file is not a valid enrollment code. Nothing changed. |
+| 4 | Core could not be reached at the address in the code (or answered unexpectedly). Nothing changed. |
+| 5 | The computer at that address does not present the certificate pinned in the code. Nothing changed. |
+| 6 | Core refused the code: expired, used or revoked. Nothing changed. |
+| 7 | An Agent is already installed on this computer (by Agent Setup or by the central installation). Nothing changed. |
+| 8 | Installation failed; Setup removed what it had installed. |
+| 9 | Core did not acknowledge the enrollment in time; Setup removed the Agent again. The code may now be used: issue a new one. |
+| 10 | Uninstall did not complete; run it again. |
+| 11 | `/uninstall`: SentinelAI Agent is not installed by Agent Setup. Nothing changed. |
+| 1603 | The native wrapper could not validate its payload or prepare its protected workspace. Nothing changed. |
+| 1460 | Setup was still running after 30 minutes; the wrapper stopped waiting. |
+
+**Windows Apps and uninstall.** Setup registers **SentinelAI Agent** in Settings → Apps → Installed apps; its **Uninstall** runs the installed Setup copy with `/uninstall`, and `QuietUninstallString` is `/uninstall /quiet`. Running the downloaded `SentinelAI-Agent-Setup.exe /uninstall` (or `/uninstall /quiet`) does the same. Uninstall removes the Agent service, the Agent and Updater code, the Agent's data directory with its DPAPI-protected credential and enrollment state, the Apps entry and the installed Setup copy. A running installed copy is deleted by Windows at the next restart. Core keeps the computer's history until an administrator uses **Remove computer**.
+
+**One Agent per computer.** Windows has one `SentinelAIAgent` service per computer, so Agent Setup refuses a computer with any Agent service, including the central computer, whose Agent is part of the full installation (exit code 7). The full Setup likewise refuses a computer with Agent Setup's Agent; uninstall it first.
+
+| Location | Contents and access |
+| --- | --- |
+| `%ProgramFiles%\SentinelAI Agent\Agent` | Signed Agent package and runtime; LocalService read/execute, installer-controlled code. |
+| `%ProgramFiles%\SentinelAI Agent\Updater` | Public-only verification client; administrator/System only. |
+| `%ProgramFiles%\SentinelAI Agent\Setup\SentinelAI-Agent-Setup.exe` | Installed Setup copy for Windows Apps' Uninstall; Users read/execute, administrator/System write. |
+| `%ProgramData%\SentinelAI Agent\Agent` | Agent configuration, ownership receipt, enrollment state and LocalService DPAPI credential. |
+| `%ProgramData%\SentinelAI Agent\Setup` | Pinned public trust key and Agent Setup's ownership receipt (Core URL, version, channel); no code or token. |
+| `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAIAgent` | Windows Apps entry with `UninstallString` and `QuietUninstallString`. |
 
 ## Bootstrap and package trust
 
@@ -102,7 +161,7 @@ dotnet run --project tools/update-dev --configuration Release -- keygen --direct
     -KeyId dev-local-setup
 ```
 
-The default fresh output is `artifacts/setup/win-x64/1.0.0/SentinelAI-Setup.exe`. Publishing refuses an existing output, verifies that the independently supplied public key authenticates the Core/Agent and whole-deployment packages, and requires exactly one final executable. Private keys and intermediate artifacts are excluded. Versions are canonical `major.minor.patch`, each component 0–65535; fresh artifacts must be newer than `0.0.0`. Build the next version with the same key, key ID and channel for maintenance of that installed deployment. Keep the private development key separately; transfer only the completed Setup executable through the trusted channel.
+The default fresh output is `artifacts/setup/win-x64/1.0.0/SentinelAI-Setup.exe`. Add `-Product Agent` (with a separate `-OutputDirectory`) to build `SentinelAI-Agent-Setup.exe` with the same key, key ID and channel; its payload holds only the signed Agent package, the Updater and the installer scripts. Publishing refuses an existing output, verifies that the independently supplied public key authenticates the Core/Agent and whole-deployment packages, and requires exactly one final executable. Private keys and intermediate artifacts are excluded. Versions are canonical `major.minor.patch`, each component 0–65535; fresh artifacts must be newer than `0.0.0`. Build the next version with the same key, key ID and channel for maintenance of that installed deployment. Keep the private development key separately; transfer only the completed Setup executable through the trusted channel.
 
 ## Validation
 
@@ -116,6 +175,14 @@ The default fresh output is `artifacts/setup/win-x64/1.0.0/SentinelAI-Setup.exe`
 The native acceptance also verifies the central role on the runner: Core's certificate in `LocalMachine\My` with its key ACL and no trusted-store copy, the exported pin, the firewall rule's program, port, LocalSubnet and Domain/Private profiles, and that the listener is owned by the Core service. A Windows TLS 1.2 client is admitted (ECDHE with AES-GCM); administrator, authentication, health and dashboard routes answer `404` on the local-network listener; a client with a different pin cannot complete TLS. The installed Agent, started as a second endpoint with the runner's own non-loopback IPv4 address, is refused under a wrong pin without spending its one-use token, then enrolls with the exact pin and delivers heartbeat, inventory, telemetry and security events through the listener. The lifecycle acceptance checks that the certificate, pin and listener survive upgrade, health rollback, repair and retained-data restoration, that repair restores a deleted firewall rule, that uninstall removes it and that confirmed data removal deletes the certificate and its key.
 
 TASK-024's recorded native acceptance passed the actual outer EXE, protected child runtime, rejection of caller-controlled runtime/temp caches, complete services/ACLs, one-use enrollment, LocalService DPAPI isolation/restart, fresh endpoint telemetry and Desktop authentication/independent lifetime. TASK-025's complete Windows lifecycle acceptance also passed in both push and PR CI: real upgrade, signed unhealthy candidate rollback, damaged-file repair, owned uninstall, identity-preserving retained-data restoration and explicit confirmed removal. Exact verified results and commits are recorded in [development status](../.agent/STATUS.md).
+
+`tests/setup/AgentSetup.Acceptance.ps1` runs that acceptance on a fresh runner, keeps the central installation and then tests the actual `SentinelAI-Agent-Setup.exe` silently beside it. It signs in to Core, takes the runner's non-loopback IPv4 address from `GET /api/admin/enrollment-options` and issues codes through `POST /api/admin/enrollment-codes`. Because a computer has one Agent service, a test-only step removes the central installation's Agent service first. Invalid options and an invalid code file, a code with another pin, a code with an unreachable port, and revoked, expired (moved into the past in Core's database, test-only) and used codes each end with their exit code and no service, folder or Apps entry. A valid code installs and enrolls the Agent over the non-loopback address: the LocalService service, its configured Core URL and pin, the Apps entry, protected trees, the endpoint and its telemetry are checked; a second install is refused; uninstall from the download and from the Apps entry's quiet command removes the service, code, credential, data and Apps entry, and schedules the running installed copy for deletion at restart. It also checks the full Setup's **SentinelAI** Apps entry; the lifecycle acceptance checks that the entry follows the upgrade and leaves with uninstall.
+
+```powershell
+.\tests\setup\AgentSetup.Acceptance.ps1 `
+    -ExecutablePath .\artifacts\setup\win-x64\1.0.0\SentinelAI-Setup.exe `
+    -AgentExecutablePath .\artifacts\setup\win-x64\agent-1.0.0\SentinelAI-Agent-Setup.exe
+```
 
 The lifecycle fixture runs on a fresh isolated Windows machine with three actual published executables sharing one temporary development trust root: initial `1.0.0`, healthy `1.1.0` and a signed `1.2.0` Core service fixture that runs without passing HTTP health. It exercises upgrade, real health-failure rollback, damaged-file repair, retained-data uninstall, restoration with the same identity/enrollment and confirmed removal through native controls:
 
@@ -135,11 +202,12 @@ CI runs Windows Server only, so the central role on Windows 10, whose SChannel h
 1. On a Windows 10 22H2 x64 computer that will be the central computer, set the network to **Private** (Settings → Network & Internet → Properties). Run `SentinelAI-Setup.exe` with **Allow Agents on other computers in this local network to connect** selected. Installation must finish without errors.
 2. In an administrator PowerShell: `Get-NetFirewallRule -Name SentinelAI-Core-LocalNetwork | Format-List Enabled, Direction, Action, Profile` must show `True`, `Inbound`, `Allow`, `Domain, Private`; `Get-NetFirewallAddressFilter -AssociatedNetFirewallRule (Get-NetFirewallRule -Name SentinelAI-Core-LocalNetwork)` must show `RemoteAddress : LocalSubnet`. `Get-NetTCPConnection -LocalPort 5443 -State Listen` must show a listener owned by the `SentinelAICore` process. `Get-ChildItem Cert:\LocalMachine\Root, Cert:\LocalMachine\CA | Where-Object FriendlyName -eq 'SentinelAI Core local network'` must return nothing.
 3. Open Desktop → **Settings** → **Local network** and note an address, the port `5443` and the fingerprint. Compare the fingerprint with `Get-ChildItem Cert:\LocalMachine\My | Where-Object FriendlyName -eq 'SentinelAI Core local network' | ForEach-Object { [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($_.RawData)).Replace('-','') }`.
-4. On the central computer, issue a one-use enrollment token in PowerShell (MVP-2 adds enrollment codes in Desktop): `$s = Invoke-RestMethod -Method Post http://127.0.0.1:5000/api/auth/login -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes((@{ username = '<administrator>'; password = Read-Host } | ConvertTo-Json)))` (the UTF-8 bytes keep national letters in the username or password intact in Windows PowerShell 5.1), then `(Invoke-RestMethod -Method Post http://127.0.0.1:5000/api/admin/enrollment-tokens -Headers @{ Authorization = 'Bearer ' + $s.accessToken }).token`.
-5. On a second computer (Windows 11 x64, then Windows 10 22H2 x64) in the same subnet, copy the published `SentinelAI.Agent.exe` and run it in a console with the environment variables `Agent__CoreUrl=https://<address>:5443`, `Agent__CoreCertificateSha256=<fingerprint>`, `Agent__DataDirectory=<empty folder>` and `Agent__EnrollmentToken=<token>`. Within a minute the computer appears in Desktop **Devices** with a fresh heartbeat and inventory. First run it once with one changed character in the fingerprint: it must log transport failures and never appear in Devices, and the same token must still enroll afterwards with the exact fingerprint.
+4. In Desktop → **Devices** → **Add computers**, create three codes for 1 hour with the computer name (if it is shown as resolving) and save them as files; revoke one of them.
+5. On a second computer (Windows 11 x64, then Windows 10 22H2 x64) in the same subnet, run `SentinelAI-Agent-Setup.exe`, approve elevation and open the revoked code's file: Setup must refuse it and change nothing. Paste a valid code with one character changed: Setup must report an invalid code. Install with a valid code: within a minute the computer appears in Desktop **Devices** with a fresh heartbeat and inventory, and Settings → Apps lists **SentinelAI Agent**. On a third computer, or after uninstalling, run `SentinelAI-Agent-Setup.exe /quiet /codefile <file>` in an administrator PowerShell followed by `$LASTEXITCODE`: `0`; the same file again on another computer: `6` (used). Disconnect the network cable and run it with an unused code: `4` and nothing installed.
    From the second computer, `curl.exe -k -i --tlsv1.2 https://<address>:5443/api/health` and `curl.exe -k -i --tlsv1.2 https://<address>:5443/` must answer `404` (`-k` only skips curl's own certificate check for this probe). `curl.exe -k -i --tlsv1.3 --tls-max 1.3 https://<address>:5443/api/health` must fail when either computer is Windows 10 and answer `404` when both are Windows 11, which shows TLS 1.3 is used whenever both sides support it.
 6. Switch the central computer's network to **Public**: the Agent's connections must fail; switch back to **Private**: they recover. From a computer outside the local subnet (for example through a VPN or a routed network), connections must fail.
 7. Run Setup again on the central computer and choose **Repair**: the fingerprint in Settings is unchanged and the Agent keeps reporting. Choose **Uninstall** with data kept: the firewall rule is gone and the certificate remains; repair restores both the rule and reporting. **Uninstall** with confirmed data removal deletes the certificate (step 3's command returns nothing).
-8. Record the Windows build, the negotiated protocol (TLS 1.2 or 1.3) and the results in the release notes of the pilot build.
+8. On the second computer, uninstall **SentinelAI Agent** in Settings → Apps: the `SentinelAIAgent` service, `%ProgramFiles%\SentinelAI Agent\Agent` and `Updater`, `%ProgramData%\SentinelAI Agent` and the Apps entry are gone, and after a restart the `SentinelAI Agent` folder too. In Desktop, the computer stops reporting; **Remove computer** hides it while its history stays in reports. On the central computer, Settings → Apps → **SentinelAI** → **Uninstall** opens Setup's maintenance view with Uninstall selected and data kept.
+9. Record the Windows build, the negotiated protocol (TLS 1.2 or 1.3) and the results in the release notes of the pilot build.
 
 The [manual pilot guide](PILOT.md), [Core service guide](CORE-SERVICE.md) and [Desktop authentication guide](DESKTOP-AUTH.md) remain available for development and diagnostic workflows.
