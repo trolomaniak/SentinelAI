@@ -7,6 +7,8 @@ param(
     [Parameter(Mandatory = $true)][ValidatePattern('^dev-[A-Za-z0-9_-]{1,48}$')][string]$KeyId,
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
     [string]$OutputDirectory,
+    # SentinelAI: the full SentinelAI-Setup.exe. Agent (MVP-2): SentinelAI-Agent-Setup.exe with only the Agent and Updater.
+    [ValidateSet('SentinelAI', 'Agent')][string]$Product = 'SentinelAI',
     # Development-only lifecycle acceptance input. The override affects only
     # the signed whole-deployment candidate, never the fresh-install bundle.
     [string]$DevelopmentCoreAssemblyOverride
@@ -19,6 +21,8 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Pa
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $work = $null
 $complete = $false
+$agentOnly = $Product -ceq 'Agent'
+$setupName = if ($agentOnly) { 'SentinelAI-Agent-Setup.exe' } else { 'SentinelAI-Setup.exe' }
 $script:SetupPublishingPhase = 'inputs'
 $script:SetupNativeCompilerDiagnostic = $null
 
@@ -304,6 +308,7 @@ try {
     if (-not (Test-Path -LiteralPath $DevelopmentPrivateKey -PathType Leaf) -or
         -not (Test-Path -LiteralPath $PublicKeyPath -PathType Leaf)) { throw 'Separate development signing and public trust files are required.' }
     if (Test-Path -LiteralPath $OutputDirectory) { throw 'The output directory must be new.' }
+    if ($agentOnly -and -not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) { throw 'Agent Setup has no Core.' }
     if (-not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) {
         if ($DevelopmentCoreAssemblyOverride -notmatch '\A(?:[A-Za-z]:[\\/]|\\\\)') { throw 'An absolute development Core assembly path is required.' }
         $DevelopmentCoreAssemblyOverride = Assert-SetupPath -Path $DevelopmentCoreAssemblyOverride
@@ -325,6 +330,8 @@ try {
     if (-not (Test-Path -LiteralPath $worker -PathType Leaf)) { throw 'The trusted setup worker is missing.' }
     $lifecycleWorker = Assert-SetupPath -Path (Join-Path $repo 'installer/setup/SetupLifecycle.ps1')
     if (-not (Test-Path -LiteralPath $lifecycleWorker -PathType Leaf)) { throw 'The trusted setup lifecycle worker is missing.' }
+    $agentWorker = Assert-SetupPath -Path (Join-Path $repo 'installer/setup/AgentSetupWorker.ps1')
+    if (-not (Test-Path -LiteralPath $agentWorker -PathType Leaf)) { throw 'The trusted Agent Setup worker is missing.' }
 
     New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
     $work = $OutputDirectory + '.work-' + [Guid]::NewGuid().ToString('N')
@@ -334,79 +341,84 @@ try {
     $bundle = Join-Path $payloadSource 'bundle'
     $script:SetupPublishingPhase = 'signed-bundle'
     & (Join-Path $PSScriptRoot 'publish-pilot-windows.ps1') -Version $Version -DevelopmentPrivateKey $DevelopmentPrivateKey -KeyId $KeyId -Channel $Channel -OutputDirectory $bundle -DirectoryHosts
+    # Agent Setup carries only the signed Agent package, the Updater and the installer modules.
+    if ($agentOnly) { foreach ($name in @('core.zip', 'core.manifest.json')) { Remove-Item -LiteralPath (Join-Path $bundle $name) -Force } }
 
     # Pin an immutable copy of the explicitly supplied public root, outside the
     # bundle. Existing public verification checks that it matches both signatures.
     $trust = Join-Path $work 'trust.pem'
     [IO.File]::WriteAllBytes($trust, $trustBytes)
     $script:SetupPublishingPhase = 'signature-verification'
-    foreach ($component in @('core', 'agent')) {
+    foreach ($component in $(if ($agentOnly) { @('agent') } else { @('core', 'agent') })) {
         Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'updater/SentinelAI.Updater.csproj'), '--configuration', 'Release', '--', 'verify',
             '--manifest', (Join-Path $bundle ($component + '.manifest.json')), '--package', (Join-Path $bundle ($component + '.zip')),
             '--public-key', $trust, '--key-id', $KeyId, '--environment', 'development', '--channel', $Channel,
             '--artifact-id', ('sentinelai-' + $component + '-win-x64'), '--installed-version', '0.0.0')
     }
 
-    $script:SetupPublishingPhase = 'desktop-publishing'
-    $desktop = Join-Path $payloadSource 'desktop'
-    Invoke-SetupDotnet -Arguments @('publish', (Join-Path $repo 'desktop/SentinelAI.Desktop/SentinelAI.Desktop.csproj'), '--configuration', 'Release',
-        '--runtime', 'win-x64', '--self-contained', 'true', '-p:PublishSingleFile=false', '-p:PublishTrimmed=false',
-        '-p:DebugType=none', '-p:DebugSymbols=false', ('-p:Version=' + $Version), ('-p:AssemblyVersion=' + $Version + '.0'), '--output', $desktop)
-    foreach ($required in @('SentinelAI.Desktop.exe', 'SentinelAI.Desktop.dll', 'SentinelAI.Desktop.deps.json', 'SentinelAI.Desktop.runtimeconfig.json', 'PresentationFramework.dll', 'coreclr.dll')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $desktop $required) -PathType Leaf)) { throw 'A Desktop runtime file is missing.' }
-    }
+    if (-not $agentOnly) {
+        $script:SetupPublishingPhase = 'desktop-publishing'
+        $desktop = Join-Path $payloadSource 'desktop'
+        Invoke-SetupDotnet -Arguments @('publish', (Join-Path $repo 'desktop/SentinelAI.Desktop/SentinelAI.Desktop.csproj'), '--configuration', 'Release',
+            '--runtime', 'win-x64', '--self-contained', 'true', '-p:PublishSingleFile=false', '-p:PublishTrimmed=false',
+            '-p:DebugType=none', '-p:DebugSymbols=false', ('-p:Version=' + $Version), ('-p:AssemblyVersion=' + $Version + '.0'), '--output', $desktop)
+        foreach ($required in @('SentinelAI.Desktop.exe', 'SentinelAI.Desktop.dll', 'SentinelAI.Desktop.deps.json', 'SentinelAI.Desktop.runtimeconfig.json', 'PresentationFramework.dll', 'coreclr.dll')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $desktop $required) -PathType Leaf)) { throw 'A Desktop runtime file is missing.' }
+        }
 
-    # One candidate covers the entire code root, so the transactional updater
-    # can restore all four components together. ProgramData is never packaged.
-    $script:SetupPublishingPhase = 'deployment-preparation'
-    $deploymentCode = Join-Path $work 'deployment-code'
-    New-Item -ItemType Directory -Path $deploymentCode | Out-Null
-    foreach ($component in @('core', 'agent')) {
-        $componentDirectory = if ($component -eq 'core') { 'Core' } else { 'Agent' }
-        Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'updater/SentinelAI.Updater.csproj'), '--configuration', 'Release', '--', 'prepare',
-            '--manifest', (Join-Path $bundle ($component + '.manifest.json')), '--package', (Join-Path $bundle ($component + '.zip')),
-            '--public-key', $trust, '--key-id', $KeyId, '--environment', 'development', '--channel', $Channel,
-            '--artifact-id', ('sentinelai-' + $component + '-win-x64'), '--installed-version', '0.0.0',
-            '--output', (Join-Path $deploymentCode $componentDirectory))
+        # One candidate covers the entire code root, so the transactional updater
+        # can restore all four components together. ProgramData is never packaged.
+        $script:SetupPublishingPhase = 'deployment-preparation'
+        $deploymentCode = Join-Path $work 'deployment-code'
+        New-Item -ItemType Directory -Path $deploymentCode | Out-Null
+        foreach ($component in @('core', 'agent')) {
+            $componentDirectory = if ($component -eq 'core') { 'Core' } else { 'Agent' }
+            Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'updater/SentinelAI.Updater.csproj'), '--configuration', 'Release', '--', 'prepare',
+                '--manifest', (Join-Path $bundle ($component + '.manifest.json')), '--package', (Join-Path $bundle ($component + '.zip')),
+                '--public-key', $trust, '--key-id', $KeyId, '--environment', 'development', '--channel', $Channel,
+                '--artifact-id', ('sentinelai-' + $component + '-win-x64'), '--installed-version', '0.0.0',
+                '--output', (Join-Path $deploymentCode $componentDirectory))
+        }
+        Copy-SetupCodeTree -Source $desktop -Destination (Join-Path $deploymentCode 'Desktop')
+        Copy-SetupCodeTree -Source (Join-Path $bundle 'updater') -Destination (Join-Path $deploymentCode 'Updater')
+        if (-not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) {
+            # A CI fixture can run a real SCM host without HTTP health. There is no
+            # installed runtime test flag, unsigned override or production mode.
+            $input = [IO.File]::Open($DevelopmentCoreAssemblyOverride, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try {
+                if ($input.Length -le 0 -or $input.Length -gt 512MB) { throw 'The development Core assembly changed.' }
+                $output = [IO.File]::Open((Join-Path $deploymentCode 'Core/SentinelAI.Core.dll'), [IO.FileMode]::Truncate, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                try { $input.CopyTo($output); $output.Flush($true) } finally { $output.Dispose() }
+            } finally { $input.Dispose() }
+        }
+        foreach ($required in @('Core/SentinelAI.Core.exe', 'Agent/SentinelAI.Agent.exe', 'Desktop/SentinelAI.Desktop.exe', 'Updater/SentinelAI.Updater.exe')) {
+            $entryPoint = Join-Path $deploymentCode $required
+            if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf) -or (Get-Item -LiteralPath $entryPoint).Length -le 0) { throw 'A deployment executable is missing.' }
+        }
+        $deploymentVersion = [ordered]@{ format = 'sentinelai-deployment-v1'; version = $Version }
+        [IO.File]::WriteAllText((Join-Path $deploymentCode 'deployment-version.json'), ($deploymentVersion | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $script:SetupPublishingPhase = 'deployment-signing'
+        $deploymentPackage = Join-Path $bundle 'deployment.zip'
+        $deploymentManifest = Join-Path $bundle 'deployment.manifest.json'
+        New-SetupPayload -Source $deploymentCode -Destination $deploymentPackage -MaximumEntries 4096 -MaximumExpandedBytes 1GB
+        Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'tools/update-dev/SentinelAI.UpdateDev.csproj'), '--configuration', 'Release', '--', 'sign',
+            '--private-key', $DevelopmentPrivateKey, '--key-id', $KeyId, '--package', $deploymentPackage, '--version', $Version,
+            '--artifact-id', 'sentinelai-deployment-win-x64', '--artifact-url', ('https://updates.example.invalid/pilot/' + $Version + '/deployment.zip'),
+            '--channel', $Channel, '--output', $deploymentManifest)
+        $script:SetupPublishingPhase = 'deployment-verification'
+        Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'updater/SentinelAI.Updater.csproj'), '--configuration', 'Release', '--', 'verify',
+            '--manifest', $deploymentManifest, '--package', $deploymentPackage, '--public-key', $trust,
+            '--key-id', $KeyId, '--environment', 'development', '--channel', $Channel,
+            '--artifact-id', 'sentinelai-deployment-win-x64', '--installed-version', '0.0.0')
     }
-    Copy-SetupCodeTree -Source $desktop -Destination (Join-Path $deploymentCode 'Desktop')
-    Copy-SetupCodeTree -Source (Join-Path $bundle 'updater') -Destination (Join-Path $deploymentCode 'Updater')
-    if (-not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) {
-        # A CI fixture can run a real SCM host without HTTP health. There is no
-        # installed runtime test flag, unsigned override or production mode.
-        $input = [IO.File]::Open($DevelopmentCoreAssemblyOverride, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-        try {
-            if ($input.Length -le 0 -or $input.Length -gt 512MB) { throw 'The development Core assembly changed.' }
-            $output = [IO.File]::Open((Join-Path $deploymentCode 'Core/SentinelAI.Core.dll'), [IO.FileMode]::Truncate, [IO.FileAccess]::Write, [IO.FileShare]::None)
-            try { $input.CopyTo($output); $output.Flush($true) } finally { $output.Dispose() }
-        } finally { $input.Dispose() }
-    }
-    foreach ($required in @('Core/SentinelAI.Core.exe', 'Agent/SentinelAI.Agent.exe', 'Desktop/SentinelAI.Desktop.exe', 'Updater/SentinelAI.Updater.exe')) {
-        $entryPoint = Join-Path $deploymentCode $required
-        if (-not (Test-Path -LiteralPath $entryPoint -PathType Leaf) -or (Get-Item -LiteralPath $entryPoint).Length -le 0) { throw 'A deployment executable is missing.' }
-    }
-    $deploymentVersion = [ordered]@{ format = 'sentinelai-deployment-v1'; version = $Version }
-    [IO.File]::WriteAllText((Join-Path $deploymentCode 'deployment-version.json'), ($deploymentVersion | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $script:SetupPublishingPhase = 'deployment-signing'
-    $deploymentPackage = Join-Path $bundle 'deployment.zip'
-    $deploymentManifest = Join-Path $bundle 'deployment.manifest.json'
-    New-SetupPayload -Source $deploymentCode -Destination $deploymentPackage -MaximumEntries 4096 -MaximumExpandedBytes 1GB
-    Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'tools/update-dev/SentinelAI.UpdateDev.csproj'), '--configuration', 'Release', '--', 'sign',
-        '--private-key', $DevelopmentPrivateKey, '--key-id', $KeyId, '--package', $deploymentPackage, '--version', $Version,
-        '--artifact-id', 'sentinelai-deployment-win-x64', '--artifact-url', ('https://updates.example.invalid/pilot/' + $Version + '/deployment.zip'),
-        '--channel', $Channel, '--output', $deploymentManifest)
-    $script:SetupPublishingPhase = 'deployment-verification'
-    Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'updater/SentinelAI.Updater.csproj'), '--configuration', 'Release', '--', 'verify',
-        '--manifest', $deploymentManifest, '--package', $deploymentPackage, '--public-key', $trust,
-        '--key-id', $KeyId, '--environment', 'development', '--channel', $Channel,
-        '--artifact-id', 'sentinelai-deployment-win-x64', '--installed-version', '0.0.0')
 
     $script:SetupPublishingPhase = 'payload-packaging'
     $setupSource = Join-Path $payloadSource 'setup'
     New-Item -ItemType Directory -Path $setupSource | Out-Null
     Copy-Item -LiteralPath $worker -Destination (Join-Path $setupSource 'SetupWorker.ps1')
     Copy-Item -LiteralPath $lifecycleWorker -Destination (Join-Path $setupSource 'SetupLifecycle.ps1')
+    if ($agentOnly) { Copy-Item -LiteralPath $agentWorker -Destination (Join-Path $setupSource 'AgentSetupWorker.ps1') }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $payload = Join-Path $work 'payload.zip'
     New-SetupPayload -Source $payloadSource -Destination $payload
@@ -415,7 +427,8 @@ try {
     try { $hash = [BitConverter]::ToString($sha256.ComputeHash($input)).Replace('-', '').ToLowerInvariant() }
     finally { $sha256.Dispose(); $input.Dispose() }
     $metadata = Join-Path $work 'metadata.json'
-    $document = [ordered]@{ version = $Version; keyId = $KeyId; channel = $Channel; environment = 'development'; payloadSha256 = $hash; payloadLength = (Get-Item -LiteralPath $payload).Length }
+    $document = [ordered]@{ version = $Version; keyId = $KeyId; channel = $Channel; environment = 'development'; payloadSha256 = $hash; payloadLength = (Get-Item -LiteralPath $payload).Length;
+        product = $(if ($agentOnly) { 'agent' } else { 'sentinelai' }) }
     [IO.File]::WriteAllText($metadata, ($document | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
 
     # Do not use .NET's single-file extraction cache for an elevated bootstrap.
@@ -444,16 +457,16 @@ try {
     Invoke-SetupNativeTool -Tool 'rc' -Arguments @('/nologo', '/fo', $compiledResource, $nativeResource) -NativeEnvironment $nativeEnvironment -WorkingDirectory $work
     $script:SetupPublishingPhase = 'native-compilation'
     Invoke-SetupNativeTool -Tool 'cl' -Arguments @('/nologo', '/std:c++17', '/utf-8', '/W4', '/WX', '/O2', '/MT', '/DUNICODE', '/D_UNICODE', '/EHsc', '/guard:cf',
-        ('/I' + $work), ('/Fo' + (Join-Path $work 'Bootstrap.obj')), ('/Fe' + (Join-Path $OutputDirectory 'SentinelAI-Setup.exe')), $nativeSource, $compiledResource,
+        ('/I' + $work), ('/Fo' + (Join-Path $work 'Bootstrap.obj')), ('/Fe' + (Join-Path $OutputDirectory $setupName)), $nativeSource, $compiledResource,
         '/link', '/SUBSYSTEM:WINDOWS', '/MACHINE:X64', '/DYNAMICBASE', '/NXCOMPAT', '/HIGHENTROPYVA', '/MANIFEST:NO', '/INCREMENTAL:NO',
         'bcrypt.lib', 'advapi32.lib', 'shell32.lib', 'ole32.lib', 'user32.lib') -NativeEnvironment $nativeEnvironment -WorkingDirectory $work
     $script:SetupPublishingPhase = 'final-artifact'
     $outputItems = @(Get-ChildItem -LiteralPath $OutputDirectory -Force)
-    if ($outputItems.Count -ne 1 -or $outputItems[0].PSIsContainer -or $outputItems[0].Name -cne 'SentinelAI-Setup.exe' -or $outputItems[0].Length -le 0) {
-        throw 'The setup publish must produce exactly SentinelAI-Setup.exe.'
+    if ($outputItems.Count -ne 1 -or $outputItems[0].PSIsContainer -or $outputItems[0].Name -cne $setupName -or $outputItems[0].Length -le 0) {
+        throw 'The setup publish must produce exactly one Setup executable.'
     }
     $complete = $true
-    Write-Output ('Development single-EXE setup created: ' + (Join-Path $OutputDirectory 'SentinelAI-Setup.exe'))
+    Write-Output ('Development single-EXE setup created: ' + (Join-Path $OutputDirectory $setupName))
 } catch {
     $safeFailure = ' Phase=' + $script:SetupPublishingPhase + '; type=' + $_.Exception.GetType().Name + '; source-line=' + $_.InvocationInfo.ScriptLineNumber + '.'
     $failure = 'Setup packaging failed. Check the version, separate development keys outside source, SDK/package access and fresh output path. Partial artifacts are not a release.' + $safeFailure

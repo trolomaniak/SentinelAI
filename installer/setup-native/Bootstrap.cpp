@@ -4,7 +4,9 @@
 #include <windows.h>
 #include <aclapi.h>
 #include <bcrypt.h>
+#include <psapi.h>
 #include <sddl.h>
+#include <shellapi.h>
 #include <shlobj.h>
 
 #include <algorithm>
@@ -20,6 +22,8 @@
 #include <vector>
 
 #include "NativePayload.h"
+
+extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 // No CLR runs in this executable. In particular, the elevated process never
 // trusts .NET's user-configurable, file-existence-only single-file cache.
@@ -94,6 +98,7 @@ namespace
         decltype(&::IsValidSid) valid_sid{};
         decltype(&::EqualSid) equal_sid{};
         decltype(&::SHGetKnownFolderPath) known_folder{};
+        decltype(&::CommandLineToArgvW) command_line_to_argv{};
         decltype(&::CoTaskMemFree) task_free{};
         decltype(&::BCryptOpenAlgorithmProvider) open_algorithm{};
         decltype(&::BCryptCloseAlgorithmProvider) close_algorithm{};
@@ -123,7 +128,9 @@ namespace
             valid_acl = Resolve<decltype(valid_acl)>(security, "IsValidAcl");
             valid_sid = Resolve<decltype(valid_sid)>(security, "IsValidSid");
             equal_sid = Resolve<decltype(equal_sid)>(security, "EqualSid");
-            known_folder = Resolve<decltype(known_folder)>(Load(L"shell32.dll"), "SHGetKnownFolderPath");
+            const HMODULE shell = Load(L"shell32.dll");
+            known_folder = Resolve<decltype(known_folder)>(shell, "SHGetKnownFolderPath");
+            command_line_to_argv = Resolve<decltype(command_line_to_argv)>(shell, "CommandLineToArgvW");
             task_free = Resolve<decltype(task_free)>(Load(L"ole32.dll"), "CoTaskMemFree");
             const HMODULE crypto = Load(L"bcrypt.dll");
             open_algorithm = Resolve<decltype(open_algorithm)>(crypto, "BCryptOpenAlgorithmProvider");
@@ -622,18 +629,134 @@ namespace
         return environment;
     }
 
-    DWORD RunHost(const PrivateStaging& staging)
+    // Documented exit codes shared with the Setup host (docs/SETUP.md).
+    constexpr int kInvalidArguments = 2;
+
+    // The only accepted command lines: none; "/uninstall"; "/uninstall /quiet"; "/quiet /codefile <path>".
+    // Options are case-insensitive and may come in any order; the host receives them in one canonical form.
+    struct Options
+    {
+        bool quiet = false;
+        bool uninstall = false;
+        std::wstring code_file;
+    };
+
+    bool HasQuietOption(const SystemApis& api) noexcept
+    {
+        if (!api.command_line_to_argv) return false;
+        int count = 0;
+        LPWSTR* values = api.command_line_to_argv(GetCommandLineW(), &count);
+        if (values == nullptr) return false;
+        bool quiet = false;
+        for (int index = 1; index < count; ++index)
+            quiet = quiet || CompareStringOrdinal(values[index], -1, L"/quiet", -1, TRUE) == CSTR_EQUAL;
+        LocalFree(values);
+        return quiet;
+    }
+
+    Options ParseOptions(const SystemApis& api)
+    {
+        int count = 0;
+        LPWSTR* values = api.command_line_to_argv(GetCommandLineW(), &count);
+        Require(values != nullptr);
+        struct ArgumentsOwner
+        {
+            LPWSTR* value;
+            ~ArgumentsOwner() { LocalFree(value); }
+        } owner{ values };
+        Require(count >= 1 && count <= 5);
+        Options options;
+        bool code_file = false;
+        for (int index = 1; index < count; ++index)
+        {
+            const std::wstring argument(values[index]);
+            if (EqualOrdinal(argument, L"/quiet") && !options.quiet) options.quiet = true;
+            else if (EqualOrdinal(argument, L"/uninstall") && !options.uninstall) options.uninstall = true;
+            else if (EqualOrdinal(argument, L"/codefile") && !code_file && index + 1 < count)
+            {
+                code_file = true;
+                const std::wstring path(values[++index]);
+                Require(!path.empty() && path.size() < 32767);
+                // The host runs in its own staging directory: resolve a relative path against the caller's.
+                const DWORD length = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
+                Require(length > 1 && length < 32767);
+                std::vector<wchar_t> full(length);
+                Require(GetFullPathNameW(path.c_str(), length, full.data(), nullptr) == length - 1);
+                options.code_file.assign(full.data(), length - 1);
+                Require(options.code_file.back() != L'\\' && options.code_file.find(L'"') == std::wstring::npos);
+            }
+            else Require(false);
+        }
+        Require(options.uninstall ? !code_file : code_file == options.quiet);
+        return options;
+    }
+
+    // The 128-bit file ID where the file system has one; the 64-bit index otherwise (FAT media, some network shares).
+    bool SameFile(HANDLE first, HANDLE second)
+    {
+        FILE_ID_INFO first_id{};
+        FILE_ID_INFO second_id{};
+        if (GetFileInformationByHandleEx(first, FileIdInfo, &first_id, sizeof(first_id)) != FALSE &&
+            GetFileInformationByHandleEx(second, FileIdInfo, &second_id, sizeof(second_id)) != FALSE)
+            return first_id.VolumeSerialNumber == second_id.VolumeSerialNumber &&
+                std::memcmp(&first_id.FileId, &second_id.FileId, sizeof(first_id.FileId)) == 0;
+        BY_HANDLE_FILE_INFORMATION first_information{};
+        BY_HANDLE_FILE_INFORMATION second_information{};
+        return GetFileInformationByHandle(first, &first_information) != FALSE && GetFileInformationByHandle(second, &second_information) != FALSE &&
+            first_information.dwVolumeSerialNumber == second_information.dwVolumeSerialNumber &&
+            first_information.nFileIndexHigh == second_information.nFileIndexHigh && first_information.nFileIndexLow == second_information.nFileIndexLow;
+    }
+
+    // Setup's own executable, opened read-only and denying writers, renames and deletion while it is copied. It must
+    // be the very file this process was mapped from (whose current name the memory manager reports), never a file
+    // moved into the launch path afterwards: Windows Apps later runs the installed copy, elevated, to uninstall.
+    UniqueHandle OpenOwnImage()
+    {
+        std::vector<wchar_t> launched(32768);
+        DWORD length = static_cast<DWORD>(launched.size());
+        Require(QueryFullProcessImageNameW(GetCurrentProcess(), 0, launched.data(), &length) != FALSE && length > 0 && length < launched.size());
+        UniqueHandle image(CreateFileW(std::wstring(launched.data(), length).c_str(), GENERIC_READ, FILE_SHARE_READ,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+        Require(image.Valid() && GetFileType(image.Get()) == FILE_TYPE_DISK);
+        std::vector<wchar_t> mapped(32768);
+        const DWORD mapped_length = K32GetMappedFileNameW(GetCurrentProcess(), &__ImageBase, mapped.data(), static_cast<DWORD>(mapped.size()));
+        Require(mapped_length > 0 && mapped_length < mapped.size());
+        const UniqueHandle running(CreateFileW((L"\\\\?\\GLOBALROOT" + std::wstring(mapped.data(), mapped_length)).c_str(), FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+        Require(running.Valid() && SameFile(image.Get(), running.Get()));
+        // Only this handle crosses into the host, read-only.
+        Require(SetHandleInformation(image.Get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) != FALSE);
+        return image;
+    }
+
+    DWORD RunHost(const PrivateStaging& staging, const Options& options, HANDLE image)
     {
         const std::wstring executable = staging.Path() + L"\\" + kHostName;
-        const std::wstring command = L"\"" + executable + L"\"";
+        std::wstring command = L"\"" + executable + L"\" --image " + std::to_wstring(reinterpret_cast<std::uintptr_t>(image));
+        if (options.uninstall) command += options.quiet ? L" --uninstall --quiet" : L" --uninstall";
+        else if (options.quiet) command += L" --quiet --codefile \"" + options.code_file + L"\"";
         std::vector<wchar_t> command_line(command.begin(), command.end());
         command_line.push_back(L'\0');
         auto environment = ChildEnvironment(staging.TemporaryPath());
-        STARTUPINFOW startup{};
-        startup.cb = static_cast<DWORD>(sizeof(startup));
+        SIZE_T attribute_bytes = 0;
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_bytes);
+        Require(attribute_bytes > 0);
+        std::vector<BYTE> attribute_storage(attribute_bytes);
+        auto attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_storage.data());
+        Require(InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_bytes) != FALSE);
+        struct AttributeOwner
+        {
+            LPPROC_THREAD_ATTRIBUTE_LIST value;
+            ~AttributeOwner() { DeleteProcThreadAttributeList(value); }
+        } attribute_owner{ attributes };
+        HANDLE inherited = image;
+        Require(UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &inherited, sizeof(inherited), nullptr, nullptr) != FALSE);
+        STARTUPINFOEXW startup{};
+        startup.StartupInfo.cb = static_cast<DWORD>(sizeof(startup));
+        startup.lpAttributeList = attributes;
         PROCESS_INFORMATION process{};
-        Require(CreateProcessW(executable.c_str(), command_line.data(), nullptr, nullptr, FALSE,
-            CREATE_UNICODE_ENVIRONMENT, environment.data(), staging.Path().c_str(), &startup, &process) != FALSE);
+        Require(CreateProcessW(executable.c_str(), command_line.data(), nullptr, nullptr, TRUE,
+            CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT, environment.data(), staging.Path().c_str(), &startup.StartupInfo, &process) != FALSE);
         const UniqueHandle process_handle(process.hProcess);
         const UniqueHandle thread_handle(process.hThread);
         const DWORD result = WaitForSingleObject(process_handle.Get(), kHostWaitMilliseconds);
@@ -648,31 +771,43 @@ namespace
     }
 }
 
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR arguments, int)
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
     SystemApis api;
     const wchar_t* failure = L"SentinelAI Setup could not initialize its protected Windows bootstrap.";
+    bool quiet = false;
     try
     {
         api.Initialize();
-        Require(arguments == nullptr || *arguments == L'\0');
+        Options options;
+        try { options = ParseOptions(api); }
+        catch (...)
+        {
+            // Only /quiet suppresses this message; any other text is never interpreted.
+            if (!HasQuietOption(api) && api.message_box)
+                api.message_box(nullptr, L"SentinelAI Setup accepts no options, /uninstall, /uninstall /quiet or /quiet /codefile <path>.",
+                    L"SentinelAI Setup", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+            return kInvalidArguments;
+        }
+        quiet = options.quiet;
         const TrustedAccounts accounts(api);
         const Sha256 sha256(api);
         failure = L"SentinelAI Setup could not validate its embedded installation runtime.";
         const auto payload = ValidatePayload(sha256);
+        const UniqueHandle image = OpenOwnImage();
         failure = L"SentinelAI Setup could not prepare a protected installation workspace. Existing protection services have not been changed.";
         PrivateStaging staging(api, accounts);
         staging.Extract(payload, sha256);
         failure = L"SentinelAI Setup could not complete its installation window. Check whether an installation window is still running before trying again.";
-        const DWORD exit_code = RunHost(staging);
-        if (exit_code == ERROR_TIMEOUT && api.message_box)
+        const DWORD exit_code = RunHost(staging, options, image.Get());
+        if (exit_code == ERROR_TIMEOUT && !quiet && api.message_box)
             api.message_box(nullptr, L"SentinelAI Setup is still running. Wait for its installation window to finish before trying again.",
                 L"SentinelAI Setup", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
         return static_cast<int>(exit_code);
     }
     catch (...)
     {
-        if (api.message_box) api.message_box(nullptr, failure, L"SentinelAI Setup", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+        if (!quiet && api.message_box) api.message_box(nullptr, failure, L"SentinelAI Setup", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
         return ERROR_INSTALL_FAILURE;
     }
 }

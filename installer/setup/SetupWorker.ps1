@@ -8,7 +8,7 @@ $ProgressPreference = 'SilentlyContinue'
 $script:SetupPhase = 'validate'
 
 function Write-SetupProgress {
-    param([ValidateSet('validate','core','services','network','agent','desktop','shortcut','inspect','replace','health','rollback','uninstall')][string]$Phase)
+    param([ValidateSet('validate','core','services','network','agent','desktop','shortcut','inspect','replace','health','rollback','uninstall','updater','apps','enroll')][string]$Phase)
     $script:SetupPhase = $Phase
     Write-Output ('PROGRESS|' + $Phase)
 }
@@ -70,7 +70,8 @@ function Get-SetupLocations {
     return @{ CodeRoot = $code; DataRoot = $data; CoreCode = Join-Path $code 'Core'; CoreData = Join-Path $data 'Core';
         AgentCode = Join-Path $code 'Agent'; AgentData = Join-Path $data 'Agent';
         DesktopCode = Join-Path $code 'Desktop'; UpdaterCode = Join-Path $code 'Updater';
-        SetupData = Join-Path $data 'Setup'; Menu = $menu }
+        SetupData = Join-Path $data 'Setup'; Menu = $menu;
+        InstallerCode = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'SentinelAI Setup' }
 }
 
 function Assert-SetupFreshTargets {
@@ -157,6 +158,114 @@ function Install-SetupShortcut {
     }
 }
 
+# Windows Apps ("Installed apps") entries. Each one runs an installed copy of the very Setup EXE that installed the
+# product, kept in an administrator-only folder, with /uninstall.
+function Get-SetupAppsKeyPath {
+    param([ValidateSet('SentinelAI','SentinelAIAgent')][string]$Key)
+    return 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\' + $Key
+}
+
+function Register-SetupDeleteAtRestart {
+    param([string]$Path)
+    if ($null -eq ('SentinelAI.Setup.RestartDelete' -as [type])) {
+        Add-Type -Namespace SentinelAI.Setup -Name RestartDelete -MemberDefinition '[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool MoveFileExW(string existing, string replacement, int flags);'
+    }
+    # MOVEFILE_DELAY_UNTIL_REBOOT with no new name: Windows deletes the entry at the next restart.
+    if (-not [SentinelAI.Setup.RestartDelete]::MoveFileExW($Path, [NullString]::Value, 4)) { throw 'Delayed removal unavailable.' }
+}
+
+function Remove-SetupOwnedTree {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    try { Remove-Item -LiteralPath $Path -Recurse -Force; return } catch { }
+    # Only the installed Setup that Windows Apps started stays locked while it runs: Windows removes it, then its folders, at restart.
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Sort-Object { $_.FullName.Length } -Descending)) {
+        if (-not (Test-Path -LiteralPath $entry.FullName)) { continue }
+        try { Remove-Item -LiteralPath $entry.FullName -Recurse -Force } catch { Register-SetupDeleteAtRestart -Path $entry.FullName }
+    }
+    try { Remove-Item -LiteralPath $Path -Recurse -Force } catch { Register-SetupDeleteAtRestart -Path $Path }
+}
+
+function Install-SetupCachedInstaller {
+    param([string]$Source, [string]$Directory, [string]$Name)
+    $Source = Assert-PilotPath -Path $Source -MustExist -File
+    Assert-PilotTrustedPath -Path $Source
+    Assert-PilotTrustedPath -Path $Directory
+    if (Test-Path -LiteralPath $Directory) {
+        Assert-PilotTrustedPath -Path $Directory -Tree
+        foreach ($entry in @(Get-ChildItem -LiteralPath $Directory -Force)) {
+            if ($entry.PSIsContainer -or ($entry.Name -cne $Name -and $entry.Name -cnotmatch ('\A' + [Regex]::Escape($Name) + '\.[0-9a-f]{32}\.old\z'))) { throw 'Foreign installed Setup content.' }
+        }
+    } else {
+        Ensure-PilotProtectedParent -Path ([IO.Path]::GetDirectoryName($Directory))
+        New-PilotDirectoryWithAcl -Path $Directory -Kind Container
+    }
+    $target = Join-Path $Directory $Name
+    if (Test-Path -LiteralPath $target) {
+        # A running installed Setup cannot be overwritten, only renamed: the old copy goes at restart if it is still in use.
+        $aside = $target + '.' + [Guid]::NewGuid().ToString('N') + '.old'
+        Move-Item -LiteralPath $target -Destination $aside
+        try { Remove-Item -LiteralPath $aside -Force } catch { Register-SetupDeleteAtRestart -Path $aside }
+    }
+    $input = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $output = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $input.CopyTo($output); $output.Flush($true) } finally { $output.Dispose() }
+    } finally { $input.Dispose() }
+    Set-SetupCodeAcl -Path $target -PublicRead
+    Set-SetupCodeAcl -Path $Directory -PublicRead
+    Assert-PilotTrustedPath -Path $Directory -Tree
+    return $target
+}
+
+function Register-SetupApps {
+    param([ValidateSet('SentinelAI','SentinelAIAgent')][string]$Key, [string]$DisplayName, [string]$Version, [string]$Installer,
+          [string]$InstallLocation, [string]$Icon, [switch]$QuietUninstall)
+    $size = 0L
+    $installerDirectory = [IO.Path]::GetDirectoryName($Installer)
+    $roots = if ($installerDirectory.StartsWith($InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase)) { @($InstallLocation) } else { @($InstallLocation, $installerDirectory) }
+    foreach ($root in $roots) {
+        if (Test-Path -LiteralPath $root) { foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -Force -File)) { $size += $file.Length } }
+    }
+    $path = Get-SetupAppsKeyPath $Key
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+    $item = New-Item -Path $path -Force
+    $quoted = '"' + $Installer + '"'
+    foreach ($value in @(@('DisplayName', $DisplayName), @('DisplayVersion', $Version), @('Publisher', 'SentinelAI'),
+        @('InstallLocation', $InstallLocation), @('DisplayIcon', $Icon), @('UninstallString', ($quoted + ' /uninstall')))) {
+        [void](New-ItemProperty -LiteralPath $path -Name $value[0] -Value $value[1] -PropertyType String)
+    }
+    if ($QuietUninstall) { [void](New-ItemProperty -LiteralPath $path -Name 'QuietUninstallString' -Value ($quoted + ' /uninstall /quiet') -PropertyType String) }
+    foreach ($flag in @('NoModify','NoRepair')) { [void](New-ItemProperty -LiteralPath $path -Name $flag -Value 1 -PropertyType DWord) }
+    [void](New-ItemProperty -LiteralPath $path -Name 'EstimatedSize' -Value ([int][Math]::Min([int]::MaxValue, [Math]::Ceiling($size / 1KB))) -PropertyType DWord)
+    $item.Dispose()
+}
+
+function Unregister-SetupApps {
+    param([ValidateSet('SentinelAI','SentinelAIAgent')][string]$Key)
+    $path = Get-SetupAppsKeyPath $Key
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+}
+
+function Register-SetupFullApps {
+    param($Locations, [string]$WorkDirectory, [string]$Version)
+    $installer = Install-SetupCachedInstaller -Source (Join-Path $WorkDirectory 'installer\setup.exe') -Directory $Locations.InstallerCode -Name 'SentinelAI-Setup.exe'
+    Register-SetupApps -Key SentinelAI -DisplayName 'SentinelAI' -Version $Version -Installer $installer -InstallLocation $Locations.CodeRoot `
+        -Icon (Join-Path $Locations.DesktopCode 'SentinelAI.Desktop.exe')
+}
+
+function Unregister-SetupFullApps {
+    param($Locations)
+    Unregister-SetupApps -Key SentinelAI
+    Assert-PilotTrustedPath -Path $Locations.InstallerCode -Tree
+    if (Test-Path -LiteralPath $Locations.InstallerCode) {
+        foreach ($entry in @(Get-ChildItem -LiteralPath $Locations.InstallerCode -Force)) {
+            if ($entry.PSIsContainer -or $entry.Name -cnotmatch '\ASentinelAI-Setup\.exe(\.[0-9a-f]{32}\.old)?\z') { throw 'Foreign installed Setup content.' }
+        }
+    }
+    Remove-SetupOwnedTree -Path $Locations.InstallerCode
+}
+
 function Invoke-SetupInstallation {
     param($Request)
     $locations = Get-SetupLocations
@@ -213,6 +322,8 @@ function Invoke-SetupInstallation {
         Write-PilotProtectedFile -Path (Join-Path $locations.SetupData 'setup-installation.json') -Content ($receipt | ConvertTo-Json -Compress) -Kind Receipt
         Write-SetupProgress 'shortcut'
         Install-SetupShortcut -Directory $locations.Menu -DesktopDirectory $locations.DesktopCode
+        Write-SetupProgress 'apps'
+        Register-SetupFullApps -Locations $locations -WorkDirectory $Request.workDirectory -Version $Request.version
         Write-Output 'DONE'
     } finally { $Request.enrollmentToken = $null }
 }
@@ -223,7 +334,7 @@ function Assert-SetupRequest {
     # Only the fresh Core preparation carries the public SHA-256 of the certificate the Setup host created.
     if ($Request.localNetworkCertificateSha256 -isnot [string] -or ($Request.localNetworkCertificateSha256.Length -ne 0 -and
         ($Request.action -cne 'prepare-core' -or $Request.localNetworkCertificateSha256 -cnotmatch '\A[0-9A-F]{64}\z'))) { throw 'Invalid local-network policy.' }
-    if ($Request.action -cnotin @('prepare-core','start-core','complete','inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile','uninstall') -or $Request.keyId -isnot [string] -or
+    if ($Request.action -cnotin @('prepare-core','start-core','complete','inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile','uninstall','apps-register') -or $Request.keyId -isnot [string] -or
         $Request.keyId -cnotmatch '\Adev-[A-Za-z0-9_-]{1,48}\z' -or $Request.channel -cnotin @('stable','pilot','beta')) { throw 'Invalid policy.' }
     if ($Request.version -isnot [string] -or $Request.version -cnotmatch '\A(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\z' -or
         @($Request.version.Split('.') | Where-Object { [int]$_ -gt 65535 }).Count -ne 0 -or

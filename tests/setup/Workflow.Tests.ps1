@@ -69,7 +69,7 @@ Reject-SetupTest { Assert-SetupRequest $request } 'administrator identity forbid
 $request = New-SetupTestRequest; $request | Add-Member -NotePropertyName destination -NotePropertyValue 'other'
 Reject-SetupTest { Assert-SetupRequest $request } 'destination overrides forbidden'
 Reject-SetupTest { Read-PilotStrictJson '{"action":"prepare-core","action":"complete"}' } 'duplicate JSON field'
-foreach ($action in @('inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile','uninstall')) {
+foreach ($action in @('inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile','uninstall','apps-register')) {
     $request = New-SetupTestRequest $action
     $decoded = Read-PilotStrictJson -Json ($request | ConvertTo-Json -Compress)
     Assert-SetupRequest $decoded
@@ -83,7 +83,7 @@ foreach ($value in @($null, $true, 'True', 'FALSE', '', '0')) {
 }
 $request = New-SetupTestRequest 'uninstall'; $request.preserveData = 'false'
 Assert-SetupRequest $request; $script:checks++
-foreach ($action in @('prepare-core','start-core','complete','inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile')) {
+foreach ($action in @('prepare-core','start-core','complete','inspect','lifecycle-stop','lifecycle-start','lifecycle-health','lifecycle-context','lifecycle-cleanup','lifecycle-reconcile','apps-register')) {
     $request = New-SetupTestRequest $action; $request.preserveData = 'false'
     Reject-SetupTest { Assert-SetupRequest $request } 'data deletion forbidden outside explicit uninstall'
 }
@@ -166,6 +166,11 @@ function Write-PilotProtectedFile {
 }
 function Get-FileHash { param($LiteralPath,$Algorithm); [pscustomobject]@{ Hash = 'A' * 64 } }
 function Install-SetupShortcut { param($Directory,$DesktopDirectory); [void]$script:events.Add('shortcut') }
+function Register-SetupFullApps {
+    param($Locations,$WorkDirectory,$Version)
+    Assert-SetupTest ($Version -ceq '1.0.0' -and $WorkDirectory -ceq $fixture) 'Windows Apps entry for the installed version and its own Setup copy'
+    [void]$script:events.Add('apps')
+}
 
 foreach ($name in $script:locations.Keys) {
     $script:existing = $script:locations[$name]
@@ -212,8 +217,8 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ('sentinelai-setup-tests-' + [Gu
 try {
     $request = New-SetupTestRequest 'complete'; $request.workDirectory = $fixture
     $output = @(Invoke-SetupInstallation $request)
-    Assert-SetupTest (($script:events -join ',') -ceq 'core-service-Start,install-Agent,SentinelAI.Desktop.exe:True,SentinelAI.Updater.exe:False,private-receipt-directory,receipt,receipt,shortcut') 'complete phase ordering and permissions'
-    Assert-SetupTest (($output -join ',') -ceq 'PROGRESS|validate,PROGRESS|services,PROGRESS|agent,PROGRESS|desktop,PROGRESS|shortcut,DONE') 'complete progress protocol'
+    Assert-SetupTest (($script:events -join ',') -ceq 'core-service-Start,install-Agent,SentinelAI.Desktop.exe:True,SentinelAI.Updater.exe:False,private-receipt-directory,receipt,receipt,shortcut,apps') 'complete phase ordering and permissions'
+    Assert-SetupTest (($output -join ',') -ceq 'PROGRESS|validate,PROGRESS|services,PROGRESS|agent,PROGRESS|desktop,PROGRESS|shortcut,PROGRESS|apps,DONE') 'complete progress protocol'
     Assert-SetupTest ($null -eq $request.enrollmentToken) 'enrollment request token released'
     Assert-SetupTest (-not ($output -join ',').Contains($syntheticToken)) 'output excludes credentials'
     $script:events.Clear(); $script:failAgent = $true

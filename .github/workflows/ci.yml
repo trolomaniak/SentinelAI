@@ -272,7 +272,7 @@ jobs:
 
   setup-windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -283,6 +283,7 @@ jobs:
         run: |
           ./tests/setup/Workflow.Tests.ps1
           ./tests/setup/Lifecycle.Tests.ps1
+          ./tests/setup/AgentWorker.Tests.ps1
           ./tests/setup/TrustedPath.Tests.ps1
           ./tests/pilot/BoundedProcess.Tests.ps1
           ./tests/setup/HangProbe.Tests.ps1
@@ -305,6 +306,11 @@ jobs:
               -DevelopmentPrivateKey (Join-Path $keys 'dev-ci-setup.private.pem') `
               -PublicKeyPath (Join-Path $keys 'dev-ci-setup.public.pem') `
               -OutputDirectory (Join-Path $env:RUNNER_TEMP 'sentinelai-setup-artifact')
+            # MVP-2: the Agent-only Setup, signed with the same development key as the central installation.
+            ./scripts/publish-setup-windows.ps1 -Version 1.0.0 -KeyId dev-ci-setup -Product Agent `
+              -DevelopmentPrivateKey (Join-Path $keys 'dev-ci-setup.private.pem') `
+              -PublicKeyPath (Join-Path $keys 'dev-ci-setup.public.pem') `
+              -OutputDirectory (Join-Path $env:RUNNER_TEMP 'sentinelai-agent-setup-artifact')
           } catch {
             $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
             if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }
@@ -314,12 +320,13 @@ jobs:
           } finally {
             if (Test-Path -LiteralPath $keys) { Remove-Item -LiteralPath $keys -Recurse -Force }
           }
-      - name: Verify native Setup wrapper, protected WPF child and complete deployment
+      - name: Verify native Setup wrapper, protected WPF child, complete deployment and silent Agent Setup enrollment
         shell: powershell
         run: |
           try {
-            ./tests/setup/Windows.Acceptance.ps1 `
+            ./tests/setup/AgentSetup.Acceptance.ps1 `
               -ExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-setup-artifact/SentinelAI-Setup.exe') `
+              -AgentExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-agent-setup-artifact/SentinelAI-Agent-Setup.exe') `
               -TimeoutSeconds 300
           } catch {
             $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
@@ -332,6 +339,11 @@ jobs:
         with:
           name: SentinelAI-Setup-win-x64
           path: ${{ runner.temp }}/sentinelai-setup-artifact/SentinelAI-Setup.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SentinelAI-Agent-Setup-win-x64
+          path: ${{ runner.temp }}/sentinelai-agent-setup-artifact/SentinelAI-Agent-Setup.exe
           if-no-files-found: error
 
   setup-lifecycle-windows:

@@ -116,8 +116,11 @@ internal sealed class WindowsSetupLifecycle(string workDirectory, SetupMetadata 
         if (installed.Status == UpdateInstallStatus.RollbackFailed) return new(false, FailureCode: "rollback_failed");
         if (File.Exists(Journal)) return new(false, FailureCode: "recovery_pending");
         await _worker.CommandAsync("lifecycle-cleanup", true, token).ConfigureAwait(false);
-        return installed.Status == UpdateInstallStatus.Installed
-            ? new(true) : new(false, RolledBack: true, FailureCode: "update_failed");
+        if (installed.Status != UpdateInstallStatus.Installed) return new(false, RolledBack: true, FailureCode: "update_failed");
+        // The Windows Apps entry and its installed Setup follow the healthy version; refreshing them never undoes it.
+        try { await _worker.CommandAsync("apps-register", true, token).ConfigureAwait(false); }
+        catch (Exception) when (!token.IsCancellationRequested) { }
+        return new(true);
     }
 
     private async Task<UpdateVerificationPolicy> ReadInstalledPolicyAsync(string installedVersion, CancellationToken token)

@@ -420,8 +420,15 @@ try {
     foreach ($path in $damaged.Keys) { Assert-SetupAcceptance ((Read-SetupStateDigest $path) -ceq $damaged[$path]) 'Repair did not restore an actual damaged program assembly.' }
     Assert-LifecycleAcls
     Assert-LifecycleLocalNetwork
+    # MVP-2: Windows Apps shows the upgraded version and opens this uninstall flow with the installed Setup copy.
+    $apps = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI'
+    $installedSetup = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'SentinelAI Setup\SentinelAI-Setup.exe'
+    Assert-SetupAcceptance ([string]$apps.DisplayVersion -ceq '1.1.0' -and [string]$apps.UninstallString -ceq ('"' + $installedSetup + '" /uninstall') -and
+        (Get-FileHash -LiteralPath $installedSetup -Algorithm SHA256).Hash -ceq (Get-FileHash -LiteralPath $UpgradeExecutablePath -Algorithm SHA256).Hash) 'The Windows Apps entry did not follow the upgrade.'
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall'
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Uninstall retained an owned service registration.'
+    Assert-SetupAcceptance (-not (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI') -and
+        -not (Test-Path -LiteralPath (Split-Path -Parent $installedSetup))) 'Uninstall retained the Windows Apps entry or the installed Setup.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $shortcutRoot)) 'Uninstall retained owned code or Start Menu shortcuts.'
     Assert-SetupAcceptance (Test-Path -LiteralPath $databasePath -PathType Leaf) 'Default uninstall deleted security history.'
     Assert-LifecyclePreserved

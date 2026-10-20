@@ -20,17 +20,17 @@ public static class SetupPayload
         if (!CryptographicOperations.FixedTimeEquals(hash, Convert.FromHexString(metadata.PayloadSha256))) throw new InvalidDataException("Invalid setup payload hash.");
         payload.Position = 0;
         using var zip = new ZipArchive(payload, ZipArchiveMode.Read, leaveOpen: true);
-        _ = ValidateEntries(zip);
+        _ = ValidateEntries(zip, metadata.Product);
         payload.Position = 0;
     }
 
-    public static async Task ExtractAsync(Stream payload, string protectedEmptyDirectory, CancellationToken token)
+    public static async Task ExtractAsync(Stream payload, string protectedEmptyDirectory, CancellationToken token, string product = SetupMetadata.FullProduct)
     {
         var root = Path.GetFullPath(protectedEmptyDirectory);
         if (!Directory.Exists(root) || Directory.EnumerateFileSystemEntries(root).Any()) throw new InvalidDataException("Setup destination must be fresh.");
         payload.Position = 0;
         using var zip = new ZipArchive(payload, ZipArchiveMode.Read, leaveOpen: true);
-        var entries = ValidateEntries(zip);
+        var entries = ValidateEntries(zip, product);
         var buffer = new byte[64 * 1024];
         try
         {
@@ -59,7 +59,7 @@ public static class SetupPayload
         finally { CryptographicOperations.ZeroMemory(buffer); }
     }
 
-    private static ZipArchiveEntry[] ValidateEntries(ZipArchive archive)
+    private static ZipArchiveEntry[] ValidateEntries(ZipArchive archive, string product)
     {
         if (archive.Entries.Count is <= 0 or > MaximumEntries) throw new InvalidDataException("Invalid setup entry count.");
         var paths = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
@@ -87,8 +87,15 @@ public static class SetupPayload
                 if (paths.TryGetValue(parent, out var directory) && !directory) throw new InvalidDataException("Ambiguous setup archive path.");
             }
         }
-        foreach (var required in new[] { "setup/SetupWorker.ps1", "desktop/SentinelAI.Desktop.exe", "bundle/installer/Install-SentinelAIPilot.ps1" })
-            if (!paths.TryGetValue(required, out var directory) || directory) throw new InvalidDataException("Incomplete setup archive.");
+        string[] required = product == SetupMetadata.AgentProduct
+            ? ["setup/SetupWorker.ps1", "setup/AgentSetupWorker.ps1", "bundle/installer/Install-SentinelAIPilot.ps1", "bundle/agent.zip", "bundle/updater/SentinelAI.Updater.exe"]
+            : ["setup/SetupWorker.ps1", "desktop/SentinelAI.Desktop.exe", "bundle/installer/Install-SentinelAIPilot.ps1"];
+        foreach (var path in required)
+            if (!paths.TryGetValue(path, out var directory) || directory) throw new InvalidDataException("Incomplete setup archive.");
+        // Agent Setup installs the Agent and Updater only: no Core package and no Desktop.
+        if (product == SetupMetadata.AgentProduct && paths.Keys.Any(path => path.StartsWith("desktop/", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("bundle/core.", StringComparison.OrdinalIgnoreCase) || path.Equals("bundle/deployment.zip", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException("Unexpected Agent Setup content.");
         return archive.Entries.ToArray();
     }
 

@@ -375,6 +375,8 @@ function Uninstall-SetupLifecycleInstallation {
         Assert-PilotTrustedPath -Path $path -Tree
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
+    # Windows Apps loses the entry with or without retained data; the installed Setup goes at restart if it is running.
+    Unregister-SetupFullApps $Locations
     if (-not $PreserveData) {
         # Reachable only through explicit UI opt-in plus DELETE confirmation. Core's certificate and key
         # leave with the data: Agents pin them, so retained data keeps them.
@@ -404,6 +406,12 @@ function Invoke-SetupLifecycleWorker {
             'lifecycle-reconcile' { Sync-SetupLifecycleReceipts $locations }
             'lifecycle-cleanup' { Clear-SetupLifecycleContext $locations }
             'uninstall' { Write-SetupProgress 'uninstall'; Uninstall-SetupLifecycleInstallation $locations ($Request.preserveData -ceq 'true') }
+            'apps-register' {
+                Write-SetupProgress 'apps'
+                $owned = Assert-SetupLifecycleOwnership $locations
+                if ($owned.Retained) { throw 'Retained installations have no Windows Apps entry.' }
+                Register-SetupFullApps -Locations $locations -WorkDirectory $Request.workDirectory -Version $owned.Core.version
+            }
             default { throw 'Invalid lifecycle action.' }
         }
     }

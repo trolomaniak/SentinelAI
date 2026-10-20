@@ -1,3 +1,4 @@
+using System.IO;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security;
@@ -6,6 +7,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using Microsoft.Win32.SafeHandles;
 using SentinelAI.Desktop.Services;
 using SentinelAI.Setup.Foundation;
 
@@ -38,9 +40,13 @@ public sealed class SetupWindow : Window
     private bool _working;
     private bool _closing;
     private bool _attempted;
+    private readonly SafeFileHandle _image;
+    private readonly bool _uninstall;
 
-    public SetupWindow()
+    /// <param name="uninstall">Windows Apps' Uninstall: the maintenance view opens with Uninstall selected, data retained by default.</param>
+    public SetupWindow(SafeFileHandle image, bool uninstall)
     {
+        _image = image; _uninstall = uninstall;
         Title = "SentinelAI Setup"; Width = 660; Height = 640; MinWidth = 480; MinHeight = 440;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         var panel = new StackPanel { Margin = new Thickness(28) };
@@ -85,7 +91,8 @@ public sealed class SetupWindow : Window
             using var identity = WindowsIdentity.GetCurrent();
             if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)) throw new InvalidOperationException();
             _installation = EmbeddedInstallation.Open();
-            _work = await _installation.ExtractAsync(_lifetime.Token);
+            if (_installation.Metadata.Product != SetupMetadata.FullProduct) throw new InvalidDataException("Not the full SentinelAI Setup.");
+            _work = await _installation.ExtractAsync(_image, _lifetime.Token);
             _backend = new WindowsSetupLifecycle(_work, _installation.Metadata, new Progress<string>(value => _progress.Text = value));
             _state = await _backend.InspectAsync(_lifetime.Token); _lifetime.Token.ThrowIfCancellationRequested();
             _version.Text = _state.Version is null ? $"Setup version: {_installation.Metadata.Version}" : $"Installed version: {_state.Version}. Setup version: {_installation.Metadata.Version}.";
@@ -95,7 +102,9 @@ public sealed class SetupWindow : Window
             }
             else if (_state.Kind is SetupInstallationKind.Installed or SetupInstallationKind.Retained or SetupInstallationKind.RecoveryPending)
             {
-                _action.ItemsSource = SetupWorkflow.AllowedLifecycleActions(_state, _installation.Metadata.Version); _action.SelectedIndex = 0;
+                var actions = SetupWorkflow.AllowedLifecycleActions(_state, _installation.Metadata.Version);
+                _action.ItemsSource = actions;
+                _action.SelectedIndex = _uninstall && actions.Contains(SetupLifecycleAction.Uninstall) ? actions.ToList().IndexOf(SetupLifecycleAction.Uninstall) : 0;
                 _maintenance.Visibility = Visibility.Visible;
                 _progress.Text = _state.Kind switch
                 {
