@@ -10,6 +10,7 @@ The artifact is a development/pilot installer built from source. Obtain the comp
 
 1. Open the trusted `SentinelAI-Setup.exe` and approve Windows administrator elevation. Canceling the UAC prompt prevents setup from starting. Credentials are entered only after elevation.
 2. Wait for Setup to verify its payload and inspect the local installation. On a fresh machine, choose the first local Core administrator username and a matching password of 12–1024 characters. **Allow Agents on other computers in this local network to connect** is selected by default; clear it to keep the installation local to this computer only. Select **Install SentinelAI**.
+   A Setup built with pilot public keys (MVP-3) first asks for the **Pilot license key**: paste the key you received. Setup verifies it on the computer before installing anything and refuses a malformed, untrusted or expired key; after installation Core stores it, and Desktop **Settings** shows it.
 3. Follow the installation progress. Setup verifies its embedded resources and signed packages, creates Core's local-network certificate (unless local-only was chosen), installs Core, creates the administrator through Core's existing private setup command, starts Core, adds the Windows Firewall rule for the local network, obtains a one-use enrollment token through a connection verified as belonging to Core, and installs/enrolls Agent. It then installs Desktop/Updater and the shortcut.
 4. After completion, use **Open Desktop** or **Start → SentinelAI**. Sign in explicitly with the administrator account you created. If a normal interactive Explorer shell is unavailable, Setup shows the Start Menu instruction rather than launching an elevated Desktop.
 5. In native **Devices**, verify the enrolled endpoint and fresh heartbeat/inventory observation times. Closing Desktop leaves Core and Agent running.
@@ -161,6 +162,8 @@ dotnet run --project tools/update-dev --configuration Release -- keygen --direct
     -PublicKeyPath "$setupBuild\keys\dev-local-setup.public.pem" `
     -KeyId dev-local-setup
 ```
+
+For the pilot license (MVP-3), add `-PilotLicensePublicKey "<key ID>=<public PEM path>"` (repeatable, at most 32) and `-PilotContactCompany`, `-PilotContactEmail`, `-PilotContactPhone`, `-PilotContactWebsite`; only public keys are accepted. Without them the Setup asks for no key. The Agent Setup refuses them.
 
 The default fresh output is `artifacts/setup/win-x64/1.0.0/SentinelAI-Setup.exe`. Add `-Product Agent` (with a separate `-OutputDirectory`) to build `SentinelAI-Agent-Setup.exe` with the same key, key ID and channel; its payload holds only the signed Agent package, the Updater and the installer scripts. Publishing refuses an existing output, verifies that the independently supplied public key authenticates the Core/Agent and whole-deployment packages, and requires exactly one final executable. Private keys and intermediate artifacts are excluded. Versions are canonical `major.minor.patch`, each component 0–65535; fresh artifacts must be newer than `0.0.0`. Build the next version with the same key, key ID and channel for maintenance of that installed deployment. Keep the private development key separately; transfer only the completed Setup executable through the trusted channel.
 
