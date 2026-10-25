@@ -15,6 +15,7 @@ public partial class App : Application
     private ReportsViewModel? _reports;
     private LicenseViewModel? _license;
     private LocalNetworkViewModel? _localNetwork;
+    private ComputerEnrollmentViewModel? _computerEnrollment;
     private AiExplanationViewModel? _aiExplanation;
     private WindowsDesktopInstance? _instance;
     private WindowsServiceStatusModel? _serviceStatus;
@@ -56,6 +57,7 @@ public partial class App : Application
             _reports = new ReportsViewModel((IReportsClient)authenticationClient, new WindowsReportSaveService(() => MainWindow));
             _license = new LicenseViewModel((ILicenseClient)authenticationClient);
             _localNetwork = new LocalNetworkViewModel((ILocalNetworkClient)authenticationClient);
+            _computerEnrollment = new ComputerEnrollmentViewModel((IComputerEnrollmentClient)authenticationClient);
             _aiExplanation = new AiExplanationViewModel((IAiExplanationClient)authenticationClient);
             var assembly = typeof(App).Assembly;
             var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -66,7 +68,7 @@ public partial class App : Application
             var integration = new DesktopIntegrationViewModel(new WindowsDesktopPreferences());
             _serviceStatus = new WindowsServiceStatusModel();
             var window = new MainWindow(_shell, _authentication, _devices, _alerts, _risk, _reports, _license, _aiExplanation,
-                integration, _serviceStatus, _localNetwork);
+                integration, _serviceStatus, _localNetwork, _computerEnrollment);
             MainWindow = window;
             _tray = new WindowsDesktopTray(window, integration, _serviceStatus, OpenSentinelAi, () => Shutdown());
             window.DesktopTray = _tray;
@@ -111,6 +113,7 @@ public partial class App : Application
         _reports?.Dispose();
         _license?.Dispose();
         _localNetwork?.Dispose();
+        _computerEnrollment?.Dispose();
         _aiExplanation?.Dispose();
         _authentication?.Dispose();
         _instance?.Dispose();

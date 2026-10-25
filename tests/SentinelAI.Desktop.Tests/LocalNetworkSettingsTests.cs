@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 using SentinelAI.Desktop.Foundation;
 
 // MVP-1: Settings shows Core's local-network addresses, port and certificate fingerprint.
-internal static class LocalNetworkSettingsTests
+internal static partial class LocalNetworkSettingsTests
 {
     private const string Token = "synthetic-local-network-bearer";
     private static readonly string Pin = new('A', 64);

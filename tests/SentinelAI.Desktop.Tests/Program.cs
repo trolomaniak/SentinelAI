@@ -21,6 +21,7 @@ assertions += await ReportFileWriterTests.RunAsync();
 assertions += await HttpLicenseRequestsTests.RunAsync();
 assertions += await LocalNetworkSettingsTests.RunAsync();
 assertions += await InstalledCoreConfigurationTests.RunAsync();
+assertions += await LocalNetworkSettingsTests.RunEnrollmentAsync();
 assertions += await HttpAiExplanationRequestsTests.RunAsync();
 assertions += await OptionalWorkflowsViewModelTests.RunAsync();
 assertions += await DesktopIntegrationTests.RunAsync();

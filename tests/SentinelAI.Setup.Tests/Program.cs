@@ -39,12 +39,16 @@ byte[] WithClaimedSizes(byte[] archive, uint size)
 
 var valid = Archive(("bundle/core/core.manifest.json", "synthetic signed package fixture", 0));
 var metadata = Metadata(valid);
-var json = JsonSerializer.SerializeToUtf8Bytes(new { keyId = metadata.KeyId, version = metadata.Version, channel = metadata.Channel, environment = "development", payloadSha256 = metadata.PayloadSha256, payloadLength = metadata.PayloadLength });
+var json = JsonSerializer.SerializeToUtf8Bytes(new { keyId = metadata.KeyId, version = metadata.Version, channel = metadata.Channel, environment = "development", payloadSha256 = metadata.PayloadSha256, payloadLength = metadata.PayloadLength, product = metadata.Product });
 Ensure(SetupMetadata.Parse(json) == metadata, "Valid exact metadata");
+Ensure(SetupMetadata.Parse(Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(json).Replace("\"product\":\"sentinelai\"", "\"product\":\"agent\""))) ==
+    metadata with { Product = SetupMetadata.AgentProduct }, "Agent Setup metadata");
 foreach (var malformed in new[]
 {
     "null", "[]", "{}", Encoding.UTF8.GetString(json).Replace("\"development\"", "\"production\""),
     Encoding.UTF8.GetString(json).Replace("\"pilot\"", "\"other\""),
+    Encoding.UTF8.GetString(json).Replace("\"product\":\"sentinelai\"", "\"product\":\"other\""),
+    Encoding.UTF8.GetString(json).Replace(",\"product\":\"sentinelai\"", ""),
     Encoding.UTF8.GetString(json).Replace("\"keyId\":", "\"keyId\":\"duplicate\",\"keyId\":"),
     Encoding.UTF8.GetString(json).Replace("\"version\":\"1.0.0\"", "\"version\":\"1.0.0\",\"privateKey\":\"never\""),
     Encoding.UTF8.GetString(json).Replace("\"keyId\":\"dev-setup-tests\"", "\"keyId\":\"bad\\nkey\""),
@@ -310,6 +314,7 @@ using (var cancellation = new CancellationTokenSource())
     Ensure(sequence.SequenceEqual(new[] { "certificate", "remove:FFFF" }), "Cancellation after certificate creation removes the unreferenced certificate");
 }
 assertions += await EnrollmentProtocolTests.RunAsync();
+assertions += await AgentSetupTests.RunAsync();
 Console.WriteLine($"Setup foundation: {assertions} assertions passed.");
 
 sealed class SilentProgress : IProgress<string> { public void Report(string value) { } }

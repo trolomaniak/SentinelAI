@@ -32,6 +32,16 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 - Upgrade and repair keep the certificate (Agents pin it) and restore the firewall rule; uninstall removes the rule; confirmed data removal deletes the certificate and key.
 - Details, the manual Windows 10 check and limitations: [Setup](SETUP.md#central-computer-and-the-local-network).
 
+## Adding and removing computers (MVP-2)
+
+- Desktop → **Devices** → **Add computers** creates 1–50 one-use enrollment codes valid for 1 hour to 7 days (default 24 hours), shown once, copied or saved as `.sentinelai-enroll` files; unused codes are listed with their expiry and can be revoked. Core refuses expired, used and revoked codes and stores only token hashes.
+- A code holds Core's address (the computer name when it resolves, or a fixed IPv4 address; the administrator chooses), port, certificate pin and one token, versioned and with a checksum. It is a secret and is never logged.
+- `SentinelAI-Agent-Setup.exe` installs only the Agent and Updater: paste a code or open a code file, or run `/quiet /codefile <path>`. It checks Core and the code over the pinned connection before changing anything, installs the LocalService Agent, and reports success only after Core acknowledged the enrollment; failures remove everything. Documented exit codes: [Setup](SETUP.md#agent-setup).
+- Windows Apps lists **SentinelAI Agent** (Uninstall, also `/uninstall /quiet`) and **SentinelAI** (Uninstall opens the central Setup's uninstall flow, data kept by default). Each keeps an installed copy of its Setup EXE for this, which costs its file size on disk.
+- **Remove computer** in Desktop revokes the computer's credential and hides it; its history is kept.
+- One Agent per computer: Agent Setup refuses the central computer and any computer with an Agent already.
+- Details: [Setup](SETUP.md#adding-computers-enrollment-codes-and-agent-setup).
+
 ## Decisions and known limitations
 
 - The installers are not code-signed for the pilot because of the cost. Windows SmartScreen warns on first run. Smart App Control or a company antivirus/EDR may block unsigned programs. Do not attach the installer to e-mails: link to a download page over HTTPS that publishes SHA-256 checksums, or install together with the company.

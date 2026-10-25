@@ -11,6 +11,7 @@ public sealed class DeviceReadStore(AdminStore admins)
         FROM EndpointEnrollments AS e
         LEFT JOIN Devices AS d ON d.InstallationId = e.InstallationId
         LEFT JOIN EndpointInventories AS i ON i.EndpointId = e.EndpointId
+        WHERE e.RemovedUtcTicks IS NULL
         """;
 
     public async Task<IReadOnlyList<DeviceListItem>> ListAsync(
@@ -49,7 +50,7 @@ public sealed class DeviceReadStore(AdminStore admins)
         await using (var query = connection.CreateCommand())
         {
             query.Transaction = transaction;
-            query.CommandText = SelectDevices + " WHERE e.EndpointId = $endpointId LIMIT 1;";
+            query.CommandText = SelectDevices + " AND e.EndpointId = $endpointId LIMIT 1;";
             query.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
             await using var reader = await query.ExecuteReaderAsync(cancellationToken);
             detail = await reader.ReadAsync(cancellationToken) ? ReadDetail(reader, DateTimeOffset.UtcNow) : null;

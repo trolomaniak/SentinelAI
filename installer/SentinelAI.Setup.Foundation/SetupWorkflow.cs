@@ -89,6 +89,8 @@ public static class SetupWorkflow
         return new(kind, fields[2].Length == 0 ? null : fields[2]);
     }
 
+    internal static bool IsVersion(string? value) => TryVersion(value, out _);
+
     private static bool TryVersion(string? value, out int[] components)
     {
         components = new int[3];
@@ -172,7 +174,7 @@ public static class SetupWorkflow
     public static int WriteWorkerRequest(byte[] buffer, string action, string workDirectory, SetupMetadata metadata,
         ReadOnlySpan<char> enrollmentToken, bool preserveData = true, string localNetworkCertificateSha256 = "")
     {
-        if (buffer.Length < 8192 || action is not ("prepare-core" or "start-core" or "complete" or "inspect" or "lifecycle-stop" or "lifecycle-start" or "lifecycle-health" or "lifecycle-context" or "lifecycle-cleanup" or "uninstall" or "lifecycle-reconcile") || workDirectory.Length is <= 0 or > 260 ||
+        if (buffer.Length < 8192 || action is not ("prepare-core" or "start-core" or "complete" or "inspect" or "lifecycle-stop" or "lifecycle-start" or "lifecycle-health" or "lifecycle-context" or "lifecycle-cleanup" or "uninstall" or "lifecycle-reconcile" or "apps-register") || workDirectory.Length is <= 0 or > 260 ||
             metadata.KeyId.Length is <= 0 or > 64 || metadata.Channel is not ("stable" or "pilot" or "beta") || !TryVersion(metadata.Version, out _) ||
             action != "complete" && enrollmentToken.Length != 0 ||
             action == "complete" && !ValidEnrollmentToken(enrollmentToken) || action != "uninstall" && !preserveData ||
@@ -211,6 +213,8 @@ public static class SetupWorkflow
         "PROGRESS|health" => "Verifying installation health...",
         "PROGRESS|rollback" => "Restoring the previous working version...",
         "PROGRESS|uninstall" => "Removing the owned installation...",
+        "PROGRESS|updater" => "Installing Updater...",
+        "PROGRESS|apps" => "Adding the Windows Apps entry...",
         _ => null
     };
 }

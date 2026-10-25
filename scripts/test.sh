@@ -24,6 +24,7 @@ if command -v pwsh >/dev/null 2>&1; then
   pwsh -NoLogo -NoProfile -NonInteractive -File "$repo_root/tests/core-service/Health.Tests.ps1"
   pwsh -NoLogo -NoProfile -NonInteractive -File "$repo_root/tests/setup/Workflow.Tests.ps1"
   pwsh -NoLogo -NoProfile -NonInteractive -File "$repo_root/tests/setup/Lifecycle.Tests.ps1"
+  pwsh -NoLogo -NoProfile -NonInteractive -File "$repo_root/tests/setup/AgentWorker.Tests.ps1"
   pwsh -NoLogo -NoProfile -NonInteractive -File "$repo_root/tests/setup/TrustedPath.Tests.ps1"
   pwsh -NoLogo -NoProfile -NonInteractive -File "$repo_root/tests/setup/HangProbe.Tests.ps1"
 else

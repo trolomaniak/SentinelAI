@@ -57,6 +57,7 @@ internal sealed class WindowsSetupLifecycle(string workDirectory, SetupMetadata 
                 await _worker.CommandAsync("lifecycle-health", true, token).ConfigureAwait(false);
             }
             await _worker.CommandAsync("lifecycle-cleanup", true, token).ConfigureAwait(false);
+            await RefreshAppsEntryAsync(token).ConfigureAwait(false);
             return new(true, FailureCode: "recovered");
         }
         if (action == SetupLifecycleAction.Uninstall)
@@ -116,8 +117,17 @@ internal sealed class WindowsSetupLifecycle(string workDirectory, SetupMetadata 
         if (installed.Status == UpdateInstallStatus.RollbackFailed) return new(false, FailureCode: "rollback_failed");
         if (File.Exists(Journal)) return new(false, FailureCode: "recovery_pending");
         await _worker.CommandAsync("lifecycle-cleanup", true, token).ConfigureAwait(false);
-        return installed.Status == UpdateInstallStatus.Installed
-            ? new(true) : new(false, RolledBack: true, FailureCode: "update_failed");
+        if (installed.Status != UpdateInstallStatus.Installed) return new(false, RolledBack: true, FailureCode: "update_failed");
+        await RefreshAppsEntryAsync(token).ConfigureAwait(false);
+        return new(true);
+    }
+
+    // The Windows Apps entry and its installed Setup follow the healthy version; refreshing them never undoes it. A
+    // retained-data baseline has no entry, and the worker refuses one.
+    private async Task RefreshAppsEntryAsync(CancellationToken token)
+    {
+        try { await _worker.CommandAsync("apps-register", true, token).ConfigureAwait(false); }
+        catch (Exception) when (!token.IsCancellationRequested) { }
     }
 
     private async Task<UpdateVerificationPolicy> ReadInstalledPolicyAsync(string installedVersion, CancellationToken token)
