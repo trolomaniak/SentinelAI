@@ -67,16 +67,17 @@ function Install-AgentSetupInstallation {
         # The roots do not exist yet: this checks every existing ancestor with the ancestor rules (ProgramData lets Users create names).
         foreach ($path in @($locations.CodeRoot, $locations.DataRoot)) { Assert-PilotTrustedPath -Path $path }
         $changing = $true
-        Write-SetupProgress 'updater'
-        Ensure-PilotProtectedParent -Path $locations.CodeRoot
-        Install-SetupAuxiliaryCode -Source (Join-Path $bundle 'updater') -Destination $locations.UpdaterCode -Executable 'SentinelAI.Updater.exe'
-        Write-SetupProgress 'apps'
-        $installer = Install-SetupCachedInstaller -Source (Join-Path $Request.workDirectory 'installer\setup.exe') -Directory $locations.InstallerCode -Name 'SentinelAI-Agent-Setup.exe'
-        New-PilotProtectedDirectory -Path $locations.SetupData -Kind Container
-        Write-PilotProtectedFile -Path (Join-Path $locations.SetupData 'public-key.pem') -Content ([IO.File]::ReadAllText($root)) -Kind Receipt
+        # Own roots without any entry for the installing account, so any administrator or SYSTEM can later
+        # verify and uninstall them. The ownership receipt comes first: an interrupted install stays uninstallable.
+        foreach ($path in @($locations.CodeRoot, $locations.DataRoot, $locations.SetupData)) { New-PilotDirectoryWithAcl -Path $path -Kind AgentRoot }
         $receipt = [ordered]@{ format = 'sentinelai-agent-setup-v1'; version = $Request.version; keyId = $Request.keyId; environment = 'development';
             channel = $Request.channel; coreUrl = $Request.coreUrl }
         Write-PilotProtectedFile -Path (Join-Path $locations.SetupData 'agent-setup-installation.json') -Content ($receipt | ConvertTo-Json -Compress) -Kind Receipt
+        Write-PilotProtectedFile -Path (Join-Path $locations.SetupData 'public-key.pem') -Content ([IO.File]::ReadAllText($root)) -Kind Receipt
+        Write-SetupProgress 'updater'
+        Install-SetupAuxiliaryCode -Source (Join-Path $bundle 'updater') -Destination $locations.UpdaterCode -Executable 'SentinelAI.Updater.exe'
+        Write-SetupProgress 'apps'
+        $installer = Install-SetupCachedInstaller -Source (Join-Path $Request.workDirectory 'installer\setup.exe') -Directory $locations.InstallerCode -Name 'SentinelAI-Agent-Setup.exe'
         Register-SetupApps -Key SentinelAIAgent -DisplayName 'SentinelAI Agent' -Version $Request.version -Installer $installer `
             -InstallLocation $locations.CodeRoot -Icon $installer -QuietUninstall
         Write-SetupProgress 'agent'
@@ -90,9 +91,10 @@ function Install-AgentSetupInstallation {
     } finally {
         $Request.enrollmentToken = $null
         if ($changing -and -not $completed) {
-            # The Agent's own receipt exists once its code and configuration were placed: then only enrollment remained.
+            # The Agent creates its installation ID when it starts with the handed-over token: then it ran, and only
+            # Core's acknowledgement of the enrollment was missing.
             $phase = $script:SetupPhase
-            if ($phase -ceq 'agent' -and (Test-Path -LiteralPath (Join-Path $locations.AgentData 'pilot-installation.json'))) { $phase = 'enroll' }
+            if ($phase -ceq 'agent' -and (Test-Path -LiteralPath (Join-Path $locations.AgentData 'installation-id'))) { $phase = 'enroll' }
             # Everything above was created by this attempt on a computer proven fresh, so all of it is removed.
             try { Remove-AgentSetupInstallation $locations } catch { $phase = 'rollback' }
             $script:SetupPhase = $phase

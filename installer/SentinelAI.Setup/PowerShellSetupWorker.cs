@@ -24,16 +24,18 @@ internal sealed class PowerShellSetupWorker(string workDirectory, SetupMetadata 
         string localNetworkCertificateSha256 = "")
     {
         var state = await RunScriptAsync(["SetupWorker.ps1"], buffer => SetupWorkflow.WriteWorkerRequest(buffer, action, workDirectory, metadata,
-            enrollmentToken.Span, preserveData, localNetworkCertificateSha256), action == "inspect", token).ConfigureAwait(false);
+            enrollmentToken.Span, preserveData, localNetworkCertificateSha256), action == "inspect", reportPhase: false, token).ConfigureAwait(false);
         return state is null ? null : SetupWorkflow.ParseInstallationState(state);
     }
 
     /// <summary>Agent Setup (MVP-2): the shared worker functions, then the Agent worker. Only "agent-install" carries a code.</summary>
     internal Task<string?> RunAgentAsync(string action, EnrollmentCode? code, CancellationToken token) =>
         RunScriptAsync(["SetupWorker.ps1", "AgentSetupWorker.ps1"],
-            buffer => AgentSetupWorkflow.WriteWorkerRequest(buffer, action, workDirectory, metadata, code), action == "agent-inspect", token);
+            buffer => AgentSetupWorkflow.WriteWorkerRequest(buffer, action, workDirectory, metadata, code), action == "agent-inspect", reportPhase: true, token);
 
-    private async Task<string?> RunScriptAsync(string[] scripts, Func<byte[], int> writeRequest, bool expectState, CancellationToken token)
+    /// <param name="reportPhase">Agent Setup distinguishes the failed phase (<see cref="SetupStepException"/>); every full
+    /// Setup step keeps failing with <see cref="InvalidDataException"/>, which its health polling treats as unhealthy.</param>
+    private async Task<string?> RunScriptAsync(string[] scripts, Func<byte[], int> writeRequest, bool expectState, bool reportPhase, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         ProtectedStaging.Validate(workDirectory);
@@ -74,7 +76,7 @@ internal sealed class PowerShellSetupWorker(string workDirectory, SetupMetadata 
             // (an Updater the worker could not release) must fail this step, not hold Setup to its deadline.
             await Task.WhenAll(output, errors).WaitAsync(TimeSpan.FromSeconds(5), deadline.Token).ConfigureAwait(false);
             var (state, failedPhase) = await output.ConfigureAwait(false); var errorOutput = await errors.ConfigureAwait(false);
-            if (failedPhase is not null && !errorOutput && process.ExitCode == 1) throw new SetupStepException(failedPhase);
+            if (reportPhase && failedPhase is not null && !errorOutput && process.ExitCode == 1) throw new SetupStepException(failedPhase);
             if (errorOutput || process.ExitCode != 0 || failedPhase is not null || expectState && state is null) throw new InvalidDataException("Installation step failed.");
             return state;
         }

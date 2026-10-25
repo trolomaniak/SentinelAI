@@ -23,7 +23,8 @@ public enum AgentSetupExitCode
     InstallFailed = 8,
     EnrollmentNotAcknowledged = 9,
     UninstallFailed = 10,
-    NotInstalled = 11
+    NotInstalled = 11,
+    RollbackFailed = 12
 }
 
 public enum SetupMode { Interactive, Uninstall, QuietInstall, QuietUninstall }
@@ -56,7 +57,7 @@ public sealed record SetupArguments(SetupMode Mode, long ImageHandle, string? Co
 internal enum AgentCodeCheck { Usable, Refused, PinMismatch, Unreachable }
 internal enum AgentSetupInstallationKind { Fresh, Installed, Blocked }
 internal sealed record AgentSetupInstallation(AgentSetupInstallationKind Kind, string? Version = null);
-internal enum AgentInstallOutcome { Installed, NotAcknowledged, Failed }
+internal enum AgentInstallOutcome { Installed, NotAcknowledged, Failed, RollbackFailed }
 
 /// <summary>Asks Core, over TLS pinned to the code's certificate, whether the code can still enroll. Never consumes it.</summary>
 internal interface IAgentCodeProbe
@@ -98,6 +99,7 @@ internal static class AgentSetupWorkflow
         {
             AgentInstallOutcome.Installed => AgentSetupExitCode.Success,
             AgentInstallOutcome.NotAcknowledged => AgentSetupExitCode.EnrollmentNotAcknowledged,
+            AgentInstallOutcome.RollbackFailed => AgentSetupExitCode.RollbackFailed,
             _ => AgentSetupExitCode.InstallFailed
         };
     }
@@ -148,6 +150,7 @@ internal static class AgentSetupWorkflow
         AgentSetupExitCode.EnrollmentNotAcknowledged => "SentinelAI Core did not confirm the enrollment in time, so Setup removed the Agent again. Ask your administrator for a new code if this one now shows as used.",
         AgentSetupExitCode.UninstallFailed => "SentinelAI Agent could not be removed completely. Run the uninstall again.",
         AgentSetupExitCode.NotInstalled => "SentinelAI Agent is not installed on this computer by Agent Setup. Nothing was changed.",
+        AgentSetupExitCode.RollbackFailed => "Installation failed and Setup could not remove everything it had installed. Run SentinelAI-Agent-Setup.exe /uninstall to finish removing it, then try again.",
         _ when uninstall => "SentinelAI Agent could not be removed completely. Run the uninstall again.",
         _ => "Installation failed. Setup removed what it had installed."
     };

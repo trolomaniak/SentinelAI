@@ -11,6 +11,7 @@ public partial class DevicesView : UserControl
 {
     // The endpoint whose removal the open confirmation is for: it never carries over to another device.
     private Guid? _removalArmedFor;
+    private Guid? _shownDetail;
 
     public DevicesView()
     {
@@ -27,7 +28,13 @@ public partial class DevicesView : UserControl
     private void OnModelChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => OnModelChanged(sender, e))); return; }
-        if (_removalArmedFor is { } armed && Model?.Detail?.EndpointId != armed) DisarmRemoval();
+        var shown = Model?.Detail?.EndpointId;
+        if (_removalArmedFor is { } armed && shown != armed) DisarmRemoval();
+        if (shown != _shownDetail)
+        {
+            _shownDetail = shown;
+            Enrollment?.DismissError();
+        }
     }
 
     private void DisarmRemoval()

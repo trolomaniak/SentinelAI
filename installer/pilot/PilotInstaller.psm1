@@ -252,7 +252,7 @@ function Get-PilotAcl {
 }
 
 function Get-PilotDirectoryAclDefinition {
-    param([Parameter(Mandatory=$true)][ValidateSet('CoreCode','CoreData','AgentCode','AgentData','Container')][string]$Kind)
+    param([Parameter(Mandatory=$true)][ValidateSet('CoreCode','CoreData','AgentCode','AgentData','AgentRoot','Container')][string]$Kind)
     $acl = New-Object Security.AccessControl.DirectorySecurity
     $acl.SetAccessRuleProtection($true, $false)
     $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier($script:AdministratorsSid)))
@@ -262,6 +262,7 @@ function Get-PilotDirectoryAclDefinition {
         $rule = New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl', $inheritance, $propagation, 'Allow')
         [void]$acl.AddAccessRule($rule)
     }
+    # AgentRoot (Agent Setup's own roots) has no entry for the installing account: any administrator can maintain it.
     if ($Kind -like 'Core*' -or $Kind -eq 'Container') {
         $rule = New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier((Get-PilotCurrentOperatorSid))), 'FullControl', $inheritance, $propagation, 'Allow')
         [void]$acl.AddAccessRule($rule)
@@ -275,7 +276,7 @@ function Get-PilotDirectoryAclDefinition {
 }
 
 function Set-PilotDirectoryAcl {
-    param([Parameter(Mandatory=$true)][string]$Path, [Parameter(Mandatory=$true)][ValidateSet('CoreCode','CoreData','AgentCode','AgentData','Container')][string]$Kind)
+    param([Parameter(Mandatory=$true)][string]$Path, [Parameter(Mandatory=$true)][ValidateSet('CoreCode','CoreData','AgentCode','AgentData','AgentRoot','Container')][string]$Kind)
     Set-Acl -LiteralPath $Path -AclObject (Get-PilotDirectoryAclDefinition -Kind $Kind)
 }
 

@@ -178,6 +178,15 @@ function Assert-AgentSetupInstalled([string]$Address, [string]$Pin, [DateTimeOff
         (Test-Path -LiteralPath $script:installedAgentSetup -PathType Leaf)) 'Agent Setup did not register a working Windows Apps entry.'
     Assert-ProtectedTree $script:agentProductCode $script:writers
     Assert-ProtectedTree $script:agentProductData ($script:writers + @($script:localServiceSid))
+    # No entry names the installing account, so any administrator or SYSTEM can later verify and uninstall the Agent.
+    foreach ($root in @($script:agentProductCode, $script:agentProductData)) {
+        foreach ($item in @((Get-Item -LiteralPath $root -Force)) + @(Get-ChildItem -LiteralPath $root -Recurse -Force)) {
+            # The running Agent replaces files through temporaries that can vanish before inspection.
+            try { $acl = Get-Acl -LiteralPath $item.FullName } catch { if (Test-Path -LiteralPath $item.FullName) { throw }; continue }
+            Assert-SetupAcceptance (@($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+                Where-Object { $_.IdentityReference.Value -ceq $script:operatorSid }).Count -eq 0) 'Agent Setup granted the installing account its own access entry.'
+        }
+    }
     $endpointId = [Guid]::ParseExact([IO.File]::ReadAllText((Join-Path $script:agentProductData 'Agent\endpoint-id')).Trim(), 'D')
     Wait-ExactEndpoint $endpointId $Since
     Wait-SetupAcceptance { $null -ne (Get-AgentTelemetry $endpointId) } 'The Agent installed by Agent Setup did not report endpoint telemetry.' $script:TimeoutSeconds
@@ -197,7 +206,7 @@ try {
     $request = @{ count = 5; validityHours = 1; address = $address } | ConvertTo-Json -Compress
     $issued = @((Invoke-SetupCoreRequest '/api/admin/enrollment-codes' 'POST' $request $accessToken | ConvertFrom-Json).codes)
     Assert-SetupAcceptance ($issued.Count -eq 5) 'Core did not issue the requested batch of enrollment codes.'
-    $first = $issued[0]; $revoked = $issued[1]; $expired = $issued[2]; $second = $issued[3]
+    $first = $issued[0]; $revoked = $issued[1]; $expired = $issued[2]; $second = $issued[3]; $third = $issued[4]
 
     # One Agent service per computer: this test-only step removes the central installation's own Agent service,
     # so Agent Setup can install the Agent product beside Core on this single runner.
@@ -254,16 +263,24 @@ try {
     Assert-SetupAcceptance ((Invoke-AgentSetup @('/quiet', '/codefile', $firstPath)) -eq 6) 'Agent Setup did not refuse a used code.'
     Assert-AgentSetupAbsent 'Used code'
 
-    # Windows Apps: the registered quiet uninstall runs the installed Setup copy, which Windows deletes at restart.
+    # Windows Apps: the registered quiet uninstall runs the installed Setup copy. Still running, that copy moves out of
+    # the product folder into Setup's protected folder, where Windows deletes it at restart; everything else goes now.
     $since = [DateTimeOffset]::UtcNow
     Assert-SetupAcceptance ((Invoke-AgentSetup @('/quiet', '/codefile', $secondPath)) -eq 0) 'Agent Setup did not reinstall with a new code.'
     [void](Assert-AgentSetupInstalled $address $pin $since)
     Assert-SetupAcceptance ((Invoke-AgentSetup @('/uninstall', '/quiet') $installedAgentSetup) -eq 0) 'The Windows Apps quiet uninstall failed.'
-    Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAIAgent') -and -not (Test-Path -LiteralPath $appsKey) -and
-        -not (Test-Path -LiteralPath $agentProductData) -and -not (Test-Path -LiteralPath (Join-Path $agentProductCode 'Agent')) -and
-        -not (Test-Path -LiteralPath (Join-Path $agentProductCode 'Updater'))) 'The Windows Apps uninstall left the service, code, data or Apps entry.'
+    Assert-AgentSetupAbsent 'Windows Apps uninstall'
     $pending = @((Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations)
-    Assert-SetupAcceptance (-not (Test-Path -LiteralPath $installedAgentSetup) -or @($pending | Where-Object { [string]$_ -like ('*' + $installedAgentSetup) }).Count -eq 1) 'The running installed Setup was not scheduled for removal.'
+    $setupFolder = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'SentinelAI-Setup'
+    Assert-SetupAcceptance (@($pending | Where-Object { [string]$_ -like ('*' + $setupFolder + '\removed-*.exe') }).Count -ge 1 -and
+        @($pending | Where-Object { [string]$_ -like ('*' + $agentProductCode + '*') }).Count -eq 0) 'The running installed Setup was not moved out for removal at restart.'
+    # No restart is needed before installing again.
+    $since = [DateTimeOffset]::UtcNow
+    $thirdPath = Write-AgentSetupCode 'third' ([string]$third.code)
+    Assert-SetupAcceptance ((Invoke-AgentSetup @('/quiet', '/codefile', $thirdPath)) -eq 0) 'Agent Setup did not install again right after the Windows Apps uninstall.'
+    [void](Assert-AgentSetupInstalled $address $pin $since)
+    Assert-SetupAcceptance ((Invoke-AgentSetup @('/uninstall', '/quiet')) -eq 0) 'The final silent Agent uninstall failed.'
+    Assert-AgentSetupAbsent 'Final uninstall'
 
     # The full Setup registered its own Windows Apps entry that opens the existing uninstall flow.
     $full = Get-ItemProperty -LiteralPath $fullAppsKey

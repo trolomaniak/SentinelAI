@@ -178,12 +178,27 @@ function Remove-SetupOwnedTree {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return }
     try { Remove-Item -LiteralPath $Path -Recurse -Force; return } catch { }
-    # Only the installed Setup that Windows Apps started stays locked while it runs: Windows removes it, then its folders, at restart.
-    foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Recurse -Force | Sort-Object { $_.FullName.Length } -Descending)) {
+    # Only the installed Setup that Windows Apps started stays locked while it runs. A running program can be
+    # renamed: it moves under a unique name into Setup's administrator-only folder, where Windows deletes it at
+    # restart, so the product folders go now and nothing ever deletes a path a later installation reuses.
+    $pending = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) 'SentinelAI-Setup'
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Recurse -Force -File)) {
         if (-not (Test-Path -LiteralPath $entry.FullName)) { continue }
-        try { Remove-Item -LiteralPath $entry.FullName -Recurse -Force } catch { Register-SetupDeleteAtRestart -Path $entry.FullName }
+        try { Remove-Item -LiteralPath $entry.FullName -Force; continue } catch { }
+        $target = Join-Path $pending ('removed-' + [Guid]::NewGuid().ToString('N') + '.exe')
+        try {
+            Assert-PilotTrustedPath -Path $pending
+            Move-Item -LiteralPath $entry.FullName -Destination $target
+            Register-SetupDeleteAtRestart -Path $target
+        } catch { Register-SetupDeleteAtRestart -Path $entry.FullName }
     }
-    try { Remove-Item -LiteralPath $Path -Recurse -Force } catch { Register-SetupDeleteAtRestart -Path $Path }
+    try { Remove-Item -LiteralPath $Path -Recurse -Force }
+    catch {
+        foreach ($directory in @(Get-ChildItem -LiteralPath $Path -Recurse -Force -Directory | Sort-Object { $_.FullName.Length } -Descending)) {
+            Register-SetupDeleteAtRestart -Path $directory.FullName
+        }
+        Register-SetupDeleteAtRestart -Path $Path
+    }
 }
 
 function Install-SetupCachedInstaller {
@@ -201,17 +216,21 @@ function Install-SetupCachedInstaller {
         New-PilotDirectoryWithAcl -Path $Directory -Kind Container
     }
     $target = Join-Path $Directory $Name
+    # The complete new copy is written under a unique name first, so the installed Setup is never missing or partial.
+    $next = $target + '.' + [Guid]::NewGuid().ToString('N') + '.old'
+    $input = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $output = [IO.File]::Open($next, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $input.CopyTo($output); $output.Flush($true) } finally { $output.Dispose() }
+    } catch { if (Test-Path -LiteralPath $next) { Remove-Item -LiteralPath $next -Force }; throw }
+    finally { $input.Dispose() }
     if (Test-Path -LiteralPath $target) {
         # A running installed Setup cannot be overwritten, only renamed: the old copy goes at restart if it is still in use.
         $aside = $target + '.' + [Guid]::NewGuid().ToString('N') + '.old'
         Move-Item -LiteralPath $target -Destination $aside
         try { Remove-Item -LiteralPath $aside -Force } catch { Register-SetupDeleteAtRestart -Path $aside }
     }
-    $input = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-    try {
-        $output = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-        try { $input.CopyTo($output); $output.Flush($true) } finally { $output.Dispose() }
-    } finally { $input.Dispose() }
+    Move-Item -LiteralPath $next -Destination $target
     Set-SetupCodeAcl -Path $target -PublicRead
     Set-SetupCodeAcl -Path $Directory -PublicRead
     Assert-PilotTrustedPath -Path $Directory -Tree

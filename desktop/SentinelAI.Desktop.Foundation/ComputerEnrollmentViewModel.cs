@@ -181,6 +181,17 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
         finally { End(generation); }
     }
 
+    // A message about one computer's removal does not belong under the next computer's details.
+    public void DismissError()
+    {
+        lock (_gate)
+        {
+            if (_errorText.Length == 0) return;
+            _errorText = "";
+        }
+        Notify();
+    }
+
     // Sign-out and session expiry: forget the codes and cancel every request in flight.
     public void Clear()
     {

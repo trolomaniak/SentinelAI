@@ -86,7 +86,12 @@ $script:fail = ''; $script:fresh = $true; $script:rollbackFails = $false
 function Get-AgentSetupState { param($Locations); return @{ Kind = $(if ($script:fresh) { 'Fresh' } else { 'Installed' }); Version = '' } }
 $script:trustedPaths = New-Object 'System.Collections.Generic.List[string]'
 function Assert-PilotTrustedPath { param($Path,[switch]$Tree,[switch]$AllowServiceWrite); $script:trustedPaths.Add($Path) }
-function Ensure-PilotProtectedParent { param($Path); $script:events.Add('code-root') }
+function New-PilotDirectoryWithAcl {
+    param($Path,$Kind)
+    # Agent Setup's roots never carry an entry for the installing account (AgentRoot), unlike the pilot's Container kind.
+    Assert-AgentTest ($Kind -ceq 'AgentRoot' -and $Path -cin @($locations.CodeRoot, $locations.DataRoot, $locations.SetupData)) 'own roots with the AgentRoot ACL'
+    $script:events.Add('root')
+}
 function Install-SetupAuxiliaryCode {
     param($Source,$Destination,$Executable,[switch]$PublicRead)
     if ($script:fail -ceq 'updater') { throw 'Synthetic Updater failure.' }
@@ -98,7 +103,7 @@ function Install-SetupCachedInstaller {
     Assert-AgentTest ($Source -ceq (Join-Path (New-AgentTestRequest).workDirectory 'installer\setup.exe') -and $Directory -ceq $locations.InstallerCode -and $Name -ceq 'SentinelAI-Agent-Setup.exe') 'installed Setup copy'
     $script:events.Add('installer'); return (Join-Path $Directory $Name)
 }
-function New-PilotProtectedDirectory { param($Path,$Kind); $script:events.Add('setup-data') }
+function New-PilotProtectedDirectory { param($Path,$Kind); $script:events.Add('unexpected-container') }
 function Write-PilotProtectedFile {
     param($Path,$Content,$Kind)
     Assert-AgentTest ($Kind -ceq 'Receipt' -and -not $Content.Contains($syntheticToken)) 'receipts never contain the token'
@@ -134,14 +139,17 @@ Assert-AgentTest (-not (Invoke-AgentInstallTest)) 'install succeeds'
 Assert-AgentTest ($script:trustedPaths -ccontains $locations.CodeRoot -and $script:trustedPaths -ccontains $locations.DataRoot -and
     -not ($script:trustedPaths -ccontains [IO.Path]::GetDirectoryName($locations.CodeRoot)) -and
     -not ($script:trustedPaths -ccontains [IO.Path]::GetDirectoryName($locations.DataRoot))) 'the product roots are checked as targets, not their shared parents'
-Assert-AgentTest (($script:events -join ',') -ceq 'code-root,updater,installer,setup-data,receipt,receipt,apps,install-Agent') 'install order'
+# The ownership receipt comes right after the roots, so an interrupted install can always be uninstalled.
+Assert-AgentTest (($script:events -join ',') -ceq 'root,root,root,receipt,receipt,updater,installer,apps,install-Agent') 'install order'
 Assert-AgentTest (($script:output -join ',') -ceq 'PROGRESS|validate,PROGRESS|updater,PROGRESS|apps,PROGRESS|agent,DONE') 'install progress protocol'
 $script:fail = 'updater'
-Assert-AgentTest ((Invoke-AgentInstallTest) -and ($script:events -join ',') -ceq 'code-root,rollback' -and $script:SetupPhase -ceq 'updater') 'an Updater failure removes everything'
+Assert-AgentTest ((Invoke-AgentInstallTest) -and ($script:events -join ',') -ceq 'root,root,root,receipt,receipt,rollback' -and $script:SetupPhase -ceq 'updater') 'an Updater failure removes everything'
 $script:fail = 'agent'; $script:present = @()
 Assert-AgentTest ((Invoke-AgentInstallTest) -and ($script:events -join ',').EndsWith('install-Agent,rollback') -and $script:SetupPhase -ceq 'agent') 'an Agent failure before its receipt removes everything'
 $script:present = @(Join-Path $locations.AgentData 'pilot-installation.json')
-Assert-AgentTest ((Invoke-AgentInstallTest) -and $script:SetupPhase -ceq 'enroll') 'Core never acknowledged the enrollment'
+Assert-AgentTest ((Invoke-AgentInstallTest) -and $script:SetupPhase -ceq 'agent') 'an Agent that never started is not reported as an unacknowledged enrollment'
+$script:present = @(Join-Path $locations.AgentData 'installation-id')
+Assert-AgentTest ((Invoke-AgentInstallTest) -and $script:SetupPhase -ceq 'enroll') 'Core never acknowledged the enrollment of a started Agent'
 $script:rollbackFails = $true
 Assert-AgentTest ((Invoke-AgentInstallTest) -and $script:SetupPhase -ceq 'rollback') 'a failed removal is reported as such'
 $script:rollbackFails = $false; $script:fail = ''; $script:present = @(); $script:fresh = $false

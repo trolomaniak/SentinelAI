@@ -178,6 +178,8 @@ internal static partial class LocalNetworkSettingsTests
         client.RemoveOutcome = ComputerEnrollmentOutcome.Conflict;
         Ensure(!await model.RemoveComputerAsync(Guid.NewGuid()) && model.ErrorText == ComputerEnrollmentViewModel.CentralComputerNotice,
             "Remove computer did not explain that the central computer's own Agent stays.");
+        model.DismissError();
+        Ensure(model.ErrorText == "", "The central computer's notice stayed for the next computer.");
         client.RemoveOutcome = ComputerEnrollmentOutcome.Success;
 
         // Sign-out or session expiry while a request is running cancels it: no exception reaches the view's handlers.

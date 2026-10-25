@@ -707,9 +707,9 @@ namespace
             first_information.nFileIndexHigh == second_information.nFileIndexHigh && first_information.nFileIndexLow == second_information.nFileIndexLow;
     }
 
-    // Setup's own executable, opened read-only and denying writers, renames and deletion while it is copied. It must
-    // be the very file this process was mapped from (whose current name the memory manager reports), never a file
-    // moved into the launch path afterwards: Windows Apps later runs the installed copy, elevated, to uninstall.
+    // Setup's own executable, opened read-only and denying writers, renames and deletion while its identity is
+    // checked. It must be the very file this process was mapped from (whose current name the memory manager reports),
+    // never a file moved into the launch path afterwards: Windows Apps later runs the installed copy, elevated, to uninstall.
     UniqueHandle OpenOwnImage()
     {
         std::vector<wchar_t> launched(32768);
@@ -724,9 +724,14 @@ namespace
         const UniqueHandle running(CreateFileW((L"\\\\?\\GLOBALROOT" + std::wstring(mapped.data(), mapped_length)).c_str(), FILE_READ_ATTRIBUTES,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
         Require(running.Valid() && SameFile(image.Get(), running.Get()));
+        // The verified file object stays behind the handle whatever its name later becomes, so the copy reads exactly
+        // this file. Sharing deletion now lets an uninstall started from Windows Apps move its own running copy out of
+        // the product folder; writing stays denied, as for every running program image.
+        UniqueHandle verified(ReOpenFile(image.Get(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, 0));
+        Require(verified.Valid());
         // Only this handle crosses into the host, read-only.
-        Require(SetHandleInformation(image.Get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) != FALSE);
-        return image;
+        Require(SetHandleInformation(verified.Get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) != FALSE);
+        return verified;
     }
 
     DWORD RunHost(const PrivateStaging& staging, const Options& options, HANDLE image)

@@ -67,6 +67,7 @@ internal sealed class PowerShellAgentSetupWorker(PowerShellSetupWorker runner) :
         }
         // The worker removed everything it created; "enroll" means the Agent ran but Core never acknowledged it.
         catch (SetupStepException failure) when (failure.Phase == "enroll") { return AgentInstallOutcome.NotAcknowledged; }
+        catch (SetupStepException failure) when (failure.Phase == "rollback") { return AgentInstallOutcome.RollbackFailed; }
         catch (Exception) when (!token.IsCancellationRequested) { return AgentInstallOutcome.Failed; }
     }
 

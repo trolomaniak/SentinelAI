@@ -92,6 +92,9 @@ internal static class AgentSetupTests
                (AgentSetupExitCode.EnrollmentNotAcknowledged, "inspect,probe,install"), "enrollment not acknowledged");
         Ensure(await Install(AgentSetupInstallationKind.Fresh, AgentCodeCheck.Usable, AgentInstallOutcome.Failed) ==
                (AgentSetupExitCode.InstallFailed, "inspect,probe,install"), "install failure");
+        Ensure(await Install(AgentSetupInstallationKind.Fresh, AgentCodeCheck.Usable, AgentInstallOutcome.RollbackFailed) ==
+               (AgentSetupExitCode.RollbackFailed, "inspect,probe,install") &&
+               AgentSetupWorkflow.Describe(AgentSetupExitCode.RollbackFailed, false).Contains("/uninstall", StringComparison.Ordinal), "a failed removal after a failed install");
         Ensure(await Install(AgentSetupInstallationKind.Fresh, AgentCodeCheck.Usable, inspectFails: true) == (AgentSetupExitCode.InstallFailed, "inspect"), "inspection failure");
         async Task<(AgentSetupExitCode Code, string Calls)> Uninstall(AgentSetupInstallationKind state, bool fails = false)
         {
