@@ -108,6 +108,7 @@ public static class CoreHost
         builder.Services.AddSingleton(licenseOptions.Renewal);
         builder.Services.AddSingleton<LicenseVerificationService>();
         builder.Services.AddSingleton<LicenseStateStore>();
+        builder.Services.AddSingleton(PilotLicenseOptions.Load(builder.Configuration));
         builder.Services.AddSingleton<LicenseClock>();
         builder.Services.AddSingleton<ILicenseLeaseClient, LicenseLeaseClient>();
         builder.Services.AddSingleton<LicenseStateService>();
@@ -918,6 +919,30 @@ public static class CoreHost
                 if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
                 return Results.Ok(await licensing.GetAsync(cancellationToken));
             }).RequireAuthorization();
+
+        // MVP-3 pilot license: verified offline when entered and whenever status is read; no network call.
+        app.MapGet("/api/admin/license/pilot", async (HttpContext context, LicenseStateService licensing,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                return Results.Ok(await licensing.GetPilotAsync(cancellationToken));
+            }).RequireAuthorization();
+
+        app.MapPost("/api/admin/license/pilot", async (PilotKeyRequest? request, HttpContext context, LicenseStateService licensing,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (request?.Key is not { Length: > 0 and <= 2 * PilotLicenseFormat.MaxKeyLength } key) return Results.BadRequest();
+                var result = await licensing.SetPilotKeyAsync(key, cancellationToken);
+                return result.Outcome switch
+                {
+                    PilotKeyOutcome.Accepted => Results.Ok(result.Status),
+                    PilotKeyOutcome.Expired => Results.Conflict(),
+                    PilotKeyOutcome.Unavailable => Results.NotFound(),
+                    _ => Results.BadRequest()
+                };
+            }).RequireAuthorization().RequireRateLimiting("license-verification")
+            .WithMetadata(new RequestSizeLimitAttribute(4096));
 
         app.MapPost("/api/admin/license/renew", async (HttpContext context, LicenseStateService licensing,
                 CancellationToken cancellationToken) =>

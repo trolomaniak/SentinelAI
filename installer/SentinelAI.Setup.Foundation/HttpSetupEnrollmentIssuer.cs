@@ -9,7 +9,7 @@ using SentinelAI.Desktop.Foundation;
 namespace SentinelAI.Setup.Foundation;
 
 /// <summary>One bounded local login/token exchange; native composition authenticates the connected Core peer.</summary>
-public sealed class HttpSetupEnrollmentIssuer : ISetupEnrollmentIssuer, IDisposable
+public sealed class HttpSetupEnrollmentIssuer : ISetupEnrollmentIssuer, ISetupPilotLicenseClient, IDisposable
 {
     private static readonly Uri Origin = new("http://127.0.0.1:5000/");
     private readonly ICoreEndpointTrust _trust;
@@ -68,6 +68,42 @@ public sealed class HttpSetupEnrollmentIssuer : ISetupEnrollmentIssuer, IDisposa
         {
             token.ThrowIfCancellationRequested();
             throw new InvalidDataException("Local Agent enrollment unavailable.");
+        }
+        finally { if (bearer is not null) CryptographicOperations.ZeroMemory(bearer); }
+    }
+
+    /// <summary>MVP-3: hands the pilot key Setup verified to the new Core, which verifies and stores it.</summary>
+    public async Task ApplyAsync(string username, ReadOnlyMemory<char> password, string key, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!SetupWorkflow.ValidCredentials(username, password.Span, password.Span) || !SetupPilotLicense.IsKeyText(key))
+            throw new InvalidDataException("Invalid pilot license input.");
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        byte[]? bearer = null;
+        try
+        {
+            if (!await _trust.IsTrustedAsync(Origin, deadline.Token).ConfigureAwait(false)) throw new InvalidDataException();
+            bearer = await LoginAsync(username.Trim(), password, deadline.Token).ConfigureAwait(false);
+            if (!await _trust.IsTrustedAsync(Origin, deadline.Token).ConfigureAwait(false)) throw new InvalidDataException();
+            using var body = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(body))
+            {
+                writer.WriteStartObject(); writer.WriteString("key", key); writer.WriteEndObject();
+            }
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(Origin, "api/admin/license/pilot"));
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Encoding.ASCII.GetString(bearer));
+            request.Content = new ByteArrayContent(body.ToArray()) { Headers = { ContentType = new MediaTypeHeaderValue("application/json") } };
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
+            CryptographicOperations.ZeroMemory(bearer);
+            var buffer = await ReadJsonBytesAsync(response, 4096, deadline.Token).ConfigureAwait(false);
+            CryptographicOperations.ZeroMemory(buffer.Bytes);
+        }
+        catch
+        {
+            token.ThrowIfCancellationRequested();
+            throw new InvalidDataException("Local pilot license unavailable.");
         }
         finally { if (bearer is not null) CryptographicOperations.ZeroMemory(bearer); }
     }

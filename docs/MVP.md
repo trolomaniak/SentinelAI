@@ -17,7 +17,7 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 | Agent connection | TLS 1.3, or TLS 1.2 only when Windows 10 lacks TLS 1.3, with AEAD cipher suites only; Agents trust Core only by the exact certificate fingerprint delivered with the enrollment code | MVP-1 |
 | Adding computers | One-use enrollment codes created in Desktop; a separate Agent installer, interactive or silent with a code file | MVP-2 |
 | Removing | Uninstall entries in Windows Apps for the Agent and the central installation; "Remove computer" in Desktop | MVP-2 |
-| License | Free signed pilot key, verified offline, valid for a chosen 30–90 days, with no endpoint limit and no license server | MVP-3 |
+| License | Free signed pilot key, verified offline, valid for a chosen 1–365 days (typically 30–90), with no endpoint limit and no license server | MVP-3 |
 | Pilot end | Monitoring continues; Desktop asks the company to get in touch and offers uninstallation | MVP-3 |
 | Documentation | For the business and for IT, in Polish and English, plus a release script with checksums and a two-computer test checklist | MVP-4 |
 
@@ -41,6 +41,14 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 - **Remove computer** in Desktop revokes the computer's credential and hides it; its history is kept.
 - One Agent per computer: Agent Setup refuses the central computer and any computer with an Agent already.
 - Details: [Setup](SETUP.md#adding-computers-enrollment-codes-and-agent-setup).
+
+## Pilot license (MVP-3)
+
+- The owner creates a key pair once with `tools/pilot-license keygen` (outside every repository) and builds the full Setup with the public key and the company's contact details. For each company: `tools/pilot-license issue --customer "<company>" --days 30` prints the key to send, for example by e-mail.
+- A fresh central Setup asks for the key first and checks it on the computer before installing anything; Core verifies it again and stores it. The Agent Setup needs no key.
+- Desktop → **Settings** → **Pilot license** shows the customer, expiry and days left and takes a new key to extend or replace the pilot.
+- From seven days before the end, Desktop shows "Pilot ends in N days — contact us" with the contact details. After the end, all monitoring continues and Desktop shows a notice with the contact details and **Uninstall SentinelAI** (Setup's uninstall flow, data kept unless DELETE is typed). Both can be hidden until sign-out.
+- Details: [Licensing](LICENSING.md#pilot-license-key-mvp-3).
 
 ## Decisions and known limitations
 

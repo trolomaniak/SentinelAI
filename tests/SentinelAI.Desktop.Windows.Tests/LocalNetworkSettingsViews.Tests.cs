@@ -43,7 +43,7 @@ internal static partial class Program
             NetworkText(settings, "LocalNetworkPort", "5443");
             NetworkText(settings, "LocalNetworkFingerprint", NativeLocalNetworkClient.Pin);
             Ensure(network.AccessText.StartsWith("On.", StringComparison.Ordinal), "Settings did not state that Agents can connect.");
-            Ensure(!Descendants<PasswordBox>(settings).Any() && !Descendants<TextBox>(settings).Any(),
+            Ensure(!Descendants<PasswordBox>(settings).Any() && Descendants<TextBox>(settings).All(box => AutomationProperties.GetAutomationId(box) == "PilotLicenseKeyBox"),
                 "Settings exposed an editable credential, address or fingerprint.");
 
             networkClient.Status = new(false, false, null, null, "SYNTHETIC-CORE", null, []);

@@ -11,12 +11,18 @@ public partial class SettingsView : UserControl
 
     private async void OnRefreshLicense(object sender, RoutedEventArgs e)
     {
+        if (Window.GetWindow(this) is MainWindow { Pilot: { CanRefresh: true } pilot }) _ = pilot.RefreshAsync();
         if (Model is { CanRefresh: true } model) await model.RefreshAsync();
     }
 
     private async void OnRenewLicense(object sender, RoutedEventArgs e)
     {
         if (Model is { CanRenew: true } model) await model.RenewAsync();
+    }
+
+    private async void OnApplyPilotKey(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this) is MainWindow { Pilot: { CanSubmit: true } model }) await model.SubmitAsync();
     }
 
     private async void OnRefreshLocalNetwork(object sender, RoutedEventArgs e)

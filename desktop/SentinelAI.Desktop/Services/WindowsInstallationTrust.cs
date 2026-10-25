@@ -76,6 +76,18 @@ internal static class WindowsInstallationTrust
         catch { executable.Dispose(); throw; }
     }
 
+    internal static string InstalledSetupPath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "SentinelAI Setup", "SentinelAI-Setup.exe");
+
+    /// <summary>
+    /// The installed full Setup that Windows Apps starts for Uninstall. It runs elevated, so only Administrators,
+    /// SYSTEM and TrustedInstaller may own or write it — never the signed-in user. The read lock is held while it starts.
+    /// </summary>
+    internal static FileStream ValidateInstalledSetup()
+    {
+        ValidatePath(InstalledSetupPath, new HashSet<string>(SystemWriters, StringComparer.Ordinal), serviceOnAncestors: false);
+        return new FileStream(InstalledSetupPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+    }
+
     internal static void RejectReadableReparsePoints(string path)
     {
         for (var current = path; current is not null; current = Path.GetDirectoryName(current))

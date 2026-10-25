@@ -194,6 +194,7 @@ Parallel.For(0, 32, _ =>
     if (Verify(validToken).Status != LeaseVerificationStatus.Valid) throw new InvalidOperationException("Concurrent verification failed.");
 });
 Ensure(true, "Parallel reads create independent public verification instances and remain valid.");
+assertions += await PilotLicenseTests.RunAsync();
 Console.WriteLine($"Licensing crypto tests passed ({assertions} assertions, generated development keys only).");
 
 LeaseVerificationResult Verify(string? token, Guid? organization = null, Guid? installation = null, DateTimeOffset? at = null) =>

@@ -18,6 +18,7 @@ await LicenseApiIntegrationTests.RunAsync();
 LicenseStateMachineTests.Run();
 await LicenseStateIntegrationTests.RunAsync();
 await LicenseRenewalClientTests.RunAsync();
+await PilotLicenseIntegrationTests.RunAsync();
 
 internal static class LicenseApiIntegrationTests
 {

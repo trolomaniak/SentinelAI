@@ -120,10 +120,16 @@ public static class SetupWorkflow
         value is { Length: 64 } && value.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 
     /// <param name="localNetwork">Null keeps the installation local-only; otherwise Core also serves Agents on the local network.</param>
-    public static async Task InstallAsync(ISetupWorker worker, IAdministratorSetupClient administrator, ISetupEnrollmentIssuer issuer,
-        ISetupLocalNetworkCertificate? localNetwork, string username, ReadOnlyMemory<char> password, IProgress<string> progress, CancellationToken token)
+    /// <param name="pilotKey">MVP-3: the pilot key Setup verified offline; Core verifies and stores it once it runs.</param>
+    /// <returns>False only when Core did not store the pilot key: licensing never stops protection, so the installation
+    /// completes and the administrator enters the key in Desktop Settings.</returns>
+    public static async Task<bool> InstallAsync(ISetupWorker worker, IAdministratorSetupClient administrator, ISetupEnrollmentIssuer issuer,
+        ISetupLocalNetworkCertificate? localNetwork, string username, ReadOnlyMemory<char> password, IProgress<string> progress, CancellationToken token,
+        ISetupPilotLicenseClient? pilot = null, string? pilotKey = null)
     {
         if (!ValidCredentials(username, password.Span, password.Span)) throw new InvalidDataException("Invalid setup credentials.");
+        if (pilotKey is not null && (pilot is null || !SetupPilotLicense.IsKeyText(pilotKey))) throw new InvalidDataException("Invalid pilot license key.");
+        var pilotStored = true;
         token.ThrowIfCancellationRequested();
         var certificate = string.Empty;
         if (localNetwork is not null)
@@ -155,6 +161,13 @@ public static class SetupWorkflow
         progress.Report("Starting Core...");
         await worker.StartCoreAsync(token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
+        if (pilotKey is not null)
+        {
+            progress.Report("Applying the pilot license key...");
+            try { await pilot!.ApplyAsync(username.Trim(), password, pilotKey, token).ConfigureAwait(false); }
+            catch (Exception) when (!token.IsCancellationRequested) { pilotStored = false; }
+            token.ThrowIfCancellationRequested();
+        }
         progress.Report("Enrolling Agent...");
         var issued = await issuer.IssueAsync(username.Trim(), password, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
@@ -168,6 +181,7 @@ public static class SetupWorkflow
             token.ThrowIfCancellationRequested();
         }
         finally { Array.Clear(enrollmentToken); }
+        return pilotStored;
     }
 
     /// <summary>Caller owns and wipes the fixed buffer immediately after the private pipe write.</summary>

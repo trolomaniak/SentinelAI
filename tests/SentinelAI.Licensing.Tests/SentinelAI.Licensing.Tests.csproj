@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../../shared/crypto/SentinelAI.Licensing.csproj" />
+    <ProjectReference Include="../../tools/pilot-license/SentinelAI.PilotLicense.csproj" />
   </ItemGroup>
   <PropertyGroup>
     <OutputType>Exe</OutputType>

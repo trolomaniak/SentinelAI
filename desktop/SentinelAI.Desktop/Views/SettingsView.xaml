@@ -30,6 +30,43 @@
                            AutomationProperties.AutomationId="LicenseStatus" AutomationProperties.LiveSetting="Polite" />
                 <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,12"
                            AutomationProperties.AutomationId="LicenseErrorText" AutomationProperties.LiveSetting="Assertive" />
+                <!-- MVP-3 pilot license: Core verifies the key offline; a new key extends or replaces the current one. -->
+                <Border x:Name="PilotLicenseSettings" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16"
+                        DataContext="{Binding Pilot, RelativeSource={RelativeSource AncestorType=Window}}"
+                        AutomationProperties.AutomationId="PilotLicenseSettings">
+                    <Border.Style>
+                        <Style TargetType="Border"><Style.Triggers>
+                            <DataTrigger Binding="{Binding}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                        </Style.Triggers></Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <TextBlock Text="Pilot license" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   AutomationProperties.AutomationId="PilotLicenseStatus" AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   AutomationProperties.AutomationId="PilotLicenseError" AutomationProperties.LiveSetting="Assertive" />
+                        <TextBlock Text="Customer" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding CustomerText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                   AutomationProperties.AutomationId="PilotLicenseCustomer" />
+                        <TextBlock Text="Expires" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding ExpiresText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                   AutomationProperties.AutomationId="PilotLicenseExpires" />
+                        <TextBlock Text="Days left" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding DaysLeftText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                   AutomationProperties.AutomationId="PilotLicenseDaysLeft" />
+                        <Label Content="New pilot license _key" Target="{Binding ElementName=PilotLicenseKeyBox}" Padding="0" />
+                        <TextBox x:Name="PilotLicenseKeyBox" Text="{Binding KeyText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 MaxLength="2048" TextWrapping="Wrap" AcceptsReturn="False" Margin="0,4,0,8" MinHeight="48"
+                                 AutomationProperties.AutomationId="PilotLicenseKeyBox" AutomationProperties.Name="New pilot license key" />
+                        <WrapPanel>
+                            <Button Content="Apply key" Click="OnApplyPilotKey" IsEnabled="{Binding CanSubmit}" Margin="0,0,8,8"
+                                    AutomationProperties.AutomationId="ApplyPilotKeyButton" />
+                        </WrapPanel>
+                        <TextBlock Text="{Binding SubmitStatusText}" TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="PilotLicenseSubmitStatus" AutomationProperties.LiveSetting="Polite" />
+                    </StackPanel>
+                </Border>
                 <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16">
                     <StackPanel>

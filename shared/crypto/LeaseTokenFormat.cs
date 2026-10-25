@@ -148,16 +148,16 @@ public static class LeaseTokenFormat
         catch (FormatException) { return false; }
     }
 
-    private static readonly JsonDocumentOptions DocumentOptions = new()
+    internal static readonly JsonDocumentOptions DocumentOptions = new()
     {
         AllowTrailingCommas = false,
         CommentHandling = JsonCommentHandling.Disallow,
         MaxDepth = 4
     };
 
-    private static string Encode(ReadOnlySpan<byte> bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    internal static string Encode(ReadOnlySpan<byte> bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
-    private static bool TryProperties(JsonElement root, string[] required, out Dictionary<string, JsonElement> properties)
+    internal static bool TryProperties(JsonElement root, string[] required, out Dictionary<string, JsonElement> properties)
     {
         properties = new(StringComparer.Ordinal);
         if (root.ValueKind != JsonValueKind.Object) return false;
@@ -166,7 +166,7 @@ public static class LeaseTokenFormat
         return properties.Count == required.Length;
     }
 
-    private static bool TryString(JsonElement element, out string? value)
+    internal static bool TryString(JsonElement element, out string? value)
     {
         value = element.ValueKind == JsonValueKind.String ? element.GetString() : null;
         return value is not null;
@@ -178,7 +178,7 @@ public static class LeaseTokenFormat
         return element.ValueKind == JsonValueKind.String && element.TryGetGuid(out value);
     }
 
-    private static bool TryDate(JsonElement element, out DateTimeOffset value)
+    internal static bool TryDate(JsonElement element, out DateTimeOffset value)
     {
         value = default;
         if (!TryString(element, out var text) || text is null || text.Length < 20 || text[10] != 'T' ||

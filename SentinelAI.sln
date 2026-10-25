@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -88,6 +88,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelAI.Setup", "installer\SentinelAI.Setup\SentinelAI.Setup.csproj", "{3F5323E4-DBC7-4B95-810D-0A68B0D9AC5B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelAI.Setup.Tests", "tests\SentinelAI.Setup.Tests\SentinelAI.Setup.Tests.csproj", "{1028E87F-4D84-4C1D-B576-8CFD16CEDF48}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelAI.PilotLicense", "tools\pilot-license\SentinelAI.PilotLicense.csproj", "{9A832FD0-8064-4A28-9871-4789E7964D2D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -411,6 +413,18 @@ Global
 		{1028E87F-4D84-4C1D-B576-8CFD16CEDF48}.Release|x64.Build.0 = Release|Any CPU
 		{1028E87F-4D84-4C1D-B576-8CFD16CEDF48}.Release|x86.ActiveCfg = Release|Any CPU
 		{1028E87F-4D84-4C1D-B576-8CFD16CEDF48}.Release|x86.Build.0 = Release|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Debug|x64.Build.0 = Debug|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Debug|x86.Build.0 = Debug|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Release|x64.ActiveCfg = Release|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Release|x64.Build.0 = Release|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Release|x86.ActiveCfg = Release|Any CPU
+		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -448,5 +462,6 @@ Global
 		{E3A95118-2D01-43B5-AE0A-E96E592D01C0} = {1860D2E4-5C43-71D5-59A5-599A4DE1DF67}
 		{3F5323E4-DBC7-4B95-810D-0A68B0D9AC5B} = {1860D2E4-5C43-71D5-59A5-599A4DE1DF67}
 		{1028E87F-4D84-4C1D-B576-8CFD16CEDF48} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{9A832FD0-8064-4A28-9871-4789E7964D2D} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal
