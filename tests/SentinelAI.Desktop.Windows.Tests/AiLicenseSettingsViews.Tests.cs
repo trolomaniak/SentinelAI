@@ -59,7 +59,7 @@ internal static partial class Program
                 "Cloud AI did not default to explicit session opt-in.");
             AiSettingsText(settings, "SettingsDesktopVersion", shell.Version);
             AiSettingsText(settings, "SettingsCoreAddress", "http://127.0.0.1:5000");
-            Ensure(!Descendants<PasswordBox>(settings).Any() && !Descendants<TextBox>(settings).Any(),
+            Ensure(!Descendants<PasswordBox>(settings).Any() && Descendants<TextBox>(settings).All(box => AutomationProperties.GetAutomationId(box) == "PilotLicenseKeyBox"),
                 "Settings exposed an editable credential or arbitrary service destination.");
             foreach (var mode in new[] { "FULL", "GRACE", "SAFE_MODE", "RECOVERING" })
             {

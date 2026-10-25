@@ -25,6 +25,7 @@ assertions += await LocalNetworkSettingsTests.RunEnrollmentAsync();
 assertions += await HttpAiExplanationRequestsTests.RunAsync();
 assertions += await OptionalWorkflowsViewModelTests.RunAsync();
 assertions += await DesktopIntegrationTests.RunAsync();
+assertions += await PilotLicenseTests.RunAsync();
 Console.WriteLine($"Desktop foundation: {assertions} assertions passed.");
 
 void Ensure(bool condition, string message)

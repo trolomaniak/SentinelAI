@@ -86,15 +86,60 @@
         </Border>
         <Grid Grid.Column="1" Margin="24">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition x:Name="AuthenticationRow" Height="Auto" />
                 <RowDefinition x:Name="PageRow" Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <views:AuthenticationView x:Name="AuthenticationPanel" Visibility="Collapsed" />
-            <ContentControl x:Name="PageContent" Grid.Row="1" Content="{Binding CurrentPage}"
+            <!-- MVP-3 pilot notice: monitoring continues whatever it says; hidden until sign-out on request. -->
+            <Border x:Name="PilotNotice" Margin="0,0,0,16" Padding="16" CornerRadius="8" BorderThickness="2"
+                    DataContext="{Binding Pilot, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource AccentBrush}"
+                    AutomationProperties.AutomationId="PilotNotice" AutomationProperties.Name="Pilot license notice">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsNoticeVisible}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel>
+                    <TextBlock Text="{Binding NoticeTitle}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="PilotNoticeTitle" AutomationProperties.LiveSetting="Polite" />
+                    <TextBlock Text="{Binding NoticeText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                               AutomationProperties.AutomationId="PilotNoticeText" />
+                    <TextBlock Text="{Binding ContactText}" TextWrapping="Wrap" Margin="0,8,0,0" FontWeight="SemiBold"
+                               AutomationProperties.AutomationId="PilotNoticeContact" />
+                    <WrapPanel Margin="0,12,0,0">
+                        <Button Content="Hide until sign-out" Click="OnHidePilotNotice" Margin="0,0,8,0"
+                                AutomationProperties.AutomationId="HidePilotNoticeButton" />
+                    </WrapPanel>
+                    <StackPanel Margin="0,16,0,0">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsEnded}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <Button Content="Uninstall SentinelAI" Click="OnUninstallSentinelAi" HorizontalAlignment="Left"
+                                IsEnabled="{Binding CanUninstall}" AutomationProperties.AutomationId="UninstallSentinelAiButton" />
+                        <TextBlock Text="{Binding UninstallStatusText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   AutomationProperties.AutomationId="UninstallSentinelAiStatus" AutomationProperties.LiveSetting="Polite" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+            <views:AuthenticationView x:Name="AuthenticationPanel" Grid.Row="1" Visibility="Collapsed" />
+            <ContentControl x:Name="PageContent" Grid.Row="2" Content="{Binding CurrentPage}"
                             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
             </ContentControl>
-            <Border Grid.Row="2" Margin="0,20,0,0" Padding="16" CornerRadius="8"
+            <Border Grid.Row="3" Margin="0,20,0,0" Padding="16" CornerRadius="8"
                     Background="{DynamicResource SurfaceBrush}"
                     BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                 <Grid>
