@@ -75,6 +75,9 @@ function New-SetupPilotLicense {
         if ($bytes.Length -le 0 -or $bytes.Length -gt 4096 -or $text.Contains('PRIVATE KEY') -or -not $text.Contains('-----BEGIN PUBLIC KEY-----')) {
             throw 'Only bounded pilot public keys can be built into Setup.'
         }
+        # Exactly what Core and Setup accept (one P-256 SPKI key), so a wrong key fails here and not on the customer's computer.
+        Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'tools/pilot-license/SentinelAI.PilotLicense.csproj'), '--configuration', 'Release', '--',
+            'check', '--public-key', $path)
         [IO.File]::WriteAllBytes((Join-Path $trustDirectory ($identifier + '.pem')), $bytes)
     }
     $contact = [ordered]@{ company = $PilotContactCompany; email = $PilotContactEmail; phone = $PilotContactPhone; website = $PilotContactWebsite }

@@ -175,7 +175,26 @@ internal static class PilotLicenseTests
                 Ensure((await Run("issue", "--private-key", privatePath, "--key-id", "dev-pilot-tool", "--customer", "Synthetic", "--days", "30")).Exit == 1,
                     "issue refuses a private key others can read");
             }
-            Ensure((await Run("--help")) is { Exit: 0 } help && help.Output.Contains("keygen", StringComparison.Ordinal), "help");
+            // The packaging check accepts exactly what Core and Setup accept.
+            Ensure((await Run("check", "--public-key", publicPath)) is { Exit: 0, Output.Length: 0, Error.Length: 0 }, "check accepts the generated public key");
+            using var p384 = ECDsa.Create(ECCurve.NamedCurves.nistP384);
+            using var rsa = RSA.Create(2048);
+            var candidates = Path.Combine(root, "candidates");
+            Directory.CreateDirectory(candidates);
+            foreach (var (name, text) in new[]
+            {
+                ("p384.pem", p384.ExportSubjectPublicKeyInfoPem()), ("rsa.pem", rsa.ExportSubjectPublicKeyInfoPem()),
+                ("private.pem", File.ReadAllText(privatePath)), ("malformed.pem", "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"),
+                ("empty.pem", "")
+            })
+            {
+                File.WriteAllText(Path.Combine(candidates, name), text);
+                var refused = await Run("check", "--public-key", Path.Combine(candidates, name));
+                Ensure(refused.Exit == 1 && refused.Output.Length == 0 && refused.Error.StartsWith("pilot-license: ", StringComparison.Ordinal) &&
+                       !refused.Error.Contains("PRIVATE", StringComparison.Ordinal), "check refuses " + name);
+            }
+            Ensure((await Run("check", "--public-key", Path.Combine(candidates, "absent.pem"))).Exit == 1, "check refuses a missing file");
+            Ensure((await Run("--help")) is { Exit: 0 } help && help.Output.Contains("keygen", StringComparison.Ordinal) && help.Output.Contains("check", StringComparison.Ordinal), "help");
         }
         finally { Directory.Delete(root, recursive: true); }
         return checks;

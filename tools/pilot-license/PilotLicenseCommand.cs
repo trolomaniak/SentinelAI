@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -26,6 +27,7 @@ public static class PilotLicenseCommand
             {
                 await output.WriteLineAsync("keygen --directory NEW_DIRECTORY_OUTSIDE_REPOSITORY --key-id ID");
                 await output.WriteLineAsync("issue --private-key PEM --key-id ID --customer \"COMPANY\" --days 1-365 [--start yyyy-mm-dd]");
+                await output.WriteLineAsync("check --public-key PEM");
                 return 0;
             }
             var command = args.FirstOrDefault();
@@ -33,11 +35,13 @@ public static class PilotLicenseCommand
             {
                 "keygen" => Parse(args, ["directory", "key-id"], []),
                 "issue" => Parse(args, ["private-key", "key-id", "customer", "days"], ["start"]),
+                "check" => Parse(args, ["public-key"], []),
                 _ => throw new ArgumentException("Unknown command.")
             };
-            if (!Regex.IsMatch(options["key-id"], @"\A[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant))
+            if (options.TryGetValue("key-id", out var keyId) && !Regex.IsMatch(keyId, @"\A[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant))
                 throw new ArgumentException("The key ID must be 1-64 letters, digits, '_' or '-'.");
-            if (command == "keygen") await KeyGenerateAsync(options, output);
+            if (command == "check") CheckPublicKey(options["public-key"]);
+            else if (command == "keygen") await KeyGenerateAsync(options, output);
             else await IssueAsync(options, output, time);
             return 0;
         }
@@ -81,7 +85,7 @@ public static class PilotLicenseCommand
         var privatePath = EnsureOutsideRepository(options["private-key"]);
         var file = new FileInfo(privatePath);
         if (!file.Exists || file.Length is <= 0 or > 16384) throw new ArgumentException("The private key file is missing or invalid.");
-        if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(privatePath) & GroupOrOther) != 0)
+        if (OperatingSystem.IsWindows() ? !IsOwnerOnly(file) : (File.GetUnixFileMode(privatePath) & GroupOrOther) != 0)
             throw new ArgumentException("The private key file must be readable by its owner only.");
         var pem = await File.ReadAllTextAsync(privatePath);
         if (!PemEncoding.TryFind(pem, out var fields) || pem[fields.Label] != "PRIVATE KEY" ||
@@ -99,6 +103,30 @@ public static class PilotLicenseCommand
         var signingInput = PilotLicenseFormat.CreateSigningInput(claims, options["key-id"]);
         var signature = key.SignData(Encoding.ASCII.GetBytes(signingInput), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
         await output.WriteLineAsync(PilotLicenseFormat.Assemble(signingInput, signature));
+    }
+
+    /// <summary>
+    /// The packaging check for a pilot public key: exactly what Core and Setup accept (one P-256 SPKI PEM, never a
+    /// private key), so a wrong key fails the build instead of the installed product. Exit 0 means usable.
+    /// </summary>
+    private static void CheckPublicKey(string path)
+    {
+        var file = new FileInfo(Path.GetFullPath(path));
+        if (!file.Exists || file.Length is <= 0 or > 4096) throw new ArgumentException("The public key file is missing or invalid.");
+        try { _ = new PilotLicenseVerifier(new Dictionary<string, string> { ["check"] = File.ReadAllText(file.FullName) }); }
+        catch (ArgumentException) { throw new ArgumentException("Only a P-256 public key in SPKI PEM form can be a pilot public key."); }
+    }
+
+    // Windows counterpart of the Unix group/other check: only the current user, SYSTEM and Administrators may read the key.
+    [SupportedOSPlatform("windows")]
+    private static bool IsOwnerOnly(FileInfo file)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        string[] allowed = [identity.User!.Value, "S-1-5-18", "S-1-5-32-544"];
+        foreach (FileSystemAccessRule rule in file.GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier)))
+            if (rule.AccessControlType == AccessControlType.Allow && (rule.FileSystemRights & FileSystemRights.ReadData) != 0 &&
+                !allowed.Contains(((SecurityIdentifier)rule.IdentityReference).Value)) return false;
+        return true;
     }
 
     private static Dictionary<string, string> Parse(string[] args, string[] required, string[] optional)
