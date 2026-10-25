@@ -8,7 +8,9 @@ param(
     [Parameter(Mandatory = $true)][string]$ExecutablePath,
     [ValidateRange(60, 900)][int]$TimeoutSeconds = 300,
     [switch]$PreserveInstallation,
-    [ref]$InstallationContext
+    [ref]$InstallationContext,
+    # MVP-3: a development pilot license key for a Setup built with development pilot public keys.
+    [string]$PilotLicenseKeyPath
 )
 
 Set-StrictMode -Version Latest
@@ -28,6 +30,11 @@ try {
 } finally { $identity.Dispose() }
 
 $ExecutablePath = (Resolve-Path -LiteralPath $ExecutablePath).ProviderPath
+$pilotLicenseKey = $null
+if (-not [string]::IsNullOrWhiteSpace($PilotLicenseKeyPath)) {
+    $pilotLicenseKey = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $PilotLicenseKeyPath).ProviderPath).Trim()
+    if ($pilotLicenseKey.Length -gt 1024 -or $pilotLicenseKey -cnotmatch '\A[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\z') { throw 'A development pilot license key is required.' }
+}
 if (-not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf) -or
     [IO.Path]::GetFileName($ExecutablePath) -cne 'SentinelAI-Setup.exe') { throw 'The actual published Setup executable is required.' }
 $repositoryRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -305,7 +312,13 @@ function Set-NativePassword([string]$Id, [string]$NextId) {
             [SentinelAI.Setup.Acceptance.Native]::GetForegroundWindow() -eq $script:activeProcess.MainWindowHandle
     } 'Native password input did not finish processing at its next control.'
 }
+function Set-SetupPilotLicenseKey([string]$Key) {
+    Wait-SetupAcceptance { Test-SetupControl 'SetupPilotLicenseKey' } 'Setup did not ask for the pilot license key.'
+    $pilot = Find-SetupControl 'SetupPilotLicenseKey'
+    ([Windows.Automation.ValuePattern]$pilot.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)).SetValue($Key)
+}
 function Set-SetupCredentials {
+    if ($null -ne $script:pilotLicenseKey) { Set-SetupPilotLicenseKey $script:pilotLicenseKey }
     Wait-SetupAcceptance { Test-SetupControl 'SetupAdministratorUsername' } 'Setup administrator input was unavailable.'
     $user = Find-SetupControl 'SetupAdministratorUsername'
     ([Windows.Automation.ValuePattern]$user.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)).SetValue($script:username)
@@ -834,6 +847,16 @@ try {
     Wait-SetupAcceptance { Test-SetupControl 'SetupErrorText' $false } 'Setup did not reject empty administrator credentials.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $dataRoot) -and
         $null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Invalid administrator input created installation files or services.'
+    if ($null -ne $pilotLicenseKey) {
+        # MVP-3: the key is verified offline before anything is installed; a tampered key is refused.
+        $parts = $pilotLicenseKey.Split('.')
+        $tampered = $parts[0] + '.' + $(if ($parts[1][0] -ceq 'A') { 'B' } else { 'A' }) + $parts[1].Substring(1) + '.' + $parts[2]
+        Set-SetupPilotLicenseKey $tampered
+        ([Windows.Automation.InvokePattern](Find-SetupControl 'SetupInstallButton').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)).Invoke()
+        Wait-SetupAcceptance { (Find-SetupControl 'SetupErrorText').Current.Name.Contains('SETUP-PILOT-KEY') } 'Setup did not refuse a tampered pilot license key.'
+        Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $dataRoot) -and
+            $null -eq (Get-SetupService 'SentinelAICore')) 'A refused pilot license key created installation files or services.'
+    }
     Wait-SetupAcceptance { Test-SetupControl 'SetupLocalNetworkAccess' } 'Setup did not offer local-network access for the central computer.'
     $localNetworkOption = [Windows.Automation.TogglePattern](Find-SetupControl 'SetupLocalNetworkAccess').GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
     Assert-SetupAcceptance ([string]$localNetworkOption.Current.ToggleState -ceq 'On') 'Setup did not enable local-network access by default.'
@@ -956,6 +979,16 @@ try {
     try { $session = Invoke-SetupCoreRequest '/api/auth/login' 'POST' $loginBody | ConvertFrom-Json } finally { $loginBody = $null }
     $accessToken = [string]$session.accessToken; $session = $null
     Assert-SetupAcceptance (-not [string]::IsNullOrWhiteSpace($accessToken) -and $accessToken.Length -le 8192) 'The administrator created by actual Setup cannot authenticate.'
+    if ($null -ne $pilotLicenseKey) {
+        # Setup handed the verified key to Core, which reports it with the build-time contact; only public keys are deployed.
+        $pilotStatus = Invoke-SetupCoreRequest '/api/admin/license/pilot' 'GET' $null $accessToken | ConvertFrom-Json
+        Assert-SetupAcceptance ([string]$pilotStatus.state -cin @('active', 'ending') -and -not [string]::IsNullOrEmpty([string]$pilotStatus.customer) -and
+            $null -ne $pilotStatus.contact -and -not [string]::IsNullOrEmpty([string]$pilotStatus.contact.company)) 'Core did not report the pilot license entered in Setup.'
+        $pilotFiles = @(Get-ChildItem -LiteralPath (Join-Path $coreCode 'pilot-license') -Recurse -File -Force)
+        Assert-SetupAcceptance ($pilotFiles.Count -ge 2 -and @($pilotFiles | Where-Object { [IO.File]::ReadAllText($_.FullName).Contains('PRIVATE KEY') }).Count -eq 0) 'Core was deployed without pilot public keys or with a private key.'
+        Write-Output ('Pilot license: state=' + [string]$pilotStatus.state + '; daysLeft=' + [string]$pilotStatus.daysLeft)
+        $pilotStatus = $null
+    }
     Wait-ExactEndpoint $endpointId $installationSince
     $stateDigest = Read-SetupStateDigest $statePath
     $identityDigest = Read-SetupStateDigest (Join-Path $agentData 'installation-id')

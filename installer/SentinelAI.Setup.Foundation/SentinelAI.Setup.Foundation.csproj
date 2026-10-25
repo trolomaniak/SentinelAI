@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../desktop/SentinelAI.Desktop.Foundation/SentinelAI.Desktop.Foundation.csproj" />
+    <ProjectReference Include="../../shared/crypto/SentinelAI.Licensing.csproj" />
     <Compile Include="../../shared/enrollment/EnrollmentCode.cs" Link="EnrollmentCode.cs" />
     <InternalsVisibleTo Include="SentinelAI.Setup.Host" />
     <InternalsVisibleTo Include="SentinelAI.Setup.Tests" />

@@ -299,12 +299,23 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $keys = Join-Path $env:RUNNER_TEMP ('sentinelai-setup-keys-' + [Guid]::NewGuid().ToString('N'))
+          $pilotKeys = Join-Path $env:RUNNER_TEMP ('sentinelai-pilot-keys-' + [Guid]::NewGuid().ToString('N'))
           try {
             dotnet run --project tools/update-dev --configuration Release -- keygen --directory $keys --key-id dev-ci-setup
             if ($LASTEXITCODE -ne 0) { throw 'Development Setup key generation failed.' }
+            # MVP-3: a development pilot key pair for this run only; the issued pilot key is the acceptance input.
+            dotnet run --project tools/pilot-license --configuration Release -- keygen --directory $pilotKeys --key-id dev-ci-pilot
+            if ($LASTEXITCODE -ne 0) { throw 'Development pilot key generation failed.' }
+            $pilotKey = dotnet run --project tools/pilot-license --configuration Release -- issue --private-key (Join-Path $pilotKeys 'dev-ci-pilot.private.pem') `
+              --key-id dev-ci-pilot --customer 'SentinelAI CI Example' --days 30
+            if ($LASTEXITCODE -ne 0) { throw 'Development pilot key issuance failed.' }
+            [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'sentinelai-ci-pilot.key'), ([string]@($pilotKey)[-1]).Trim())
             ./scripts/publish-setup-windows.ps1 -Version 1.0.0 -KeyId dev-ci-setup `
               -DevelopmentPrivateKey (Join-Path $keys 'dev-ci-setup.private.pem') `
               -PublicKeyPath (Join-Path $keys 'dev-ci-setup.public.pem') `
+              -PilotLicensePublicKey ('dev-ci-pilot=' + (Join-Path $pilotKeys 'dev-ci-pilot.public.pem')) `
+              -PilotContactCompany 'Example Pilot Company' -PilotContactEmail 'pilot@example.invalid' `
+              -PilotContactPhone '+00 000 000 000' -PilotContactWebsite 'https://example.invalid' `
               -OutputDirectory (Join-Path $env:RUNNER_TEMP 'sentinelai-setup-artifact')
             # MVP-2: the Agent-only Setup, signed with the same development key as the central installation.
             ./scripts/publish-setup-windows.ps1 -Version 1.0.0 -KeyId dev-ci-setup -Product Agent `
@@ -319,6 +330,7 @@ jobs:
             throw
           } finally {
             if (Test-Path -LiteralPath $keys) { Remove-Item -LiteralPath $keys -Recurse -Force }
+            if (Test-Path -LiteralPath $pilotKeys) { Remove-Item -LiteralPath $pilotKeys -Recurse -Force }
           }
       - name: Verify native Setup wrapper, protected WPF child, complete deployment and silent Agent Setup enrollment
         shell: powershell
@@ -327,6 +339,7 @@ jobs:
             ./tests/setup/AgentSetup.Acceptance.ps1 `
               -ExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-setup-artifact/SentinelAI-Setup.exe') `
               -AgentExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-agent-setup-artifact/SentinelAI-Agent-Setup.exe') `
+              -PilotLicenseKeyPath (Join-Path $env:RUNNER_TEMP 'sentinelai-ci-pilot.key') `
               -TimeoutSeconds 300
           } catch {
             $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace

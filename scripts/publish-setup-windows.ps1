@@ -11,7 +11,14 @@ param(
     [ValidateSet('SentinelAI', 'Agent')][string]$Product = 'SentinelAI',
     # Development-only lifecycle acceptance input. The override affects only
     # the signed whole-deployment candidate, never the fresh-install bundle.
-    [string]$DevelopmentCoreAssemblyOverride
+    [string]$DevelopmentCoreAssemblyOverride,
+    # MVP-3 pilot licensing, built into the full Setup only when supplied: pilot public keys as KEY_ID=PATH (separate
+    # from update and lease keys) and the contact details shown when the pilot ends. Never a private key.
+    [string[]]$PilotLicensePublicKey = @(),
+    [string]$PilotContactCompany = '',
+    [string]$PilotContactEmail = '',
+    [string]$PilotContactPhone = '',
+    [string]$PilotContactWebsite = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,6 +53,35 @@ function Assert-SetupPath {
         }
     }
     return $full
+}
+
+function New-SetupPilotLicense {
+    param([string]$Destination)
+    # Core and Desktop recheck everything: trust/<key ID>.pem holds P-256 public keys only; contact.json is optional.
+    if ($PilotLicensePublicKey.Count -gt 32) { throw 'At most 32 pilot public keys are supported.' }
+    $trustDirectory = Join-Path $Destination 'trust'
+    New-Item -ItemType Directory -Path $trustDirectory -Force | Out-Null
+    $identifiers = @{}
+    foreach ($entry in $PilotLicensePublicKey) {
+        $separator = $entry.IndexOf('=')
+        if ($separator -lt 1) { throw 'Pilot public keys are given as KEY_ID=PATH.' }
+        $identifier = $entry.Substring(0, $separator)
+        if ($identifier -cnotmatch '\A[A-Za-z0-9_-]{1,64}\z' -or $identifiers.ContainsKey($identifier)) { throw 'Each pilot key ID must be unique: 1-64 letters, digits, _ or -.' }
+        $identifiers[$identifier] = $true
+        $path = Assert-SetupPath -Path $entry.Substring($separator + 1)
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'A pilot public key file is missing.' }
+        $bytes = [IO.File]::ReadAllBytes($path)
+        $text = [Text.Encoding]::ASCII.GetString($bytes)
+        if ($bytes.Length -le 0 -or $bytes.Length -gt 4096 -or $text.Contains('PRIVATE KEY') -or -not $text.Contains('-----BEGIN PUBLIC KEY-----')) {
+            throw 'Only bounded pilot public keys can be built into Setup.'
+        }
+        [IO.File]::WriteAllBytes((Join-Path $trustDirectory ($identifier + '.pem')), $bytes)
+    }
+    $contact = [ordered]@{ company = $PilotContactCompany; email = $PilotContactEmail; phone = $PilotContactPhone; website = $PilotContactWebsite }
+    if (@($contact.Values | Where-Object { $_.Length -gt 0 }).Count -eq 0) { return }
+    foreach ($value in $contact.Values) { if ($value.Length -gt 128 -or $value -match '\p{Cc}') { throw 'Pilot contact details are at most 128 characters without control characters.' } }
+    if ($PilotContactCompany.Length -eq 0) { throw 'Pilot contact details need the company name.' }
+    [IO.File]::WriteAllText((Join-Path $Destination 'contact.json'), ($contact | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
 }
 
 function New-SetupPayload {
@@ -309,6 +345,9 @@ try {
         -not (Test-Path -LiteralPath $PublicKeyPath -PathType Leaf)) { throw 'Separate development signing and public trust files are required.' }
     if (Test-Path -LiteralPath $OutputDirectory) { throw 'The output directory must be new.' }
     if ($agentOnly -and -not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) { throw 'Agent Setup has no Core.' }
+    $pilotContactSupplied = @($PilotContactCompany, $PilotContactEmail, $PilotContactPhone, $PilotContactWebsite | Where-Object { $_.Length -gt 0 }).Count -gt 0
+    if ($agentOnly -and ($PilotLicensePublicKey.Count -gt 0 -or $pilotContactSupplied)) { throw 'Agent Setup needs no pilot license key.' }
+    if ($pilotContactSupplied -and $PilotLicensePublicKey.Count -eq 0) { throw 'Pilot contact details need pilot public keys.' }
     if (-not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) {
         if ($DevelopmentCoreAssemblyOverride -notmatch '\A(?:[A-Za-z]:[\\/]|\\\\)') { throw 'An absolute development Core assembly path is required.' }
         $DevelopmentCoreAssemblyOverride = Assert-SetupPath -Path $DevelopmentCoreAssemblyOverride
@@ -339,8 +378,16 @@ try {
     $payloadSource = Join-Path $work 'payload'
     New-Item -ItemType Directory -Path $payloadSource | Out-Null
     $bundle = Join-Path $payloadSource 'bundle'
+    $pilotLicense = $null
+    $pilotArguments = @{}
+    if ($PilotLicensePublicKey.Count -gt 0) {
+        $script:SetupPublishingPhase = 'pilot-license'
+        $pilotLicense = Join-Path $work 'pilot-license'
+        New-SetupPilotLicense -Destination $pilotLicense
+        $pilotArguments.PilotLicenseDirectory = $pilotLicense
+    }
     $script:SetupPublishingPhase = 'signed-bundle'
-    & (Join-Path $PSScriptRoot 'publish-pilot-windows.ps1') -Version $Version -DevelopmentPrivateKey $DevelopmentPrivateKey -KeyId $KeyId -Channel $Channel -OutputDirectory $bundle -DirectoryHosts
+    & (Join-Path $PSScriptRoot 'publish-pilot-windows.ps1') -Version $Version -DevelopmentPrivateKey $DevelopmentPrivateKey -KeyId $KeyId -Channel $Channel -OutputDirectory $bundle -DirectoryHosts @pilotArguments
     # Agent Setup carries only the signed Agent package, the Updater and the installer modules.
     if ($agentOnly) { foreach ($name in @('core.zip', 'core.manifest.json')) { Remove-Item -LiteralPath (Join-Path $bundle $name) -Force } }
 
@@ -419,6 +466,11 @@ try {
     Copy-Item -LiteralPath $worker -Destination (Join-Path $setupSource 'SetupWorker.ps1')
     Copy-Item -LiteralPath $lifecycleWorker -Destination (Join-Path $setupSource 'SetupLifecycle.ps1')
     if ($agentOnly) { Copy-Item -LiteralPath $agentWorker -Destination (Join-Path $setupSource 'AgentSetupWorker.ps1') }
+    # The same pilot public keys let Setup verify the key before installing; contact details stay with Core.
+    if ($null -ne $pilotLicense) {
+        New-Item -ItemType Directory -Path (Join-Path $setupSource 'pilot-license') | Out-Null
+        Copy-Item -LiteralPath (Join-Path $pilotLicense 'trust') -Destination (Join-Path $setupSource 'pilot-license/trust') -Recurse
+    }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $payload = Join-Path $work 'payload.zip'
     New-SetupPayload -Source $payloadSource -Destination $payload

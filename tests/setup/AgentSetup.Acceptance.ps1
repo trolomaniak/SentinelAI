@@ -6,7 +6,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$ExecutablePath,
     [Parameter(Mandatory = $true)][string]$AgentExecutablePath,
-    [ValidateRange(60, 900)][int]$TimeoutSeconds = 300
+    [ValidateRange(60, 900)][int]$TimeoutSeconds = 300,
+    [string]$PilotLicenseKeyPath
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -16,7 +17,7 @@ if (-not (Test-Path -LiteralPath $AgentExecutablePath -PathType Leaf) -or [IO.Pa
 }
 $context = $null
 . (Join-Path $PSScriptRoot 'Windows.Acceptance.ps1') -ExecutablePath $ExecutablePath -TimeoutSeconds $TimeoutSeconds `
-    -PreserveInstallation -InstallationContext ([ref]$context)
+    -PreserveInstallation -InstallationContext ([ref]$context) -PilotLicenseKeyPath $PilotLicenseKeyPath
 if ($null -eq $context -or [string]::IsNullOrWhiteSpace($context.Password)) { throw 'Fresh native acceptance did not provide its private synthetic context.' }
 $username = $context.Username; $password = $context.Password
 $context = $null; $coreProcess = $null; $agentProcess = $null; $client = $null; $accessToken = $null

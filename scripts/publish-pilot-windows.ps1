@@ -6,7 +6,9 @@ param(
     [Parameter(Mandatory = $true)][ValidatePattern('^dev-[A-Za-z0-9_-]{1,48}$')][string]$KeyId,
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
     [string]$OutputDirectory,
-    [switch]$DirectoryHosts
+    [switch]$DirectoryHosts,
+    # MVP-3: a prepared pilot-license directory (trust/<key ID>.pem public keys, optional contact.json) deployed next to Core.
+    [string]$PilotLicenseDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,6 +33,14 @@ try {
         if ((Test-Path -LiteralPath (Join-Path $directory '.git')) -or
             ((Test-Path -LiteralPath (Join-Path $directory 'AGENTS.md')) -and (Test-Path -LiteralPath (Join-Path $directory 'SentinelAI.sln')))) { throw 'A development key outside source is required.' }
     }
+    if (-not [string]::IsNullOrWhiteSpace($PilotLicenseDirectory)) {
+        if (-not [IO.Path]::IsPathRooted($PilotLicenseDirectory) -or -not (Test-Path -LiteralPath (Join-Path $PilotLicenseDirectory 'trust') -PathType Container)) { throw 'A prepared pilot license directory is required.' }
+        foreach ($entry in @(Get-ChildItem -LiteralPath $PilotLicenseDirectory -Recurse -Force)) {
+            $relative = $entry.FullName.Substring($PilotLicenseDirectory.TrimEnd('\', '/').Length + 1).Replace('\', '/')
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                -not ($relative -ceq 'trust' -or $relative -ceq 'contact.json' -or $relative -cmatch '\Atrust/[A-Za-z0-9_-]{1,64}\.pem\z')) { throw 'The pilot license directory holds only public keys and contact details.' }
+        }
+    }
     New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     foreach ($component in @('core', 'agent', 'updater')) {
@@ -46,6 +56,9 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $publish $executable) -PathType Leaf)) { throw 'The Windows executable was not published.' }
         if ($component -eq 'core' -and (-not (Test-Path -LiteralPath (Join-Path $publish 'dashboard/index.html') -PathType Leaf) -or
             -not (Test-Path -LiteralPath (Join-Path $publish 'dashboard/assets/app.js') -PathType Leaf))) { throw 'Published Core dashboard assets are missing.' }
+        if ($component -eq 'core' -and -not [string]::IsNullOrWhiteSpace($PilotLicenseDirectory)) {
+            Copy-Item -LiteralPath $PilotLicenseDirectory -Destination (Join-Path $publish 'pilot-license') -Recurse
+        }
         if ($component -eq 'updater') { Move-Item -LiteralPath $publish -Destination (Join-Path $OutputDirectory 'updater'); continue }
         $zip = Join-Path $OutputDirectory ($component + '.zip')
         [IO.Compression.ZipFile]::CreateFromDirectory($publish, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)

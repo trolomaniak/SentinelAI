@@ -4,8 +4,17 @@ using SentinelAI.Setup.Foundation;
 
 namespace SentinelAI.Setup;
 
-internal sealed class SetupEnrollmentIssuer(WindowsCoreServices core) : ISetupEnrollmentIssuer
+internal sealed class SetupEnrollmentIssuer(WindowsCoreServices core) : ISetupEnrollmentIssuer, ISetupPilotLicenseClient
 {
+    public async Task ApplyAsync(string username, ReadOnlyMemory<char> password, string key, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var service = WindowsNativeCore.ReadService();
+        if (service is null || service.State != 4 || service.ProcessId <= 0) throw new InvalidDataException("Local Core service unavailable.");
+        using var client = new HttpSetupEnrollmentIssuer(core, WindowsCoreServices.CreatePeerTrustedHandler());
+        await client.ApplyAsync(username, password, key, token).ConfigureAwait(false);
+    }
+
     public async Task<string> IssueAsync(string username, ReadOnlyMemory<char> password, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();

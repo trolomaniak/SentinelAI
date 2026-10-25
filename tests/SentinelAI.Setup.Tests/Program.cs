@@ -315,6 +315,7 @@ using (var cancellation = new CancellationTokenSource())
 }
 assertions += await EnrollmentProtocolTests.RunAsync();
 assertions += await AgentSetupTests.RunAsync();
+assertions += await PilotSetupTests.RunAsync();
 Console.WriteLine($"Setup foundation: {assertions} assertions passed.");
 
 sealed class SilentProgress : IProgress<string> { public void Report(string value) { } }
