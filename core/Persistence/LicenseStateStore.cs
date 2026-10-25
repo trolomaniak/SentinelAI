@@ -8,7 +8,9 @@ public sealed record LicenseStoredState(
     DateTimeOffset? LastSuccessfulValidationUtc,
     DateTimeOffset HighWaterUtc,
     bool LastAttemptSucceeded,
-    bool ClockRollbackDetected)
+    bool ClockRollbackDetected,
+    // MVP-3: the entered pilot license key, verified again whenever status is read.
+    string? PilotKey = null)
 {
     public override string ToString() => nameof(LicenseStoredState);
 }
@@ -32,6 +34,15 @@ public sealed class LicenseStateStore(AdminStore admins)
             );
             """;
         await create.ExecuteNonQueryAsync(cancellationToken);
+        // Additive MVP-3 column: existing state keeps its lease, clock floor and flags.
+        await using var columns = connection.CreateCommand();
+        columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('LicenseState') WHERE name = 'PilotKey';";
+        if ((long)(await columns.ExecuteScalarAsync(cancellationToken))! == 0)
+        {
+            await using var add = connection.CreateCommand();
+            add.CommandText = "ALTER TABLE LicenseState ADD COLUMN PilotKey TEXT;";
+            await add.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
     public async Task<LicenseStoredState?> LoadAsync(CancellationToken cancellationToken = default)
@@ -47,10 +58,13 @@ public sealed class LicenseStateStore(AdminStore admins)
                         (typeof(Lease) != 'text' OR length(CAST(Lease AS BLOB)) NOT BETWEEN 1 AND $maximum)
                         THEN 1 ELSE 0 END,
                    LastSuccessfulValidationUtcTicks, HighWaterUtcTicks,
-                   LastAttemptSucceeded, ClockRollbackDetected
+                   LastAttemptSucceeded, ClockRollbackDetected,
+                   CASE WHEN typeof(PilotKey) = 'text' AND length(CAST(PilotKey AS BLOB)) BETWEEN 1 AND $pilotMaximum
+                        THEN PilotKey ELSE NULL END
             FROM LicenseState WHERE Singleton = 1;
             """;
         query.Parameters.AddWithValue("$maximum", LeaseTokenFormat.MaxTokenLength);
+        query.Parameters.AddWithValue("$pilotMaximum", PilotLicenseFormat.MaxKeyLength);
         await using var reader = await query.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
 
@@ -65,8 +79,10 @@ public sealed class LicenseStateStore(AdminStore admins)
         valid &= TryReadUtc(reader.GetValue(3), out var highWater);
         valid &= TryReadBoolean(reader.GetValue(4), out var succeeded);
         valid &= TryReadBoolean(reader.GetValue(5), out var rollback);
-        if (!valid) return new(null, null, highWater, false, true);
-        return new(lease, validated, highWater, succeeded, rollback);
+        // A damaged pilot key reads as none; the pilot never fails open.
+        var pilotKey = reader.IsDBNull(6) ? null : reader.GetString(6);
+        if (!valid) return new(null, null, highWater, false, true, pilotKey);
+        return new(lease, validated, highWater, succeeded, rollback, pilotKey);
     }
 
     public async Task SaveAsync(LicenseStoredState state, CancellationToken cancellationToken = default)
@@ -76,6 +92,10 @@ public sealed class LicenseStateStore(AdminStore admins)
         {
             throw new ArgumentException("The persisted lease must respect the lease size limit.", nameof(state));
         }
+        if (state.PilotKey is { } pilotKey && (pilotKey.Length == 0 || pilotKey.Length > PilotLicenseFormat.MaxKeyLength))
+        {
+            throw new ArgumentException("The persisted pilot key must respect its size limit.", nameof(state));
+        }
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -83,8 +103,8 @@ public sealed class LicenseStateStore(AdminStore admins)
         save.CommandText = """
             INSERT INTO LicenseState
                 (Singleton, Lease, LastSuccessfulValidationUtcTicks, HighWaterUtcTicks,
-                 LastAttemptSucceeded, ClockRollbackDetected)
-            VALUES (1, $lease, $validated, $highWater, $succeeded, $rollback)
+                 LastAttemptSucceeded, ClockRollbackDetected, PilotKey)
+            VALUES (1, $lease, $validated, $highWater, $succeeded, $rollback, $pilotKey)
             ON CONFLICT(Singleton) DO UPDATE SET
                 Lease = excluded.Lease,
                 LastSuccessfulValidationUtcTicks = excluded.LastSuccessfulValidationUtcTicks,
@@ -94,7 +114,8 @@ public sealed class LicenseStateStore(AdminStore admins)
                     THEN MAX(LicenseState.HighWaterUtcTicks, excluded.HighWaterUtcTicks)
                     ELSE excluded.HighWaterUtcTicks END,
                 LastAttemptSucceeded = excluded.LastAttemptSucceeded,
-                ClockRollbackDetected = excluded.ClockRollbackDetected;
+                ClockRollbackDetected = excluded.ClockRollbackDetected,
+                PilotKey = excluded.PilotKey;
             """;
         save.Parameters.AddWithValue("$lease", (object?)state.Lease ?? DBNull.Value);
         save.Parameters.AddWithValue("$validated", state.LastSuccessfulValidationUtc is { } validated
@@ -103,6 +124,7 @@ public sealed class LicenseStateStore(AdminStore admins)
         save.Parameters.AddWithValue("$maximumTicks", DateTime.MaxValue.Ticks);
         save.Parameters.AddWithValue("$succeeded", state.LastAttemptSucceeded ? 1 : 0);
         save.Parameters.AddWithValue("$rollback", state.ClockRollbackDetected ? 1 : 0);
+        save.Parameters.AddWithValue("$pilotKey", (object?)state.PilotKey ?? DBNull.Value);
         await save.ExecuteNonQueryAsync(cancellationToken);
     }
 

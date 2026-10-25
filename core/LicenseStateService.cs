@@ -12,14 +12,30 @@ public sealed record LicenseStatus(
     bool ClockRollbackDetected,
     IReadOnlyList<string> EnabledFeatures);
 
+/// <summary>
+/// MVP-3 pilot license status: unavailable (this build has no pilot keys), none, invalid, scheduled, active, ending
+/// (the last seven days), or ended. Evaluated at the effective time, so turning the clock back cannot extend a pilot.
+/// </summary>
+public sealed record PilotLicenseView(string State, string? Customer, DateTimeOffset? StartsUtc, DateTimeOffset? ExpiresUtc,
+    int? DaysLeft, DateTimeOffset EffectiveUtc, PilotContact? Contact);
+public enum PilotKeyOutcome { Accepted, Invalid, Expired, Unavailable }
+public sealed record PilotKeyResult(PilotKeyOutcome Outcome, PilotLicenseView Status);
+public sealed record PilotKeyRequest(string? Key)
+{
+    public override string ToString() => nameof(PilotKeyRequest);
+}
+
 /// <summary>Local licensing policy. Monitoring never depends on a successful renewal.</summary>
 public sealed class LicenseStateService(
     LicenseVerificationOptions options,
     EnrollmentStore enrollments,
     LicenseStateStore store,
     LicenseClock clock,
-    ILicenseLeaseClient client)
+    ILicenseLeaseClient client,
+    PilotLicenseOptions pilot)
 {
+    public static readonly TimeSpan PilotWarningPeriod = TimeSpan.FromDays(7);
+
     private readonly SemaphoreSlim _stateGate = new(1, 1);
     private readonly SemaphoreSlim _renewalGate = new(1, 1);
     private int _recovering;
@@ -31,14 +47,7 @@ public sealed class LicenseStateService(
         await _stateGate.WaitAsync(cancellationToken);
         try
         {
-            var state = await LoadAsync(cancellationToken);
-            var reading = clock.Observe(state.HighWaterUtc);
-            state = state with
-            {
-                HighWaterUtc = reading.UtcNow,
-                ClockRollbackDetected = state.ClockRollbackDetected || reading.RollbackDetected
-            };
-            await store.SaveAsync(state, cancellationToken);
+            var state = await ObserveAsync(cancellationToken);
             var identity = await enrollments.GetCoreIdentityAsync(cancellationToken);
             return Snapshot(state, options.Verifier.Authenticate(state.Lease,
                 identity.OrganizationId, identity.CoreInstallationId), Volatile.Read(ref _recovering) != 0);
@@ -99,6 +108,61 @@ public sealed class LicenseStateService(
             Interlocked.Exchange(ref _recovering, 0);
             _renewalGate.Release();
         }
+    }
+
+    public async Task<PilotLicenseView> GetPilotAsync(CancellationToken cancellationToken = default)
+    {
+        await _stateGate.WaitAsync(cancellationToken);
+        try { return PilotView(await ObserveAsync(cancellationToken)); }
+        finally { _stateGate.Release(); }
+    }
+
+    /// <summary>Stores a key that is valid now or later, replacing the current one; an expired or invalid key changes nothing.</summary>
+    public async Task<PilotKeyResult> SetPilotKeyAsync(string key, CancellationToken cancellationToken = default)
+    {
+        await _stateGate.WaitAsync(cancellationToken);
+        try
+        {
+            var state = await ObserveAsync(cancellationToken);
+            if (!pilot.Configured) return new(PilotKeyOutcome.Unavailable, PilotView(state));
+            var result = pilot.Verifier.Verify(key, state.HighWaterUtc);
+            if (result.Status is PilotLicenseStatus.Invalid or PilotLicenseStatus.Expired)
+                return new(result.Status == PilotLicenseStatus.Expired ? PilotKeyOutcome.Expired : PilotKeyOutcome.Invalid, PilotView(state));
+            state = state with { PilotKey = key.Trim(' ', '\t', '\r', '\n') };
+            await store.SaveAsync(state, cancellationToken);
+            return new(PilotKeyOutcome.Accepted, PilotView(state));
+        }
+        finally { _stateGate.Release(); }
+    }
+
+    private PilotLicenseView PilotView(LicenseStoredState state)
+    {
+        var now = state.HighWaterUtc;
+        if (!pilot.Configured) return new("unavailable", null, null, null, null, now, pilot.Contact);
+        if (state.PilotKey is null) return new("none", null, null, null, null, now, pilot.Contact);
+        var result = pilot.Verifier.Verify(state.PilotKey, now);
+        if (result.Claims is not { } claims) return new("invalid", null, null, null, null, now, pilot.Contact);
+        var (name, daysLeft) = result.Status switch
+        {
+            PilotLicenseStatus.NotYetValid => ("scheduled", (int?)null),
+            PilotLicenseStatus.Expired => ("ended", 0),
+            _ => (claims.ExpiresAt - now <= PilotWarningPeriod ? "ending" : "active", (int)Math.Ceiling((claims.ExpiresAt - now).TotalDays))
+        };
+        return new(name, claims.Customer, claims.IssuedAt, claims.ExpiresAt, daysLeft, now, pilot.Contact);
+    }
+
+    // Reads the persisted state and advances the effective time; the clock floor is saved before any decision.
+    private async Task<LicenseStoredState> ObserveAsync(CancellationToken cancellationToken)
+    {
+        var state = await LoadAsync(cancellationToken);
+        var reading = clock.Observe(state.HighWaterUtc);
+        state = state with
+        {
+            HighWaterUtc = reading.UtcNow,
+            ClockRollbackDetected = state.ClockRollbackDetected || reading.RollbackDetected
+        };
+        await store.SaveAsync(state, cancellationToken);
+        return state;
     }
 
     private async Task<LicenseStoredState> LoadAsync(CancellationToken cancellationToken) =>
