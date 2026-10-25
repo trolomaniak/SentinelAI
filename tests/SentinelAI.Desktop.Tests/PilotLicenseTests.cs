@@ -243,15 +243,24 @@ internal static class PilotLicenseTests
                model.NoticeText.Contains("All monitoring continues", StringComparison.Ordinal) && model.NoticeText.Contains("Uninstall SentinelAI", StringComparison.Ordinal),
             "The ended notice did not replace a hidden warning, or lacked the uninstall action.");
         Ensure(launcher.Calls == 0, "The uninstall flow started without the administrator asking.");
+        var exits = 0;
+        model.ExitRequested += (_, _) => exits++;
+        client.Next = new(PilotLicenseOutcome.Unavailable);
+        await model.RefreshAsync();
+        Ensure(model.IsNoticeVisible && model.IsEnded && model.CanUninstall && model.ErrorText.Contains("unavailable", StringComparison.Ordinal),
+            "A failed read removed the persistent ended notice.");
+        client.Next = new(PilotLicenseOutcome.Success, Info("ended", 0));
         model.StartUninstall();
-        Ensure(launcher.Calls == 1 && model.UninstallStatusText.Contains("kept unless you type DELETE", StringComparison.Ordinal),
-            "Uninstall SentinelAI did not open the existing Setup uninstall flow.");
+        Ensure(launcher.Calls == 1 && exits == 1 && model.UninstallStatusText.Contains("kept unless you type DELETE", StringComparison.Ordinal) &&
+               model.UninstallStatusText.Contains("Desktop closes", StringComparison.Ordinal),
+            "Uninstall SentinelAI did not open the existing Setup uninstall flow and close Desktop, which Setup requires.");
         launcher.Next = UninstallLaunchOutcome.Cancelled;
         model.StartUninstall();
-        Ensure(model.UninstallStatusText == "Uninstall was not started.", "A cancelled elevation prompt was misreported.");
+        Ensure(model.UninstallStatusText == "Uninstall was not started." && exits == 1, "A cancelled elevation prompt was misreported or closed Desktop.");
         launcher.Throw = true;
         model.StartUninstall();
-        Ensure(model.UninstallStatusText.Contains("Windows Settings", StringComparison.Ordinal), "A missing Setup did not point to Windows Settings.");
+        Ensure(model.UninstallStatusText.Contains("Windows Settings", StringComparison.Ordinal) && exits == 1,
+            "A missing Setup did not point to Windows Settings, or closed Desktop.");
         model.HideNotice();
         await model.RefreshAsync();
         Ensure(!model.IsNoticeVisible && model.StatusText.Contains("has ended", StringComparison.Ordinal),

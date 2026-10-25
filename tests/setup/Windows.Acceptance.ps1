@@ -848,7 +848,12 @@ try {
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $dataRoot) -and
         $null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Invalid administrator input created installation files or services.'
     if ($null -ne $pilotLicenseKey) {
-        # MVP-3: the key is verified offline before anything is installed; a tampered key is refused.
+        # MVP-3: the key is checked first and offline. With the issued key Setup moves on to the (empty) credentials;
+        # a tampered key then turns that message back into the pilot key refusal, and nothing is installed.
+        Assert-SetupAcceptance ((Find-SetupControl 'SetupErrorText').Current.Name.Contains('SETUP-PILOT-KEY')) 'Setup did not ask for the pilot license key first.'
+        Set-SetupPilotLicenseKey $pilotLicenseKey
+        ([Windows.Automation.InvokePattern](Find-SetupControl 'SetupInstallButton').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)).Invoke()
+        Wait-SetupAcceptance { (Find-SetupControl 'SetupErrorText').Current.Name.Contains('valid username') } 'Setup refused the issued pilot license key.'
         $parts = $pilotLicenseKey.Split('.')
         $tampered = $parts[0] + '.' + $(if ($parts[1][0] -ceq 'A') { 'B' } else { 'A' }) + $parts[1].Substring(1) + '.' + $parts[2]
         Set-SetupPilotLicenseKey $tampered

@@ -168,13 +168,14 @@ public sealed class SetupWindow : Window
             var worker = new PowerShellSetupWorker(_work, _installation.Metadata, progress);
             var issuer = new SetupEnrollmentIssuer(core);
             var localNetwork = localNetworkAccess ? new WindowsLocalNetworkCertificate() : null;
-            await SetupWorkflow.InstallAsync(worker, administrator, issuer, localNetwork, username, password, progress, _lifetime.Token,
+            var pilotStored = await SetupWorkflow.InstallAsync(worker, administrator, issuer, localNetwork, username, password, progress, _lifetime.Token,
                 pilotKey is null ? null : issuer, pilotKey);
             _progress.Text = "Installation finished.";
             Application.Current.Properties["ExitCode"] = 0;
             _finished.Text = localNetworkAccess
                 ? "SentinelAI installation completed. Open Desktop and sign in with the administrator account you created. Settings shows the local-network addresses, port and certificate fingerprint for Agents."
                 : "SentinelAI installation completed. Open Desktop and sign in with the administrator account you created.";
+            if (!pilotStored) _finished.Text += " Core could not store the pilot license key: enter it again in Desktop → Settings → Pilot license.";
             _finished.Visibility = Visibility.Visible; _open.Visibility = Visibility.Visible;
             BringResultIntoView(_finished);
         }

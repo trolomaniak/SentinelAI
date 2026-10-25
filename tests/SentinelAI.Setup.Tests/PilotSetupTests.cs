@@ -55,9 +55,9 @@ internal static class PilotSetupTests
         var key = Issue(signer, "dev-pilot", now, now.AddDays(30));
         var sequence = new List<string>();
         var client = new FakePilotClient(sequence);
-        await SetupWorkflow.InstallAsync(new FakeWorker(sequence), new FakeAdministrator(sequence), new FakeIssuer(sequence), null,
+        var stored = await SetupWorkflow.InstallAsync(new FakeWorker(sequence), new FakeAdministrator(sequence), new FakeIssuer(sequence), null,
             " operator ", Password.AsMemory(), new SilentProgress(), CancellationToken.None, client, key);
-        Ensure(sequence.SequenceEqual(new[] { "prepare", "state", "initialize:operator", "start", "pilot:operator", "issue:operator", "complete" }) && client.Key == key,
+        Ensure(stored && sequence.SequenceEqual(new[] { "prepare", "state", "initialize:operator", "start", "pilot:operator", "issue:operator", "complete" }) && client.Key == key,
             "the pilot key is applied once Core runs and before the Agent enrolls");
         sequence.Clear();
         await SetupWorkflow.InstallAsync(new FakeWorker(sequence), new FakeAdministrator(sequence), new FakeIssuer(sequence), null,
@@ -70,10 +70,24 @@ internal static class PilotSetupTests
                 "operator", Password.AsMemory(), new SilentProgress(), CancellationToken.None, pilotClient, pilotKey), reason);
             Ensure(sequence.Count == 0, "an unusable pilot key stops Setup before any change: " + reason);
         }
+        // Licensing never stops protection: if Core does not store the key, the installation still completes.
         sequence.Clear();
-        await Reject(() => SetupWorkflow.InstallAsync(new FakeWorker(sequence), new FakeAdministrator(sequence), new FakeIssuer(sequence), null,
-            "operator", Password.AsMemory(), new SilentProgress(), CancellationToken.None, new FakePilotClient(sequence) { Fail = true }, key), "Core refusal");
-        Ensure(!sequence.Contains("complete") && !sequence.Any(step => step.StartsWith("issue:", StringComparison.Ordinal)), "a refused pilot key does not complete installation");
+        stored = await SetupWorkflow.InstallAsync(new FakeWorker(sequence), new FakeAdministrator(sequence), new FakeIssuer(sequence), null,
+            "operator", Password.AsMemory(), new SilentProgress(), CancellationToken.None, new FakePilotClient(sequence) { Fail = true }, key);
+        Ensure(!stored && sequence.SequenceEqual(new[] { "prepare", "state", "initialize:operator", "start", "pilot:operator", "issue:operator", "complete" }),
+            "a pilot key Core did not store stopped the Agent or Desktop installation");
+        using (var canceled = new CancellationTokenSource())
+        {
+            sequence.Clear();
+            var cancelling = new FakePilotClient(sequence) { OnApply = canceled.Cancel };
+            try
+            {
+                await SetupWorkflow.InstallAsync(new FakeWorker(sequence), new FakeAdministrator(sequence), new FakeIssuer(sequence), null,
+                    "operator", Password.AsMemory(), new SilentProgress(), canceled.Token, cancelling, key);
+                Ensure(false, "a canceled installation completed");
+            }
+            catch (OperationCanceledException) { Ensure(!sequence.Contains("complete"), "cancellation during the pilot key stops installation"); }
+        }
 
         // The real client: one login, then one POST with only the key, over a trusted loopback Core.
         var handler = new PilotHandler();
@@ -103,10 +117,12 @@ internal static class PilotSetupTests
     private sealed class FakePilotClient(List<string> sequence) : ISetupPilotLicenseClient
     {
         public bool Fail { get; init; }
+        public Action? OnApply { get; init; }
         public string? Key { get; private set; }
         public Task ApplyAsync(string username, ReadOnlyMemory<char> password, string key, CancellationToken token)
         {
-            token.ThrowIfCancellationRequested(); sequence.Add("pilot:" + username); Key = key;
+            token.ThrowIfCancellationRequested(); sequence.Add("pilot:" + username); Key = key; OnApply?.Invoke();
+            if (OnApply is not null) return Task.FromException(new OperationCanceledException(token));
             return Fail ? Task.FromException(new InvalidDataException("Synthetic refusal.")) : Task.CompletedTask;
         }
     }

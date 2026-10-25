@@ -73,9 +73,11 @@ internal static partial class Program
             Ensure(notice.IsVisible && uninstall.IsVisible && uninstall.IsEnabled, "The ended notice or its uninstall action was not shown.");
             PilotText(notice, "PilotNoticeTitle", "Your SentinelAI pilot has ended");
             Ensure(launcher.Calls == 0, "Showing the ended notice started the uninstall flow.");
+            var exits = 0;
+            pilot.ExitRequested += (_, _) => exits++;
             uninstall.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await FlushAsync();
-            Ensure(launcher.Calls == 1, "Uninstall SentinelAI did not start the Setup uninstall flow.");
+            Ensure(launcher.Calls == 1 && exits == 1, "Uninstall SentinelAI did not start the Setup uninstall flow and ask Desktop to close.");
             PilotText(notice, "UninstallSentinelAiStatus", pilot.UninstallStatusText);
 
             PilotButton(notice, "HidePilotNoticeButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

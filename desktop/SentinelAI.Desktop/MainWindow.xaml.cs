@@ -12,6 +12,8 @@ public partial class MainWindow : Window
     private readonly ShellViewModel _viewModel;
     private readonly AuthenticationViewModel? _authentication;
     private readonly DispatcherTimer? _sessionTimer;
+    // The pilot can end while Desktop stays open on one page.
+    private readonly DispatcherTimer _pilotTimer = new() { Interval = TimeSpan.FromHours(1) };
     public DevicesViewModel? Devices { get; }
     public AlertsViewModel? Alerts { get; }
     public RiskViewModel? Risk { get; }
@@ -81,7 +83,11 @@ public partial class MainWindow : Window
         if (aiExplanation is not null) aiExplanation.SessionExpired += OnWorkspaceSessionExpired;
         if (localNetwork is not null) localNetwork.SessionExpired += OnWorkspaceSessionExpired;
         if (computerEnrollment is not null) computerEnrollment.SessionExpired += OnWorkspaceSessionExpired;
-        if (pilot is not null) pilot.SessionExpired += OnWorkspaceSessionExpired;
+        if (pilot is not null)
+        {
+            pilot.SessionExpired += OnWorkspaceSessionExpired;
+            _pilotTimer.Tick += OnPilotTick;
+        }
         if (alerts is not null) alerts.PropertyChanged += OnAlertsChanged;
         AuthenticationPanel.DataContext = authentication;
         DataContext = viewModel;
@@ -101,6 +107,7 @@ public partial class MainWindow : Window
     {
         // Core availability never delays the native window opening.
         await _viewModel.InitializeAsync();
+        if (!_closed && Pilot is not null) _pilotTimer.Start();
         if (!_closed && _authentication is not null)
         {
             await _authentication.InitializeAsync();
@@ -204,6 +211,11 @@ public partial class MainWindow : Window
         else Dispatcher.InvokeAsync(Apply);
     }
 
+    private void OnPilotTick(object? sender, EventArgs e)
+    {
+        if (!_closed && _workspaceAuthorized && Pilot is not null) _ = Pilot.RefreshAsync();
+    }
+
     private void OnHidePilotNotice(object sender, RoutedEventArgs e) => Pilot?.HideNotice();
 
     private void OnUninstallSentinelAi(object sender, RoutedEventArgs e) => Pilot?.StartUninstall();
@@ -244,6 +256,8 @@ public partial class MainWindow : Window
         if (AiExplanation is not null) { AiExplanation.SessionExpired -= OnWorkspaceSessionExpired; AiExplanation.Dispose(); }
         if (LocalNetwork is not null) { LocalNetwork.SessionExpired -= OnWorkspaceSessionExpired; LocalNetwork.Dispose(); }
         if (ComputerEnrollment is not null) { ComputerEnrollment.SessionExpired -= OnWorkspaceSessionExpired; ComputerEnrollment.Dispose(); }
+        _pilotTimer.Stop();
+        _pilotTimer.Tick -= OnPilotTick;
         if (Pilot is not null) { Pilot.SessionExpired -= OnWorkspaceSessionExpired; Pilot.Dispose(); }
         _sessionTimer?.Stop();
         if (_sessionTimer is not null) _sessionTimer.Tick -= OnSessionTick;

@@ -60,6 +60,8 @@ public partial class App : Application
             _localNetwork = new LocalNetworkViewModel((ILocalNetworkClient)authenticationClient);
             _computerEnrollment = new ComputerEnrollmentViewModel((IComputerEnrollmentClient)authenticationClient);
             _pilot = new PilotLicenseViewModel((IPilotLicenseClient)authenticationClient, new WindowsSetupUninstallLauncher());
+            // Setup refuses to uninstall while Desktop runs; monitoring continues in the services meanwhile.
+            _pilot.ExitRequested += (_, _) => Dispatcher.BeginInvoke(() => Shutdown());
             _aiExplanation = new AiExplanationViewModel((IAiExplanationClient)authenticationClient);
             var assembly = typeof(App).Assembly;
             var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()

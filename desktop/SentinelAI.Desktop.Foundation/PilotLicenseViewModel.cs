@@ -36,6 +36,8 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event EventHandler? SessionExpired;
+    /// <summary>Setup's uninstall refuses to run beside Desktop, so Desktop exits once Setup has started.</summary>
+    public event EventHandler? ExitRequested;
     public PilotLicenseState State { get { lock (_gate) return _state; } }
     public PilotLicenseInfo? Info { get { lock (_gate) return _info; } }
     public string ErrorText { get { lock (_gate) return _errorText; } }
@@ -167,12 +169,13 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
             if (_disposed) return;
             _uninstallStatusText = outcome switch
             {
-                UninstallLaunchOutcome.Started => "SentinelAI Setup opened with Uninstall selected. Your data is kept unless you type DELETE there.",
+                UninstallLaunchOutcome.Started => "SentinelAI Setup opened with Uninstall selected, and Desktop closes so it can continue. Your data is kept unless you type DELETE there.",
                 UninstallLaunchOutcome.Cancelled => "Uninstall was not started.",
                 _ => "SentinelAI Setup could not be started. Uninstall SentinelAI from Windows Settings → Apps instead."
             };
         }
         Notify(nameof(UninstallStatusText));
+        if (outcome == UninstallLaunchOutcome.Started) ExitRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private Task Begin(string? key)
@@ -265,8 +268,9 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
 
     private void SetFailureLocked(PilotLicenseOutcome outcome, bool submitted)
     {
-        // Whether a submitted key was stored is unknown; only a fresh read is authoritative.
-        _info = null;
+        // Whether a submitted key was stored is unknown; only a fresh read is authoritative. A failed read keeps the last
+        // state Core reported, so the ended notice stays while Core restarts or is busy.
+        if (submitted) _info = null;
         _state = PilotLicenseState.Unavailable;
         _errorText = outcome switch
         {

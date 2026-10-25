@@ -84,6 +84,16 @@ function New-SetupPilotLicense {
     [IO.File]::WriteAllText((Join-Path $Destination 'contact.json'), ($contact | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
 }
 
+function Test-SetupPilotPublicKey {
+    param([string]$Name, [string]$Path)
+    # MVP-3: the only key files a payload may carry are pilot public keys at their fixed places, one public PEM each.
+    if ($Name -cnotmatch '\A(Core|setup)/pilot-license/trust/[A-Za-z0-9_-]{1,64}\.pem\z') { return $false }
+    $length = (Get-Item -LiteralPath $Path).Length
+    if ($length -le 0 -or $length -gt 4096) { return $false }
+    $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Path))
+    return -not $text.Contains('PRIVATE') -and ([regex]::Matches($text, '-----BEGIN ')).Count -eq 1 -and $text.Contains('-----BEGIN PUBLIC KEY-----')
+}
+
 function New-SetupPayload {
     param([string]$Source, [string]$Destination,
           [ValidateRange(1, 4096)][int]$MaximumEntries = 4096,
@@ -102,8 +112,8 @@ function New-SetupPayload {
             $attributes = [IO.File]::GetAttributes($path)
             if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Payload links are not allowed.' }
             if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) { $paths.Push($path); continue }
-            if ([IO.Path]::GetExtension($path) -in @('.pem', '.key')) { throw 'Payload key files are not allowed.' }
             $name = $path.Substring($Source.Length + 1).Replace('\', '/')
+            if ([IO.Path]::GetExtension($path) -in @('.pem', '.key') -and -not (Test-SetupPilotPublicKey -Name $name -Path $path)) { throw 'Payload key files are not allowed.' }
             Assert-SetupRelativePath -Path $name
             if ($files.ContainsKey($name) -or $files.Count -ge $MaximumEntries) { throw 'Payload entry bounds exceeded.' }
             $files.Add($name, $path)
