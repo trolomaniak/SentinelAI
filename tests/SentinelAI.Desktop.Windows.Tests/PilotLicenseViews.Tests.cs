@@ -83,8 +83,8 @@ internal static partial class Program
             PilotButton(notice, "HidePilotNoticeButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await FlushAsync();
             Ensure(!notice.IsVisible, "The ended notice could not be hidden.");
-            shell.CurrentPage = shell.Pages.Single(page => page.Id == PageId.Settings);
             var reads = pilotClient.Reads;
+            shell.CurrentPage = shell.Pages.Single(page => page.Id == PageId.Settings);
             await WaitForAsync(() => pilotClient.Reads > reads && pilot.State == PilotLicenseState.Ready, "Settings did not reread the ended pilot.");
             await FlushAsync();
             Ensure(!notice.IsVisible && pilot.StatusText.Contains("has ended", StringComparison.Ordinal),
