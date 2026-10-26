@@ -15,7 +15,7 @@
 
 | Lokalizacja | Zawartość |
 | --- | --- |
-| `%ProgramFiles%\SentinelAI\{Core,Agent,Desktop,Updater}` | Kod programu instalacji centralnej, zapisywalny dla Administratorów, SYSTEM i konta Windows, które zainstalowało SentinelAI albo ostatnio je naprawiło lub zaktualizowało (zob. punkt 10). `Core\pilot-license` zawiera klucze publiczne pilotażu i dane kontaktowe. |
+| `%ProgramFiles%\SentinelAI\{Core,Agent,Desktop,Updater}` | Kod programu instalacji centralnej, zapisywalny tylko dla Administratorów i SYSTEM (zob. punkt 10). `Core\pilot-license` zawiera klucze publiczne pilotażu i dane kontaktowe. |
 | `%ProgramData%\SentinelAI\Core` | Baza SQLite Core `sentinelai.db`, konfiguracja i potwierdzenia własności. Baza zawiera konto administratora (skrót hasła), urządzenia, alerty i klucz pilotażowy. |
 | `%ProgramData%\SentinelAI\Agent` | Agent komputera centralnego: stan rejestracji i jego dane uwierzytelniające, chronione przez DPAPI konta LocalService. |
 | `%ProgramData%\SentinelAI\Setup` | Przypięty publiczny klucz zaufania instalatora i potwierdzenie własności. Bez haseł i tokenów. |
@@ -151,7 +151,7 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
   3. **Keep security history and protected configuration** jest domyślnie zaznaczone. Dezinstalacja usuwa wtedy usługi, regułę zapory, pliki programu i skrót, a zachowuje bazę, konfigurację i certyfikat Core. Późniejszy instalator z tej samej linii wydań przywraca instalację z tą samą tożsamością, a dotychczasowi Agenci znowu jej ufają.
   4. Aby usunąć także dane, odznacz to pole i wpisz **DELETE**. Usuwa to również certyfikat i klucz Core; dotychczasowi Agenci nie połączą się już nigdy.
 
-  Konserwację wykonuj tym samym kontem administratora Windows, którym zainstalowano SentinelAI: uprawnienia folderów instalacji centralnej obejmują to konto. Przycisk **Uninstall SentinelAI** w Desktopie, widoczny po zakończeniu pilotażu, otwiera ten sam proces w instalatorze i zamyka Desktop.
+  Konserwację może wykonać dowolne konto administratora Windows, nie tylko to, którym zainstalowano SentinelAI. Przycisk **Uninstall SentinelAI** w Desktopie, widoczny po zakończeniu pilotażu, otwiera ten sam proces w instalatorze i zamyka Desktop.
 
 ## 7. Klucz pilotażowy i jego wygaśnięcie
 
@@ -167,6 +167,7 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
 - Aby **zaktualizować**, zamknij Desktop, uruchom nowszy instalator na komputerze centralnym i wybierz **Upgrade**. Instalator weryfikuje podpisaną paczkę, wymienia razem Core, Agenta komputera centralnego, Desktop i Updater, a jeśli nowa wersja nie uruchomi się poprawnie, automatycznie przywraca poprzednią. Dane, konto administratora, rejestracje, klucz pilotażowy i certyfikat Core zostają zachowane.
 - Aby **naprawić**, uruchom instalator tej samej wersji i wybierz **Repair**. Odtwarza to także regułę zapory, jeśli została usunięta lub zmieniona.
 - Starszy instalator pozwala tylko odinstalować; nie obniża wersji.
+- Instalacja wykonana wcześniejszym instalatorem dawała też kontu Windows, które ją zainstalowało, pełną kontrolę nad folderami Core. Pierwsza aktualizacja, naprawa lub dezinstalacja, uruchomiona przez dowolnego administratora, usuwa ten dostęp.
 - **Agentów na pozostałych komputerach** nie można w pilotażu zaktualizować w miejscu: instalator Agenta odrzuca komputer, na którym Agent już jest (kod wyjścia 7). Aby zainstalować nowszego Agenta:
   1. Odinstaluj starego Agenta.
   2. Zainstaluj nowy instalator Agenta z nowym kodem. Komputer pojawi się wtedy jako nowe urządzenie.
@@ -215,7 +216,7 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
 - **Najmniejsze uprawnienia.**
   - Agent działa jako LocalService i tylko odczytuje dane; zapisuje wyłącznie własny stan i nigdy nie zmienia ustawień Windows ani Waszych plików.
   - Core działa na własnym wirtualnym koncie usługi.
-  - Foldery programu są zapisywalne tylko dla Administratorów i SYSTEM, z jednym wyjątkiem na komputerze centralnym: foldery programu i danych Core dają też pełną kontrolę kontu Windows, które zainstalowało (albo ostatnio naprawiło lub zaktualizowało) SentinelAI, nawet gdy to konto uruchamia programy bez podniesienia uprawnień. Do instalacji i konserwacji używaj osobnego konta administratora.
+  - Foldery programu i danych są zapisywalne tylko dla Administratorów i SYSTEM, a dla każdej usługi tylko tam, gdzie zapisuje własny stan. Żaden folder nie daje osobnego dostępu kontu Windows, które zainstalowało SentinelAI, więc programy tego konta uruchomione bez podniesienia uprawnień nie mogą zmienić tego, co uruchamia Core lub Agent, a instalację może konserwować dowolny administrator.
 - **Podpisane paczki.** Instalator weryfikuje podpis i skrót każdej paczki kluczem publicznym wbudowanym w instalator i wymienia kod programu transakcyjnie, z automatycznym wycofaniem zmian.
 - **Dostęp administracyjny.** Desktop wymaga konta administratora SentinelAI utworzonego podczas instalacji.
 - **Minimum danych.**

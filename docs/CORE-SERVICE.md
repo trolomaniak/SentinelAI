@@ -34,7 +34,7 @@ The fixed account is the virtual account `NT SERVICE\SentinelAICore`, not an adm
 | `pilot-config.json` and ownership receipts | Read only, protected ACLs | Nonsecret configuration and installer ownership |
 | Agent code/data | No new grant | Existing LocalService/DPAPI enrollment boundary |
 
-Configuration and receipts keep administrator/System ownership and protected ACLs. The service cannot rewrite or replace them. Service write trust applies only within the explicit Core data directory; code and unrelated ancestors retain installer-only write access. Code and data paths remain separate. Back up the existing data before operational changes; uninstall preserves it.
+Configuration and receipts keep administrator/System ownership and protected ACLs. The service cannot rewrite or replace them. While the service is registered, no entry names a Windows account: Administrators and SYSTEM have full control, so the non-elevated programs of the account that ran the installer cannot change what runs as the service. Removal returns the files to the console layout, which again grants the operator running the console pilot. Service write trust applies only within the explicit Core data directory; code and unrelated ancestors retain installer-only write access. Code and data paths remain separate. Back up the existing data before operational changes; uninstall preserves it.
 
 ## Startup, stop and recovery
 

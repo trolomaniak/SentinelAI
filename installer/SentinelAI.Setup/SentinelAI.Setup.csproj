@@ -13,11 +13,13 @@
     <Product>SentinelAI</Product>
     <Description>SentinelAI Windows deployment setup and maintenance</Description>
     <PublishTrimmed>false</PublishTrimmed>
+    <!-- The linked installation check trusts no Windows account in Setup (WindowsInstallationTrust). -->
+    <DefineConstants>$(DefineConstants);SENTINELAI_SETUP</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../SentinelAI.Setup.Foundation/SentinelAI.Setup.Foundation.csproj" />
     <ProjectReference Include="../../shared/updates/SentinelAI.Updates.csproj" />
-    <!-- Compile the existing authoritative trust/bootstrap implementation unchanged. -->
+    <!-- Compile the existing authoritative trust/bootstrap implementation; only SENTINELAI_SETUP differs. -->
     <Compile Include="../../desktop/SentinelAI.Desktop/Services/WindowsCoreServices.cs" Link="ExistingCore/WindowsCoreServices.cs" />
     <Compile Include="../../desktop/SentinelAI.Desktop/Services/WindowsInstallationTrust.cs" Link="ExistingCore/WindowsInstallationTrust.cs" />
     <Compile Include="../../desktop/SentinelAI.Desktop/Services/WindowsNativeCore.cs" Link="ExistingCore/WindowsNativeCore.cs" />

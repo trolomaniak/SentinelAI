@@ -58,7 +58,6 @@ function New-Fixture {
             return [IO.Path]::GetFullPath($Path)
         }
         function script:Assert-PilotTrustedPath { $script:TestState.Events.Add('trusted-path') }
-        function script:Get-PilotCurrentOperatorSid { 'S-1-5-21-100-200-300-1001' }
         function script:Set-PilotFileAcl { $script:TestState.Events.Add('protected-file') }
         function script:Set-CoreServiceAcl { param($Path,$Kind); $script:TestState.Events.Add('acl-' + $Kind) }
         function script:Set-PilotDirectoryAcl { param($Path,$Kind); $script:TestState.Events.Add('restore-' + $Kind) }

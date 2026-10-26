@@ -147,6 +147,49 @@ function Set-SetupLifecycleFirewallRule {
     } else { Remove-CoreServiceFirewallRule }
 }
 
+# Central installations made before Setup became administrators-only granted the Windows account that
+# installed (or last repaired or upgraded) them full control of Core's folders and the shared roots, which
+# its non-elevated programs could use too. Their shared data root names exactly that one account besides
+# Administrators, SYSTEM and LocalService: full control, inherited by every child.
+function Get-SetupLifecycleLegacyOperatorSid {
+    param($Locations)
+    if (-not (Test-Path -LiteralPath $Locations.DataRoot -PathType Container)) { return $null }
+    # An unreadable root is no recognized earlier installation: the ownership checks then refuse it.
+    try { $acl = Get-PilotAcl -Path $Locations.DataRoot -Container $true } catch { return $null }
+    $accounts = @()
+    foreach ($rule in $acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier])) {
+        if ($rule.IdentityReference.Value -cnotin @('S-1-5-32-544','S-1-5-18','S-1-5-19')) { $accounts += $rule }
+    }
+    if ($accounts.Count -ne 1 -or $accounts[0].AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+        $accounts[0].FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or
+        $accounts[0].InheritanceFlags -ne [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit' -or
+        $accounts[0].PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None -or
+        $accounts[0].IdentityReference.Value -cnotmatch '\AS-1-(?:5-21|12-1)-\d+-\d+-\d+-\d+\z') { return $null }
+    return $accounts[0].IdentityReference.Value
+}
+
+# Removes that account from every owned tree. The shared data root identifies it, so it changes last:
+# an interrupted removal is found and resumed by the next maintenance.
+function Remove-SetupLifecycleLegacyAccess {
+    param($Locations, [string]$Sid)
+    foreach ($root in @($Locations.CodeRoot, $Locations.Menu, $Locations.InstallerCode, $Locations.CoreData, $Locations.AgentData, $Locations.SetupData)) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        # Listed before any change; a link stops the removal before anything below it is touched.
+        $entries = @($root) + @(Get-ChildItem -LiteralPath $root -Recurse -Force | ForEach-Object { $_.FullName })
+        foreach ($entry in $entries) {
+            try { Remove-PilotAccountAccess -Path $entry -Sid $Sid }
+            catch {
+                # Running services remove transient files (Core's SQLite journal, the Agent's checkpoint
+                # temporaries); only such a listed entry that no longer exists is skipped.
+                $failure = $_.Exception.GetBaseException()
+                if ($entry -cne $root -and ($failure -is [IO.FileNotFoundException] -or $failure -is [IO.DirectoryNotFoundException])) { continue }
+                throw
+            }
+        }
+    }
+    Remove-PilotAccountAccess -Path $Locations.DataRoot -Sid $Sid
+}
+
 function Get-SetupLifecycleJournal {
     param($Locations)
     return Join-Path ([IO.Path]::GetDirectoryName($Locations.CodeRoot)) '.SentinelAI.sentinelai-update.json'
@@ -392,10 +435,20 @@ function Invoke-SetupLifecycleWorker {
     Assert-PilotTrustedPath -Path $Request.workDirectory -Tree
     $locations = Get-SetupLocations
     Write-SetupProgress 'inspect'
+    # Any administrator maintains an earlier installation: its installing account is accepted as before,
+    # and only until the first change removes it (Get-SetupLifecycleLegacyOperatorSid).
+    $legacy = Get-SetupLifecycleLegacyOperatorSid $locations
+    if ($null -ne $legacy) { Set-PilotLegacyOperatorSid -Sid $legacy }
     if ($Request.action -ceq 'inspect') {
         $state = Inspect-SetupLifecycleInstallation $locations
         Write-Output ('STATE|' + $state.Kind + '|' + $state.Version)
     } else {
+        if ($null -ne $legacy) {
+            # Only an installation proven owned is changed. Afterwards no check accepts that account.
+            [void](Assert-SetupLifecycleOwnership $locations -UseContext)
+            Remove-SetupLifecycleLegacyAccess $locations $legacy
+            Set-PilotLegacyOperatorSid -Sid $null
+        }
         # Every operation below validates ownership at its own boundary. Avoid
         # a duplicate whole-deployment scan inside the bounded health/recovery call.
         switch -CaseSensitive ($Request.action) {

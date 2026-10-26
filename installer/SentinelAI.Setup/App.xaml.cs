@@ -12,6 +12,8 @@ public partial class App : Application
     {
         base.OnStartup(e);
         ChildProcessEnvironment.SanitizeParent();
+        // Before anything is created: what Setup installs is owned by Administrators, never by an account.
+        AdministratorsDefaultOwner.Apply();
         // Only the native wrapper starts this host, with its canonical, allow-listed options.
         if (!SetupArguments.TryParse(e.Args, out var arguments)) { Finish(AgentSetupExitCode.InvalidArguments); return; }
         _image = new SafeFileHandle((IntPtr)arguments!.ImageHandle, ownsHandle: true);

@@ -598,6 +598,20 @@ function Assert-PoisonedCallerUntouched {
             [IO.File]::ReadAllText($sentinel) -ceq 'Synthetic caller-controlled runtime sentinel.') 'Setup changed caller-controlled runtime sentinels.'
     }
 }
+# Administrators only: no owner or access entry, explicit or inherited, names a local, domain or Microsoft
+# Entra account (the installing operator included), so no non-elevated program can change the installation
+# and any administrator can maintain it.
+function Assert-NoAccountAccess([string]$Root) {
+    if (-not (Test-Path -LiteralPath $Root)) { return }
+    $account = '\AS-1-(?:5-21|12-1)-'
+    foreach ($item in @((Get-Item -LiteralPath $Root -Force)) + @(Get-ChildItem -LiteralPath $Root -Recurse -Force)) {
+        # Running services replace transient files, which can vanish between enumeration and inspection.
+        try { $acl = Get-Acl -LiteralPath $item.FullName } catch { if (Test-Path -LiteralPath $item.FullName) { throw }; continue }
+        Assert-SetupAcceptance ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cnotmatch $account) 'A Windows account owns an installed path.'
+        Assert-SetupAcceptance (@($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+            Where-Object { $_.IdentityReference.Value -cmatch $account }).Count -eq 0) 'An installed path has an access entry for a Windows account.'
+    }
+}
 function Assert-ServiceAcl([string]$Path, [string]$Sid, [int]$Required, [int]$Forbidden) {
     $rights = Get-EffectiveAllowRights $Path $Sid
     Assert-SetupAcceptance (($rights -band $Required) -eq $Required -and ($rights -band $Forbidden) -eq 0) 'A service ACL does not preserve its required limited rights.'
@@ -913,13 +927,17 @@ try {
         (Join-Path $setupData 'public-key.pem'), (Join-Path $setupData 'setup-installation.json'), $shortcutPath)) {
         Assert-SetupAcceptance (Test-Path -LiteralPath $path -PathType Leaf) 'A required component, configuration, ownership receipt, state or Start Menu shortcut was not installed.'
     }
-    $writers = @('S-1-5-32-544', 'S-1-5-18', $operatorSid)
+    # Not the installing operator: Core's code and data are writable only by Administrators and SYSTEM.
+    $writers = @('S-1-5-32-544', 'S-1-5-18')
     Assert-ProtectedTree $programRoot $writers
     Assert-ProtectedTree $dataRoot ($writers + @($coreSid, $localServiceSid))
     Assert-ProtectedTree $coreData ($writers + @($coreSid))
     Assert-ProtectedTree $agentData ($writers + @($localServiceSid))
     Assert-ProtectedTree $setupData $writers
     Assert-ProtectedTree $shortcutRoot $writers
+    $installedSetupRoot = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'SentinelAI Setup'
+    Assert-ProtectedTree $installedSetupRoot $writers
+    foreach ($root in @($programRoot, $dataRoot, $shortcutRoot, $installedSetupRoot)) { Assert-NoAccountAccess $root }
     $readExecute = [int][Security.AccessControl.FileSystemRights]::ReadAndExecute
     $read = [int][Security.AccessControl.FileSystemRights]::Read
     $modify = [int][Security.AccessControl.FileSystemRights]::Modify

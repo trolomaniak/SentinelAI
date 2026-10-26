@@ -228,4 +228,50 @@ try {
     Assert-SetupTest ($null -eq $request.enrollmentToken) 'failure releases token'
 } finally { [IO.Directory]::Delete($fixture, $true); $syntheticToken = $null }
 
+# Setup imports the authenticated modules administrators-only, exactly as its worker does: no ACL kind or
+# check names a Windows account, so any administrator maintains the installation. The console pilot (the
+# module default) still grants its installing operator, whose non-elevated console process runs Core.
+$operator = 'S-1-5-21-1000-1000-1000-1001'; $legacy = 'S-1-5-21-2000-2000-2000-1002'
+$builtIn = @('S-1-5-32-544', 'S-1-5-18', 'S-1-5-80-1772522954-4099193962-4247269631-2556497313-4219375900')
+function Get-SetupTestAclSids($CoreModule, [string]$Kind) {
+    return @(& $CoreModule { param($Kind) Get-CoreServiceAclRules -Kind $Kind -Directory:($Kind -in 'Code','DataDirectory') } $Kind | ForEach-Object { $_.Sid })
+}
+$bootstrap = Join-Path ([IO.Path]::GetTempPath()) ('sentinelai-setup-modules-' + [Guid]::NewGuid().ToString('N'))
+try {
+    foreach ($pair in @(@('bundle\installer\PilotInstaller.psm1', 'installer/pilot/PilotInstaller.psm1'),
+        @('bundle\installer\CoreServiceInstaller.psm1', 'installer/pilot/CoreServiceInstaller.psm1'), @('setup\SetupLifecycle.ps1', 'installer/setup/SetupLifecycle.ps1'))) {
+        # Windows resolves the worker's '\' separators to folders; elsewhere they stay part of one file name.
+        $target = Join-Path $bootstrap $pair[0]
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+        [IO.File]::Copy((Join-Path $repo $pair[1]), $target)
+    }
+    Import-SetupInstallerModules -WorkDirectory $bootstrap
+    $setupPilot = Get-Module SentinelAISetupPilot; $setupCore = Get-Module SentinelAISetupCore
+    & $setupPilot { param($Sid) $script:TestOperatorSid = $Sid; function script:Get-PilotCurrentOperatorSid { $script:TestOperatorSid } } $operator
+    Assert-SetupTest (-not (& $setupPilot { $script:OperatorAccess })) 'Setup loads the pilot module administrators-only'
+    Assert-SetupTest (@(& $setupPilot { Get-PilotTrustedAccountSids }).Count -eq 0 -and @(& $setupPilot { Get-PilotOperatorAccessSid }).Count -eq 0) 'Setup trusts and grants no Windows account'
+    foreach ($kind in @('Code', 'DataDirectory', 'DataFile', 'ProtectedFile', 'RetainedFile')) {
+        Assert-SetupTest (@(Get-SetupTestAclSids $setupCore $kind | Where-Object { $_ -cnotin $builtIn }).Count -eq 0) ('Setup Core ACL names a Windows account: ' + $kind)
+    }
+    & $setupPilot { param($Sid) Set-PilotLegacyOperatorSid -Sid $Sid } $legacy
+    Assert-SetupTest ((@(& $setupPilot { Get-PilotTrustedAccountSids }) -join ',') -ceq $legacy) 'Setup maintenance accepts the legacy installing account'
+    & $setupPilot { Set-PilotLegacyOperatorSid -Sid $null }
+    Assert-SetupTest (@(& $setupPilot { Get-PilotTrustedAccountSids }).Count -eq 0) 'Setup maintenance clears the legacy installing account'
+} finally {
+    Remove-Module SentinelAISetupCore, SentinelAISetupPilot -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $bootstrap) { Remove-Item -LiteralPath $bootstrap -Recurse -Force }
+}
+$consolePilot = New-Module -Name SetupConsolePilot -ScriptBlock ([ScriptBlock]::Create([IO.File]::ReadAllText((Join-Path $repo 'installer/pilot/PilotInstaller.psm1'))))
+$consoleCore = New-Module -Name SetupConsoleCore -ArgumentList @($consolePilot) -ScriptBlock ([ScriptBlock]::Create([IO.File]::ReadAllText((Join-Path $repo 'installer/pilot/CoreServiceInstaller.psm1'))))
+try {
+    & $consolePilot { param($Sid) $script:TestOperatorSid = $Sid; function script:Get-PilotCurrentOperatorSid { $script:TestOperatorSid } } $operator
+    Assert-SetupTest ((& $consolePilot { $script:OperatorAccess }) -and (@(& $consolePilot { Get-PilotTrustedAccountSids }) -join ',') -ceq $operator) 'the console pilot trusts its installing operator'
+    Reject-SetupTest { & $consolePilot { param($Sid) Set-PilotLegacyOperatorSid -Sid $Sid } $legacy } 'the console pilot accepts no legacy account'
+    # The service-managed Core names no account even in the console pilot; files restored to the console return to its operator.
+    foreach ($kind in @('Code', 'DataDirectory', 'DataFile', 'ProtectedFile')) {
+        Assert-SetupTest (@(Get-SetupTestAclSids $consoleCore $kind | Where-Object { $_ -cnotin $builtIn }).Count -eq 0) ('service-managed Core ACL names a Windows account: ' + $kind)
+    }
+    Assert-SetupTest ((@(Get-SetupTestAclSids $consoleCore 'RetainedFile') -join ',') -ceq ('S-1-5-32-544,S-1-5-18,' + $operator)) 'console-restored Core files return to the operator'
+} finally { Remove-Module $consoleCore, $consolePilot -ErrorAction SilentlyContinue }
+
 Write-Output ('Setup worker assertions passed: ' + $script:checks)

@@ -101,6 +101,28 @@ function Register-PilotService { param($ExecutablePath,$ConfigurationPath); $scr
 function Set-CoreServiceRecovery { }
 function Wait-CoreServiceHealth { param($Origin,$TimeoutSeconds,$LocalNetworkPort); $script:events.Add('health:' + $LocalNetworkPort) }
 function Wait-PilotAgentEnrollment { param($DataDirectory,$TimeoutSeconds); }
+# Access control is a native boundary: the shared data root has a synthetic DACL, and removal records each change.
+$script:dataRootRules = @()
+$script:accessFailures = @{}
+function New-LifecycleTestRule([string]$Sid, [Security.AccessControl.FileSystemRights]$Rights = 'FullControl',
+    [Security.AccessControl.InheritanceFlags]$Inheritance = 'ContainerInherit, ObjectInherit', [Security.AccessControl.AccessControlType]$Type = 'Allow') {
+    return [pscustomobject]@{ IdentityReference = [pscustomobject]@{ Value = $Sid }; FileSystemRights = $Rights; AccessControlType = $Type
+        InheritanceFlags = $Inheritance; PropagationFlags = [Security.AccessControl.PropagationFlags]::None }
+}
+function Get-PilotAcl {
+    param([string]$Path, [bool]$Container)
+    if ($Path -cne $script:fixture.Locations.DataRoot -or -not $Container) { throw 'Only the shared data root identifies a legacy account.' }
+    if ($null -eq $script:dataRootRules) { throw (New-Object UnauthorizedAccessException('Access to the path is denied.')) }
+    $acl = [pscustomobject]@{ Rules = $script:dataRootRules }
+    $acl | Add-Member -MemberType ScriptMethod -Name GetAccessRules -Value { param($Explicit, $Inherited, $Type) $this.Rules }
+    return $acl
+}
+function Set-PilotLegacyOperatorSid { param([AllowNull()][string]$Sid); $script:events.Add('legacy:' + $Sid) }
+function Remove-PilotAccountAccess {
+    param([string]$Path, [string]$Sid)
+    if ($script:accessFailures.ContainsKey($Path)) { throw $script:accessFailures[$Path] }
+    $script:events.Add('remove-access:' + $Sid + '|' + $Path)
+}
 
 function Write-LifecycleTestDocument([string]$Path, $Document) {
     [IO.File]::WriteAllText($Path, ($Document | ConvertTo-Json -Compress -Depth 8), (New-Object Text.UTF8Encoding($false)))
@@ -111,13 +133,17 @@ function New-LifecycleTestFixture([switch]$LocalNetwork) {
     $pin = ('C' + [Guid]::NewGuid().ToString('N').ToUpperInvariant() + [Guid]::NewGuid().ToString('N').ToUpperInvariant()).Substring(0, 64)
     $locations = @{
         CodeRoot = Join-Path $root 'ProgramFiles/SentinelAI'; DataRoot = Join-Path $root 'ProgramData/SentinelAI';
-        Menu = Join-Path $root 'StartMenu/SentinelAI'
+        Menu = Join-Path $root 'StartMenu/SentinelAI'; InstallerCode = Join-Path $root 'ProgramFiles/SentinelAI Setup'
     }
     foreach ($component in @('Core','Agent','Desktop','Updater')) { $locations[$component + 'Code'] = Join-Path $locations.CodeRoot $component }
     foreach ($component in @('Core','Agent','Setup')) { $locations[$component + 'Data'] = Join-Path $locations.DataRoot $component }
-    foreach ($name in @('CoreCode','AgentCode','DesktopCode','UpdaterCode','CoreData','AgentData','SetupData','Menu')) {
+    foreach ($name in @('CoreCode','AgentCode','DesktopCode','UpdaterCode','CoreData','AgentData','SetupData','Menu','InstallerCode')) {
         New-Item -ItemType Directory -Path $locations[$name] -Force | Out-Null
     }
+    [IO.File]::WriteAllText((Join-Path $locations.InstallerCode 'SentinelAI-Setup.exe'), 'synthetic-installed-setup')
+    # A current installation: Administrators, SYSTEM and LocalService (read), no Windows account.
+    $script:dataRootRules = @((New-LifecycleTestRule 'S-1-5-32-544'), (New-LifecycleTestRule 'S-1-5-18'), (New-LifecycleTestRule 'S-1-5-19' 'ReadAndExecute'))
+    $script:accessFailures = @{}
     foreach ($component in @('Core','Agent','Desktop','Updater')) {
         [IO.File]::WriteAllText((Join-Path $locations[$component + 'Code'] ('SentinelAI.' + $component + '.exe')), ('synthetic-owned-' + $component + '-1.0.0'))
     }
@@ -387,6 +413,69 @@ try {
     [IO.File]::WriteAllText((Get-SetupLifecycleJournal $locations), 'synthetic-pending-journal')
     Reject-LifecycleTest { Uninstall-SetupLifecycleInstallation $locations $false } 'pending transaction prevents destructive uninstall'
     Assert-LifecycleTest ($script:events.Count -eq 0) 'pending transaction refusal happens before stop'
+
+    # Earlier central installations granted their installing account full control. Any administrator's first
+    # change removes it after proving ownership with that account accepted; inspection alone changes nothing.
+    $legacy = 'S-1-5-21-2000-2000-2000-1002'
+    $builtIn = @((New-LifecycleTestRule 'S-1-5-32-544'), (New-LifecycleTestRule 'S-1-5-18'), (New-LifecycleTestRule 'S-1-5-19' 'ReadAndExecute'))
+    $fixture = New-LifecycleTestFixture; $locations = $fixture.Locations
+    Assert-LifecycleTest ($null -eq (Get-SetupLifecycleLegacyOperatorSid $locations)) 'a current installation names no legacy account'
+    foreach ($shape in @(
+        @((New-LifecycleTestRule $legacy), (New-LifecycleTestRule 'S-1-5-21-3000-3000-3000-1003')),
+        @(New-LifecycleTestRule 'S-1-5-32-545'), @(New-LifecycleTestRule 'S-1-1-0'), @(New-LifecycleTestRule 'S-1-5-11'),
+        @(New-LifecycleTestRule $legacy 'Modify'), @(New-LifecycleTestRule $legacy 'FullControl' 'None'),
+        @(New-LifecycleTestRule $legacy 'FullControl' 'ContainerInherit, ObjectInherit' 'Deny'))) {
+        $script:dataRootRules = $builtIn + $shape
+        Assert-LifecycleTest ($null -eq (Get-SetupLifecycleLegacyOperatorSid $locations)) 'only the exact single-account legacy shape is recognized'
+    }
+    $script:dataRootRules = $null
+    Assert-LifecycleTest ($null -eq (Get-SetupLifecycleLegacyOperatorSid $locations)) 'an unreadable shared data root names no legacy account'
+    $script:dataRootRules = $builtIn + @(New-LifecycleTestRule 'S-1-12-1-100-200-300-400')
+    Assert-LifecycleTest ((Get-SetupLifecycleLegacyOperatorSid $locations) -ceq 'S-1-12-1-100-200-300-400') 'a Microsoft Entra installing account is recognized'
+    $script:dataRootRules = $builtIn + @(New-LifecycleTestRule $legacy)
+    Assert-LifecycleTest ((Get-SetupLifecycleLegacyOperatorSid $locations) -ceq $legacy) 'the legacy installing account is recognized'
+    $output = @(Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'inspect'; workDirectory = $fixture.Root; preserveData = 'true' }))
+    Assert-LifecycleTest ($output -contains 'STATE|Installed|1.0.0') 'a legacy installation is inspected as owned'
+    Assert-LifecycleTest ($script:events.Count -eq 1 -and $script:events[0] -ceq ('legacy:' + $legacy)) 'inspection accepts but never removes the legacy account'
+
+    $script:events.Clear()
+    Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'lifecycle-stop'; workDirectory = $fixture.Root; preserveData = 'true' }) | Out-Null
+    $recorded = @($script:events)
+    $removed = @($recorded | Where-Object { $_.StartsWith('remove-access:') } | ForEach-Object { $_.Substring($_.IndexOf('|') + 1) })
+    Assert-LifecycleTest (@($recorded | Where-Object { $_.StartsWith('remove-access:') -and -not $_.StartsWith('remove-access:' + $legacy + '|') }).Count -eq 0) 'only the legacy account is removed'
+    $expected = @()
+    foreach ($name in @('CodeRoot','Menu','InstallerCode','CoreData','AgentData','SetupData')) {
+        $expected += $locations[$name]
+        $expected += @(Get-ChildItem -LiteralPath $locations[$name] -Recurse -Force | ForEach-Object { $_.FullName })
+    }
+    foreach ($path in $expected) { Assert-LifecycleTest ($removed -contains $path) ('every owned entry loses the legacy account: ' + $path) }
+    Assert-LifecycleTest ($removed.Count -eq $expected.Count + 1 -and $removed[-1] -ceq $locations.DataRoot) 'the shared data root that identifies the account changes last'
+    Assert-LifecycleTest (@($removed | Where-Object { $_.StartsWith($fixture.Neighbor) }).Count -eq 0) 'foreign neighbors are never changed'
+    $cleared = [array]::IndexOf($recorded, 'legacy:')
+    Assert-LifecycleTest ($recorded[0] -ceq ('legacy:' + $legacy) -and $cleared -gt [array]::LastIndexOf($recorded, ('remove-access:' + $legacy + '|' + $locations.DataRoot)) -and
+        $cleared -lt $recorded.IndexOf('stop-agent') -and $cleared -lt $recorded.IndexOf('stop-core')) 'the action itself runs only after the legacy account is no longer accepted'
+
+    # A transient file a running service removed is skipped; any other failure stops before the shared data root.
+    $fixture = New-LifecycleTestFixture; $locations = $fixture.Locations
+    $script:dataRootRules = $builtIn + @(New-LifecycleTestRule $legacy)
+    $script:accessFailures[(Get-Item -LiteralPath (Join-Path $locations.CoreData 'license-state')).FullName] = New-Object IO.FileNotFoundException('Could not find file.')
+    Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'lifecycle-stop'; workDirectory = $fixture.Root; preserveData = 'true' }) | Out-Null
+    Assert-LifecycleTest ($script:events.Contains('remove-access:' + $legacy + '|' + $locations.DataRoot) -and $script:events.Contains('stop-core')) 'a vanished transient file does not stop the removal'
+    foreach ($failure in @('missing-root', 'denied')) {
+        $fixture = New-LifecycleTestFixture; $locations = $fixture.Locations
+        $script:dataRootRules = $builtIn + @(New-LifecycleTestRule $legacy)
+        if ($failure -ceq 'missing-root') { $script:accessFailures[$locations.CoreData] = New-Object IO.DirectoryNotFoundException('missing root') }
+        else { $script:accessFailures[(Get-Item -LiteralPath (Join-Path $locations.CoreData 'sentinelai.db')).FullName] = New-Object UnauthorizedAccessException('denied') }
+        Reject-LifecycleTest { Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'lifecycle-stop'; workDirectory = $fixture.Root; preserveData = 'true' }) } 'an interrupted removal fails the action'
+        Assert-LifecycleTest (-not $script:events.Contains('remove-access:' + $legacy + '|' + $locations.DataRoot) -and -not $script:events.Contains('stop-core')) 'an interrupted removal keeps the shared data root, so the next maintenance resumes it'
+    }
+
+    # An installation not proven owned is never changed, even with the legacy account accepted.
+    $fixture = New-LifecycleTestFixture; $locations = $fixture.Locations
+    $script:dataRootRules = $builtIn + @(New-LifecycleTestRule $legacy)
+    [IO.File]::WriteAllText((Join-Path $locations.SetupData 'unknown.json'), '{}')
+    Reject-LifecycleTest { Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'uninstall'; workDirectory = $fixture.Root; preserveData = 'true' }) } 'a foreign legacy-looking installation is refused'
+    Assert-LifecycleTest (@($script:events | Where-Object { $_.StartsWith('remove-access:') }).Count -eq 0 -and -not $script:events.Contains('stop-core')) 'a foreign installation keeps every access entry'
     Write-Output ('Setup lifecycle portable tests passed: ' + $script:checks + ' assertions.')
 } finally {
     # The suite created this random directory and keeps every target below it.
