@@ -29,7 +29,7 @@ $complete = $false
 
 try {
     if (-not [IO.Path]::IsPathRooted($OutputDirectory)) { throw 'An absolute output directory is required.' }
-    $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+    $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd('\', '/')
     if (Test-Path -LiteralPath $OutputDirectory) { throw 'The release directory must be new.' }
     if ($PilotLicensePublicKey.Count -eq 0) { throw 'A pilot release needs at least one pilot public key.' }
     foreach ($document in $documents) {
@@ -52,6 +52,19 @@ try {
     Copy-Item -LiteralPath (Join-Path $work 'central/SentinelAI-Setup.exe') -Destination $OutputDirectory
     Copy-Item -LiteralPath (Join-Path $work 'agent/SentinelAI-Agent-Setup.exe') -Destination $OutputDirectory
     foreach ($document in $documents) { Copy-Item -LiteralPath (Join-Path $repo ('docs/pilot/' + $document)) -Destination $OutputDirectory }
+    # The business documents carry the same contact details as the installers instead of their placeholder line.
+    # ASCII-only source: Windows PowerShell 5.1 reads a script without a byte order mark as ANSI.
+    $separator = ' ' + [char]0x00B7 + ' '
+    $contact = (@($PilotContactCompany, $PilotContactEmail, $PilotContactPhone, $PilotContactWebsite) | Where-Object { $_.Length -gt 0 }) -join $separator
+    foreach ($placeholder in @(
+        @('SentinelAI-for-business.en.md', (@('[Company name]', '[e-mail address]', '[phone number]', '[website]') -join $separator)),
+        @('SentinelAI-dla-firm.pl.md', (@('[Nazwa firmy]', '[adres e-mail]', '[numer telefonu]', '[strona internetowa]') -join $separator)))) {
+        $path = Join-Path $OutputDirectory $placeholder[0]
+        $text = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
+        $first = $text.IndexOf($placeholder[1], [StringComparison]::Ordinal)
+        if ($first -lt 0 -or $text.IndexOf($placeholder[1], $first + 1, [StringComparison]::Ordinal) -ge 0) { throw 'A business document lost its contact placeholder.' }
+        [IO.File]::WriteAllText($path, $text.Replace($placeholder[1], $contact), (New-Object Text.UTF8Encoding($false)))
+    }
 
     # sha256sum format: lowercase hash, two spaces, file name; Get-FileHash output can be compared with it directly.
     $lines = foreach ($name in $installers + $documents) {

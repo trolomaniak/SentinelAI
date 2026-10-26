@@ -8,20 +8,20 @@
 | --- | --- | --- |
 | **Core** | Central computer, Windows service `SentinelAICore` ("SentinelAI Local Core"), account `NT SERVICE\SentinelAICore`, delayed automatic start | Receives Agent data, evaluates the rules, keeps alerts, risk and the pilot license, serves Desktop. |
 | **Desktop** | Central computer only, runs as the signed-in Windows user | The administration application: Devices, Alerts, Risk, Reports, Settings. You sign in with the SentinelAI administrator account created during setup. |
-| **Agent** | Every computer, including the central one; Windows service `SentinelAIAgent` ("SentinelAI Endpoint Agent"), account `NT AUTHORITY\LocalService`, automatic start | Reads the computer's inventory, security settings, security status and selected Windows events and sends them to Core. It changes nothing on the computer. |
-| **Updater** | Installed with Core and with each Agent | Verifies signed packages during installation, upgrade and repair. It does not download anything. |
+| **Agent** | Every computer, including the central one; Windows service `SentinelAIAgent` ("SentinelAI Endpoint Agent"), account `NT AUTHORITY\LocalService`, automatic start | Reads the computer's inventory, security settings, security status and selected Windows events and sends them to Core. It writes only its own state files and never changes Windows settings or your files. |
+| **Updater** | Installed with Core and with each Agent | Public-only package verification client. During installation, upgrade and repair, Setup verifies the signed packages with its own embedded copy. It does not download anything. |
 
 **Data locations**
 
 | Location | Contents |
 | --- | --- |
-| `%ProgramFiles%\SentinelAI\{Core,Agent,Desktop,Updater}` | Program code of the central installation, writable only by Administrators and SYSTEM. `Core\pilot-license` holds the pilot public keys and the contact details. |
+| `%ProgramFiles%\SentinelAI\{Core,Agent,Desktop,Updater}` | Program code of the central installation, writable by Administrators, SYSTEM and the Windows account that installed or last repaired or upgraded SentinelAI (see section 10). `Core\pilot-license` holds the pilot public keys and the contact details. |
 | `%ProgramData%\SentinelAI\Core` | Core's SQLite database `sentinelai.db`, configuration and ownership receipts. The database holds the administrator account (password hash), devices, alerts and the pilot key. |
 | `%ProgramData%\SentinelAI\Agent` | The central computer's Agent: enrollment state and its credential, protected with the LocalService account's DPAPI. |
 | `%ProgramData%\SentinelAI\Setup` | Setup's pinned public trust key and ownership receipt. No passwords or tokens. |
-| `%ProgramFiles%\SentinelAI Setup\SentinelAI-Setup.exe` | Installed copy of Setup, run by Windows **Settings → Apps → SentinelAI → Uninstall**. |
+| `%ProgramFiles%\SentinelAI Setup\SentinelAI-Setup.exe` | Installed copy of Setup, run by **Uninstall** of **SentinelAI** in Windows **Settings → Apps → Installed apps** (Windows 10: **Apps & features**). |
 | `%ProgramFiles%\SentinelAI Agent\…`, `%ProgramData%\SentinelAI Agent\…` | On the other computers: the Agent, the Updater, the installed copy of Agent Setup, the Agent's configuration and DPAPI-protected credential. |
-| `LocalMachine\My`, certificate "SentinelAI Core local network" | Core's own TLS certificate for the local network. Its private key is non-exportable and usable only by Core's service account, SYSTEM and Administrators. |
+| `LocalMachine\My`, certificate with the friendly name "SentinelAI Core local network" (subject: the computer name) | Core's own TLS certificate for the local network. Its private key is non-exportable and usable only by Core's service account, SYSTEM and Administrators. |
 
 All data stays on the central computer. Core makes no outbound connections in the pilot: there is no cloud service, license server, telemetry to the vendor or automatic update.
 
@@ -31,9 +31,9 @@ All data stays on the central computer. Core makes no outbound connections in th
 - **Firewall rule.** Setup adds one inbound rule, `SentinelAI-Core-LocalNetwork` ("SentinelAI Core (Agents on the local network)"): TCP 5443, program `SentinelAI.Core.exe`, remote address **LocalSubnet**, profiles **Domain and Private** only, never Public. Consequences:
   - Agents must be in the same subnet as the central computer. Computers in another VLAN or reached through VPN are not supported by the default rule.
   - Windows does not apply the rule while the network is classified as **Public**, which is the default for a new network. Set the company network to **Private** in Windows Settings on the central computer.
-- **TLS.** TLS 1.3 is used whenever both sides support it. TLS 1.2 is accepted only when one side is Windows 10, which has no TLS 1.3. Core accepts only AES-GCM cipher suites (with ECDHE key exchange for TLS 1.2) and drops any other connection before any data is exchanged. TLS 1.1 and older are never enabled.
+- **TLS.** TLS 1.3 is used whenever both sides support it. TLS 1.2 is used only when one side is Windows 10, which has no TLS 1.3. Core accepts only AES-GCM cipher suites (with ECDHE key exchange for TLS 1.2) and drops any other connection before any data is exchanged. TLS 1.1 and older are never enabled.
 - **Certificate pinning.** Setup creates Core's own certificate (ECDSA P-256, self-signed, valid for 10 years). No certificate authority is installed anywhere. Each Agent trusts Core only if the SHA-256 fingerprint of its certificate exactly matches the pin from the enrollment code. A wrong certificate ends the connection during the TLS handshake, before any token or credential is sent. Desktop → **Settings → Local network** shows the addresses, the port and the fingerprint.
-- **Agent traffic.** Every 30 seconds the Agent sends a short heartbeat. It sends the inventory every six hours and immediately after a monitored setting changes, the security status every hour, and new events in batches.
+- **Agent traffic.** Every 30 seconds the Agent sends a short heartbeat. It sends the inventory every six hours and within seconds after a monitored setting changes (at most every 30 seconds), the security status every hour, and new events in batches.
 
 ## 3. Requirements
 
@@ -41,7 +41,7 @@ All data stays on the central computer. Core makes no outbound connections in th
 - A central computer that stays switched on, with a fixed IP address (static or a DHCP reservation) or a DNS name the other computers resolve.
 - All computers in the same subnet, with the network set to Private or Domain.
 - An administrator account on each computer for installation. Setup uses the built-in Windows PowerShell 5.1 and never changes its execution policy or other controls; enforced application control or constrained language mode can therefore block it.
-- TCP port 5443 free on the central computer.
+- TCP port 5443 free on the central computer. Check it before installing: `Get-NetTCPConnection -LocalPort 5443 -ErrorAction SilentlyContinue` must show nothing. Setup checks the port only during installation, and a failed fresh installation leaves partial state that the next Setup refuses (support code `SETUP-OWNERSHIP`); contact the vendor in that case.
 - No internet access, .NET installation or browser is needed; the programs include their runtime.
 
 ## 4. Central installation
@@ -51,13 +51,13 @@ All data stays on the central computer. Core makes no outbound connections in th
    Get-FileHash .\SentinelAI-Setup.exe -Algorithm SHA256
    Get-Content .\SHA256SUMS.txt
    ```
-   The hash must be identical. If it differs, do not run the file.
+   The hash must match; letter case does not matter. If it differs, do not run the file.
 2. **Run `SentinelAI-Setup.exe`.** The installer is not code-signed, so Windows SmartScreen shows **Windows protected your PC**. Select **More info**, check the file name, then select **Run anyway**. Approve the administrator (UAC) prompt.
-3. **Wait** while Setup verifies its embedded packages and checks the computer. A computer that already has SentinelAI, part of it or another program on port 5443 is refused.
+3. **Wait** while Setup verifies its embedded packages and checks the computer. On a computer that already has this SentinelAI installation, Setup offers Repair, Upgrade or Uninstall instead. Partial or unrecognized installation state is refused (support code `SETUP-OWNERSHIP`).
 4. **Enter the pilot key** you received. Setup checks it on the computer, offline, before installing anything. A malformed, foreign or expired key is refused with support code `SETUP-PILOT-KEY` or `SETUP-PILOT-EXPIRED`.
 5. **Create the SentinelAI administrator:** a username and a password of 12–1024 characters. This account signs in to Desktop; it is not a Windows account.
 6. **Keep "Allow Agents on other computers in this local network to connect" selected.** Clearing it makes a local-only installation that monitors only the central computer.
-7. **Select Install SentinelAI.** Setup creates Core's certificate, installs Core, creates the administrator, starts Core, stores the pilot key, adds the firewall rule, installs and enrolls the central computer's own Agent, then installs Desktop, the Updater and the Start menu shortcut. If any step fails, Setup reports it and does not report success.
+7. **Select Install SentinelAI.** Setup creates Core's certificate, installs Core, creates the administrator, starts Core and adds the firewall rule, stores the pilot key, installs and enrolls the central computer's own Agent, then installs Desktop, the Updater and the Start menu shortcut. If a step fails, Setup reports the failure and does not report success. The only exception is the pilot key: if Core cannot store it, installation completes and Setup asks you to enter the key in Desktop.
 8. **Open Desktop** from Setup or **Start → SentinelAI** and sign in. **Devices** shows the central computer.
 
 ## 5. Adding computers
@@ -68,9 +68,9 @@ All data stays on the central computer. Core makes no outbound connections in th
 - the number of codes (1–50);
 - their validity: 1 hour, 8 hours, 24 hours (default), 3 days or 7 days.
 
-**Copy** puts the codes on the clipboard, excluded from clipboard history. **Save** writes one `.sentinelai-enroll` file per code. Each code is a secret that enrolls exactly one computer; pass it only to the person installing that computer. Unused codes are listed with their expiry and can be revoked.
+**Copy codes** puts the codes on the clipboard, excluded from clipboard history. **Save codes as files** writes one `.sentinelai-enroll` file per code, named `SentinelAI-computer-NN-….sentinelai-enroll`. Each code is a secret that enrolls exactly one computer; pass it only to the person installing that computer. Unused codes are listed with their expiry and can be revoked.
 
-**Interactive installation.** On the computer to add, check `SentinelAI-Agent-Setup.exe` against `SHA256SUMS.txt`, run it (SmartScreen: **More info → Run anyway**), approve UAC, paste the code or select **Open code file…**, then **Install SentinelAI Agent**. Before changing anything, Setup connects to Core at the address in the code, checks the certificate pin, and asks Core whether the code is still valid. On success the computer appears in Desktop → **Devices**.
+**Interactive installation.** On the computer to add, check `SentinelAI-Agent-Setup.exe` against `SHA256SUMS.txt`, run it (SmartScreen: **More info → Run anyway**), approve UAC, paste the code or select **Open code file...**, then **Install SentinelAI Agent**. Before changing anything, Setup connects to Core at the address in the code, checks the certificate pin, and asks Core whether the code is still valid. On success the computer appears in Desktop → **Devices**.
 
 **Silent installation.** Run elevated or as SYSTEM:
 
@@ -78,11 +78,18 @@ All data stays on the central computer. Core makes no outbound connections in th
 SentinelAI-Agent-Setup.exe /quiet /codefile <path to .sentinelai-enroll>
 ```
 
-No window appears. The exit code reports the result:
+No window appears. Agent Setup is a Windows (GUI) program, so PowerShell does not wait for it or set `$LASTEXITCODE`; read the exit code like this:
+
+```powershell
+(Start-Process .\SentinelAI-Agent-Setup.exe -ArgumentList '/quiet', '/codefile', '"C:\Codes\PC01.sentinelai-enroll"' -Wait -PassThru).ExitCode
+```
+
+The exit code reports the result:
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Installed and enrolled. |
+| 1 | Unexpected failure. |
 | 2 | Invalid command line. |
 | 3 | Not a valid enrollment code. Nothing changed. |
 | 4 | Core not reachable at the address in the code. Nothing changed. |
@@ -92,10 +99,10 @@ No window appears. The exit code reports the result:
 | 8 | Installation failed; Setup removed what it installed. |
 | 9 | Core did not confirm the enrollment; Setup removed the Agent. Issue a new code. |
 | 12 | Installation failed and cleanup did not complete: run `/uninstall`, then install again. |
-| 1603 | The installer could not prepare its protected workspace. Nothing changed. |
+| 1603 | The installer could not start, validate itself or prepare its protected workspace. Nothing changed. |
 | 1460 | Setup was still running after 30 minutes. |
 
-**Group Policy example.** One code per computer, saved as `<COMPUTERNAME>.sentinelai-enroll` on a share that only the domain computers can read, together with `SentinelAI-Agent-Setup.exe`. Create a computer startup script under **Computer Configuration → Policies → Windows Settings → Scripts → Startup**, which runs as SYSTEM:
+**Group Policy example.** One code per computer: rename each saved code file to `<COMPUTERNAME>.sentinelai-enroll` and put it in a `codes` folder on a share that only the domain computers can read, together with `SentinelAI-Agent-Setup.exe`. Create a computer startup script under **Computer Configuration → Policies → Windows Settings → Scripts → Startup**, which runs as SYSTEM:
 
 ```powershell
 $share = '\\fileserver\SentinelAI$'
@@ -116,7 +123,7 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
 
 **Microsoft Intune example.** Because each code enrolls one computer, create one Win32 app per computer, for a few computers, or use a script like the Group Policy example above.
 
-1. Package a folder with `SentinelAI-Agent-Setup.exe` and that computer's `code.sentinelai-enroll` using the Microsoft Win32 Content Prep Tool.
+1. Rename that computer's code file to `code.sentinelai-enroll` and package it with `SentinelAI-Agent-Setup.exe` in one folder, using the Microsoft Win32 Content Prep Tool.
 2. Configure the app:
    - **Install command:** `SentinelAI-Agent-Setup.exe /quiet /codefile code.sentinelai-enroll`. Agent Setup resolves a relative path against the current folder, which for a Win32 app is the folder Intune extracts it to.
    - **Uninstall command:** `SentinelAI-Agent-Setup.exe /uninstall /quiet`.
@@ -129,17 +136,17 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
 
 - **Remove a computer.** In Desktop, open the computer in **Devices**, select **Remove computer** and confirm. Its credential is revoked, so its Agent can no longer report, and it disappears from Devices, Risk and reports; its history is kept. The central computer's own Agent cannot be removed.
 - **Uninstall the Agent** on that computer:
-  - interactively: **Settings → Apps → Installed apps → SentinelAI Agent → Uninstall**;
+  - interactively: **Settings → Apps → Installed apps** (Windows 10: **Apps & features**) **→ SentinelAI Agent → Uninstall**;
   - silently: `"%ProgramFiles%\SentinelAI Agent\Setup\SentinelAI-Agent-Setup.exe" /uninstall /quiet`. Exit code 0 means done, 10 means it did not complete (run it again), and 11 means no Agent installed by Agent Setup was found.
 
-  This removes the service, the program files, the Agent's data and credential, the Apps entry and the installed copy of Setup. When that copy is the one running the uninstall, Windows deletes it at the next restart; a new installation does not have to wait for that.
+  This removes the service, the program files, the Agent's data and credential, the Apps entry and the installed copy of Setup. When that copy is the one running the uninstall, it is moved into `%ProgramData%\SentinelAI-Setup` and Windows deletes it at the next restart; the product folders go at once, and a new installation does not have to wait.
 - **Uninstall the central installation.**
   1. Close Desktop.
-  2. Open **Settings → Apps → Installed apps → SentinelAI → Uninstall**. Setup opens with **Uninstall** selected.
+  2. Open **Settings → Apps → Installed apps** (Windows 10: **Apps & features**) **→ SentinelAI → Uninstall**. Setup opens with **Uninstall** selected; select **Continue** to run it.
   3. **Keep security history and protected configuration** is checked by default. Uninstall then removes the services, the firewall rule, the program files and the shortcut, and keeps the database, the configuration and Core's certificate. A later Setup of the same release line restores the installation with the same identity, and the existing Agents trust it again.
   4. To delete the data as well, clear the checkbox and type **DELETE**. This also deletes Core's certificate and key; existing Agents can then never connect again.
 
-  Run maintenance with the same Windows administrator account that installed SentinelAI: the pilot's folder permissions are tied to that account. Desktop's **Uninstall SentinelAI** button, shown when the pilot has ended, opens the same Setup flow and closes Desktop.
+  Run maintenance with the same Windows administrator account that installed SentinelAI: the central installation's folder permissions include that account. Desktop's **Uninstall SentinelAI** button, shown when the pilot has ended, opens the same Setup flow and closes Desktop.
 
 ## 7. Pilot key and its expiry
 
@@ -164,7 +171,7 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
 
 **The Agent cannot connect (exit code 4, or a computer stops reporting)**
 - On the central computer:
-  - Desktop → **Settings → Local network** must say the listener is on.
+  - Desktop → **Settings → Local network** must say that Agents can connect.
   - The network must be **Private** or Domain, not Public.
   - The firewall rule `SentinelAI-Core-LocalNetwork` must exist and be enabled. **Repair** recreates it.
   - Another program must not use port 5443. `netsh interface ipv4 show excludedportrange protocol=tcp` shows ranges Windows has reserved. Core keeps working locally and logs that the network listener is disabled; free the port and restart the "SentinelAI Local Core" service.
@@ -190,7 +197,7 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
 - Setup does not switch off application control, constrained language mode or other security controls; if they block it, Setup reports a failure.
 
 **The Agent reports the Security log as "access denied"**
-- This is expected. The Agent runs as LocalService, which cannot read the Windows Security log, so detections based on sign-in events do not work in the standard installation. Detections from the System, PowerShell and Microsoft Defender logs do work.
+- This is expected. The Agent runs as LocalService, which cannot read the Windows Security log, so the detections based on it (failed and Remote Desktop sign-ins, scheduled task creation, clearing of the Security log) do not work in the standard installation. Detections from the System, PowerShell and Microsoft Defender logs do work, except two that read English Windows texts and therefore work only on English Windows: driver installations and changes to how protection services start.
 
 ## 10. Security model summary
 
@@ -201,9 +208,9 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
   - Codes are never logged, and Agent Setup checks the pin before it sends the token.
   - Each Agent's credential is protected with DPAPI under its LocalService account.
 - **Least privilege.**
-  - The Agent runs as LocalService and only reads; it never changes settings or files.
+  - The Agent runs as LocalService and only reads; it writes only its own state and never changes Windows settings or your files.
   - Core runs under its own virtual service account.
-  - Program folders are writable only by Administrators and SYSTEM.
+  - Program folders are writable only by Administrators and SYSTEM, with one exception on the central computer: Core's program and data folders also give full control to the Windows account that installed (or last repaired or upgraded) SentinelAI, even when that account runs programs without elevation. Use a dedicated administrator account for installation and maintenance.
 - **Signed packages.** Setup verifies the signature and hash of every package against the public key built into it, and replaces program code transactionally with automatic rollback.
 - **Administrator access.** Desktop requires the SentinelAI administrator account created during setup.
 - **Minimal data.**

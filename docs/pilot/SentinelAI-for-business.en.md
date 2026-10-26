@@ -4,7 +4,7 @@
 
 ## What SentinelAI is
 
-SentinelAI watches the security of the Windows computers in a small company and tells you, in one place, what needs attention. It answers questions such as: Is disk encryption on? Is the antivirus healthy? Is a computer missing updates or waiting for a restart? Did Microsoft Defender find malware? Which computer is the biggest risk right now?
+SentinelAI watches the security of the Windows computers in a small company and tells you, in one place, what needs attention. It answers questions such as: Is disk encryption on? Is the antivirus healthy? Are automatic updates switched on, and when were updates last installed? Is a computer waiting for a restart? Did Microsoft Defender find malware? Which computer is the biggest risk right now?
 
 It is meant for companies without a security team. It does not replace your antivirus; it checks that the protection you already have is switched on and working, and it points out risky settings and suspicious events.
 
@@ -19,10 +19,12 @@ Only what is listed here is implemented today:
 - **Windows Update:** the automatic update setting and when updates were last searched for and installed.
 - **Pending restarts:** whether Windows is waiting for a restart to finish updates.
 - **Risky settings:** for example User Account Control switched off, Remote Desktop without network-level authentication, the old SMB1 file sharing protocol, automatic sign-in, and local administrator accounts.
-- **Security event detections:** for example Microsoft Defender finding malware or being switched off, an event log being cleared, a service or driver installed from an unusual place, or PowerShell flagging a suspicious script. Detections that need the Windows Security log (repeated failed sign-ins, risky Remote Desktop sign-ins) do not work in the standard installation, because the Agent's service account cannot read that log.
+- **Security event detections:** for example Microsoft Defender finding malware or being switched off, an event log being cleared, a service or driver installed from an unusual place, or PowerShell flagging a suspicious script. Detections that need the Windows Security log (repeated failed sign-ins, risky Remote Desktop sign-ins, new scheduled tasks and clearing of the Security log) do not work in the standard installation, because the Agent's service account cannot read that log. Two detections read English Windows texts, so on Windows in another language, such as Polish, they do not work: driver installations and changes to how protection services start.
 - **Risk score:** each computer gets a score from 0 to 100 with an explanation, and the company's score is that of its riskiest computer.
 - **Alerts and incidents:** each finding becomes an alert with evidence and a recommended action. You mark it as investigating, accepted or resolved.
 - **Reports:** a security report for a chosen period, saved as an HTML file.
+
+Alerts are raised for risky settings and detections. The other values, such as pending restarts, Defender details and local administrators, are shown in Desktop for you to review.
 
 ## How it works
 
@@ -58,11 +60,11 @@ Only what is listed here is implemented today:
 
 ## Honest limitations
 
-- **This is pilot software.** It has been tested automatically and on test computers, but not yet in many companies. It has not been audited by an independent security firm, and we make no compliance or certification claims.
+- **This is pilot software.** It is tested automatically on Windows, including real installations in our build system, but it is not yet used in many companies. It has not been audited by an independent security firm, and we make no compliance or certification claims.
 - **The installers are not code-signed.** Windows SmartScreen will warn that the publisher is unknown. Always check the downloads against the published SHA-256 checksums before running them. Smart App Control or some antivirus or EDR products may block unsigned programs.
 - **Windows only.** There is no Linux or macOS version yet.
 - **Desktop only on the central computer.** Alerts and reports are viewed there; there is no web or mobile access.
-- **No automatic updates.** We provide new versions; you run them on the central computer.
+- **No automatic updates.** We provide new versions; you run them on the central computer, and the Agents on the other computers are reinstalled with new codes.
 - **English interface.** The program itself is in English.
 
 ## Contact
@@ -71,9 +73,9 @@ Only what is listed here is implemented today:
 
 ## Frequently asked questions
 
-**Will SentinelAI slow my computers down?** The Agent reads a fixed set of settings and events: a short status message every 30 seconds, the device inventory every six hours and immediately after a monitored setting changes, the security status every hour, and new events as they happen.
+**Will SentinelAI slow my computers down?** The Agent reads a fixed set of settings and events: a short status message every 30 seconds, the device inventory every six hours and within seconds after a monitored setting changes, the security status every hour, and new events as they happen.
 
-**Does SentinelAI change anything on our computers?** No. It only reads. Changing a setting or removing a threat is always done by you.
+**Does SentinelAI change anything on our computers?** No. It only reads; it never changes Windows settings or your files. Changing a setting or removing a threat is always done by you.
 
 **Do you see our data?** No. Everything stays on your central computer and nothing is sent to us.
 
@@ -81,4 +83,4 @@ Only what is listed here is implemented today:
 
 **What happens when the pilot ends?** Monitoring continues. Desktop asks you to contact us and offers an uninstall option.
 
-**How do we remove SentinelAI?** Remove each computer in Desktop and uninstall the Agent from Windows **Settings → Apps**. Uninstall SentinelAI on the central computer the same way; your data is kept unless you type **DELETE** to remove it.
+**How do we remove SentinelAI?** Remove each computer in Desktop and uninstall **SentinelAI Agent** from Windows **Settings → Apps**. Uninstall SentinelAI on the central computer the same way; your data is kept unless you type **DELETE** to remove it.

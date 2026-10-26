@@ -160,6 +160,25 @@
   - no code signing, Windows only, English interface, no automatic updates.
 - **`docs/MVP.md`** is completed as the source of truth (documentation and release section, the full known limitations), and `README.md` links the four documents.
 - **Release script** `scripts/publish-pilot-release-windows.ps1` (owner decision of 2026-10-26: the update signing key is an input; it signs only and is never copied, and the pilot license private key is never an input). It builds `SentinelAI-Setup.exe` (with the pilot public keys and contact details) and `SentinelAI-Agent-Setup.exe` through `publish-setup-windows.ps1`, then writes a new folder with the two installers, the four documents and `SHA256SUMS.txt` (sha256sum format), and refuses any other file. It never removes a folder it did not create. In Windows CI it replaces the two separate Setup publish calls: CI checks every checksum and the file count, then the native Setup and Agent Setup acceptance run on the release's installers. A small `SentinelAI-Pilot-Release-documents` artifact holds the documents and checksums.
+- **Independent review against the implementation** (one reviewer over all statements; each finding checked against the code; 18 findings, all fixed):
+  - Statements corrected:
+    - an existing installation is offered maintenance, not refused;
+    - port 5443 is checked only during installation, and a failed fresh installation leaves state the next Setup refuses;
+    - the order of the Setup steps, and that a pilot key Core cannot store does not fail installation;
+    - Core's folders also grant the installing account full control;
+    - Setup, not the installed Updater, verifies packages;
+    - TLS 1.2 is "used", not "accepted", only with Windows 10;
+    - no missing-patch detection;
+    - two detections need English Windows texts, and the full list of Security-log detections;
+    - testing is automatic, on Windows Server.
+  - Instructions added or fixed:
+    - exit codes 1 and 1603, and reading exit codes with `Start-Process -Wait -PassThru` because Agent Setup is a GUI program;
+    - renaming code files for GPO and Intune;
+    - the exact UI labels (Copy codes, Save codes as files, Open code file..., Continue), the certificate's friendly name, and the Windows 10 Apps & features wording;
+    - hash comparison regardless of letter case.
+  - Checklist and release script:
+    - the checklist enters the 5-day key and moves the clock forward, because Core and Desktop refuse an expired key, and checks telemetry on both client versions;
+    - the release script now writes the contact details into the business documents, accepts a trailing separator and uses an ASCII-only source for Windows PowerShell 5.1.
 - **Internal checklist** `docs/pilot/PILOT-TEST-CHECKLIST.md`: build and download check, central installation (Windows 10 or 11), adding the second computer (revoked code, interactive, silent, exit code 7), an alert, a pilot key near and after its end and clock rollback, removing a computer, and both central uninstalls (data kept and restored, then DELETE).
 
 ## MVP-3 implementation and validation

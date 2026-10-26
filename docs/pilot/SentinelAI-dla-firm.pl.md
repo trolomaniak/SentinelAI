@@ -4,7 +4,7 @@
 
 ## Czym jest SentinelAI
 
-SentinelAI pilnuje bezpieczeństwa komputerów z Windows w małej firmie i w jednym miejscu pokazuje, co wymaga uwagi. Odpowiada na pytania takie jak: czy dysk jest zaszyfrowany? Czy antywirus działa poprawnie? Czy komputerowi brakuje aktualizacji albo czeka na ponowne uruchomienie? Czy Microsoft Defender znalazł złośliwe oprogramowanie? Który komputer jest teraz największym ryzykiem?
+SentinelAI pilnuje bezpieczeństwa komputerów z Windows w małej firmie i w jednym miejscu pokazuje, co wymaga uwagi. Odpowiada na pytania takie jak: czy dysk jest zaszyfrowany? Czy antywirus działa poprawnie? Czy aktualizacje automatyczne są włączone i kiedy ostatnio zainstalowano aktualizacje? Czy komputer czeka na ponowne uruchomienie? Czy Microsoft Defender znalazł złośliwe oprogramowanie? Który komputer jest teraz największym ryzykiem?
 
 Jest przeznaczony dla firm bez własnego zespołu bezpieczeństwa. Nie zastępuje antywirusa: sprawdza, czy ochrona, którą już macie, jest włączona i działa, oraz wskazuje ryzykowne ustawienia i podejrzane zdarzenia.
 
@@ -19,10 +19,12 @@ Działa dziś tylko to, co jest wymienione poniżej:
 - **Windows Update:** ustawienie aktualizacji automatycznych oraz kiedy ostatnio wyszukano i zainstalowano aktualizacje.
 - **Oczekujące ponowne uruchomienie:** czy Windows czeka na restart, aby dokończyć aktualizacje.
 - **Ryzykowne ustawienia:** na przykład wyłączona Kontrola konta użytkownika (UAC), Pulpit zdalny bez uwierzytelniania na poziomie sieci, stary protokół udostępniania plików SMB1, automatyczne logowanie oraz konta lokalnych administratorów.
-- **Wykrywanie zdarzeń bezpieczeństwa:** na przykład znalezienie złośliwego oprogramowania przez Microsoft Defender albo jego wyłączenie, wyczyszczenie dziennika zdarzeń, instalacja usługi lub sterownika z nietypowego miejsca, podejrzany skrypt oznaczony przez PowerShell. Wykrycia wymagające dziennika Zabezpieczenia Windows (powtarzające się nieudane logowania, ryzykowne logowania przez Pulpit zdalny) nie działają w standardowej instalacji, ponieważ konto usługi Agenta nie może czytać tego dziennika.
+- **Wykrywanie zdarzeń bezpieczeństwa:** na przykład znalezienie złośliwego oprogramowania przez Microsoft Defender albo jego wyłączenie, wyczyszczenie dziennika zdarzeń, instalacja usługi lub sterownika z nietypowego miejsca, podejrzany skrypt oznaczony przez PowerShell. Wykrycia wymagające dziennika Zabezpieczenia Windows (powtarzające się nieudane logowania, ryzykowne logowania przez Pulpit zdalny, nowe zaplanowane zadania i wyczyszczenie dziennika Zabezpieczenia) nie działają w standardowej instalacji, ponieważ konto usługi Agenta nie może czytać tego dziennika. Dwa wykrycia odczytują angielskie teksty Windows, więc w Windows w innym języku, na przykład polskim, nie działają: instalacja sterowników i zmiana sposobu uruchamiania usług ochrony.
 - **Ocena ryzyka:** każdy komputer dostaje ocenę od 0 do 100 z wyjaśnieniem, a ocena firmy to ocena jej najbardziej zagrożonego komputera.
 - **Alerty i incydenty:** każde ustalenie staje się alertem z dowodami i zalecanym działaniem. Oznaczacie go jako badany, zaakceptowany lub rozwiązany.
 - **Raporty:** raport bezpieczeństwa za wybrany okres, zapisywany jako plik HTML.
+
+Alerty powstają dla ryzykownych ustawień i wykryć. Pozostałe wartości, takie jak oczekujące ponowne uruchomienie, szczegóły Defendera i lokalni administratorzy, Desktop pokazuje do przejrzenia.
 
 ## Jak to działa
 
@@ -58,11 +60,11 @@ Działa dziś tylko to, co jest wymienione poniżej:
 
 ## Uczciwie o ograniczeniach
 
-- **To oprogramowanie pilotażowe.** Przeszło testy automatyczne i testy na komputerach testowych, ale nie było jeszcze używane w wielu firmach. Nie przeszło niezależnego audytu bezpieczeństwa i nie deklarujemy zgodności z żadnymi normami ani certyfikatów.
+- **To oprogramowanie pilotażowe.** Jest testowane automatycznie na Windows, w tym przez rzeczywiste instalacje w naszym systemie budowania, ale nie jest jeszcze używane w wielu firmach. Nie przeszło niezależnego audytu bezpieczeństwa i nie deklarujemy zgodności z żadnymi normami ani certyfikatów.
 - **Instalatory nie są podpisane cyfrowo.** Windows SmartScreen ostrzeże, że wydawca jest nieznany. Przed uruchomieniem zawsze sprawdzaj pobrane pliki z opublikowanymi sumami kontrolnymi SHA-256. Inteligentna kontrola aplikacji (Smart App Control) lub niektóre programy antywirusowe i EDR mogą blokować niepodpisane programy.
 - **Tylko Windows.** Nie ma jeszcze wersji dla Linuksa ani macOS.
 - **Desktop tylko na komputerze centralnym.** Alerty i raporty ogląda się tam; nie ma dostępu przez przeglądarkę ani telefon.
-- **Brak automatycznych aktualizacji.** Nowe wersje dostarczamy my, a uruchamiacie je na komputerze centralnym.
+- **Brak automatycznych aktualizacji.** Nowe wersje dostarczamy my: uruchamiacie je na komputerze centralnym, a Agentów na pozostałych komputerach instaluje się ponownie z nowymi kodami.
 - **Interfejs po angielsku.** Sam program jest w języku angielskim.
 
 ## Kontakt
@@ -71,9 +73,9 @@ Działa dziś tylko to, co jest wymienione poniżej:
 
 ## Najczęstsze pytania
 
-**Czy SentinelAI spowolni nasze komputery?** Agent odczytuje stały zestaw ustawień i zdarzeń: krótki komunikat o stanie co 30 sekund, inwentarz urządzenia co sześć godzin i od razu po zmianie monitorowanego ustawienia, stan zabezpieczeń co godzinę, a nowe zdarzenia na bieżąco.
+**Czy SentinelAI spowolni nasze komputery?** Agent odczytuje stały zestaw ustawień i zdarzeń: krótki komunikat o stanie co 30 sekund, inwentarz urządzenia co sześć godzin i w ciągu kilku sekund po zmianie monitorowanego ustawienia, stan zabezpieczeń co godzinę, a nowe zdarzenia na bieżąco.
 
-**Czy SentinelAI coś zmienia na naszych komputerach?** Nie. Tylko odczytuje. Zmianę ustawienia lub usunięcie zagrożenia zawsze wykonujecie sami.
+**Czy SentinelAI coś zmienia na naszych komputerach?** Nie. Tylko odczytuje; nigdy nie zmienia ustawień Windows ani Waszych plików. Zmianę ustawienia lub usunięcie zagrożenia zawsze wykonujecie sami.
 
 **Czy widzicie nasze dane?** Nie. Wszystko zostaje na Waszym komputerze centralnym i nic nie jest do nas wysyłane.
 
@@ -81,4 +83,4 @@ Działa dziś tylko to, co jest wymienione poniżej:
 
 **Co się stanie po zakończeniu pilotażu?** Monitorowanie działa dalej. Desktop prosi o kontakt i oferuje odinstalowanie.
 
-**Jak usunąć SentinelAI?** Usuń każdy komputer w Desktopie i odinstaluj Agenta w **Ustawienia → Aplikacje** systemu Windows. Na komputerze centralnym odinstaluj SentinelAI w ten sam sposób; dane zostają, chyba że wpiszesz **DELETE**, aby je usunąć.
+**Jak usunąć SentinelAI?** Usuń każdy komputer w Desktopie i odinstaluj **SentinelAI Agent** w **Ustawienia → Aplikacje** systemu Windows. Na komputerze centralnym odinstaluj SentinelAI w ten sam sposób; dane zostają, chyba że wpiszesz **DELETE**, aby je usunąć.
