@@ -179,6 +179,7 @@
   - Checklist and release script:
     - the checklist enters the 5-day key and moves the clock forward, because Core and Desktop refuse an expired key, and checks telemetry on both client versions;
     - the release script now writes the contact details into the business documents, accepts a trailing separator and uses an ASCII-only source for Windows PowerShell 5.1.
+- **Windows CI.** `cbc2a70` (first MVP-4 push) passed all six jobs: the release script built both installers, the checksums matched, and the native Setup and Agent Setup acceptance passed on the release's installers. The reviewed state `34639ce` passed all twelve checks in [push CI `40249760603`](https://github.com/trolomaniak/SentinelAI/actions/runs/40249760603) and [PR CI `40249792237`](https://github.com/trolomaniak/SentinelAI/actions/runs/40249792237) of [PR #42](https://github.com/trolomaniak/SentinelAI/pull/42). Changed files are documents, one PowerShell script and the CI workflow; `./scripts/build.sh` and `./scripts/test.sh` are unaffected and ran in CI (`build-and-test`).
 - **Internal checklist** `docs/pilot/PILOT-TEST-CHECKLIST.md`: build and download check, central installation (Windows 10 or 11), adding the second computer (revoked code, interactive, silent, exit code 7), an alert, a pilot key near and after its end and clock rollback, removing a computer, and both central uninstalls (data kept and restored, then DELETE).
 
 ## MVP-3 implementation and validation
