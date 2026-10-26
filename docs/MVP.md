@@ -50,6 +50,17 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 - From seven days before the end, Desktop shows "Pilot ends in N days — contact us" with the contact details. After the end, all monitoring continues and Desktop shows a notice with the contact details and **Uninstall SentinelAI** (Setup's uninstall flow, data kept unless DELETE is typed). Both can be hidden until sign-out.
 - Details: [Licensing](LICENSING.md#pilot-license-key-mvp-3).
 
+## Documentation and release (MVP-4)
+
+- Customer documents in `docs/pilot/`, equivalent in Polish and English, checked against the implementation:
+  - for the business: [SentinelAI dla firm](pilot/SentinelAI-dla-firm.pl.md), [SentinelAI for business](pilot/SentinelAI-for-business.en.md);
+  - for IT: [przewodnik IT](pilot/SentinelAI-przewodnik-IT.pl.md), [IT guide](pilot/SentinelAI-IT-guide.en.md).
+- `scripts/publish-pilot-release-windows.ps1` builds both installers and writes one new release folder, ready to upload:
+  - inputs: the owner's update signing key (outside every repository, used only to sign and never copied), the update public key, the pilot public keys and the contact details. The pilot license private key is never an input;
+  - output: `SentinelAI-Setup.exe`, `SentinelAI-Agent-Setup.exe`, the four documents and `SHA256SUMS.txt` (sha256sum format), and nothing else.
+  - Windows CI runs it with development keys, and the native Setup and Agent Setup acceptance test its installers.
+- [Pilot test checklist](pilot/PILOT-TEST-CHECKLIST.md) (internal): central installation, adding a second computer, an alert, a pilot key near and after its end, removing a computer, and both uninstalls, on one Windows 10 and one Windows 11 computer in one network.
+
 ## Decisions and known limitations
 
 - The installers are not code-signed for the pilot because of the cost. Windows SmartScreen warns on first run. Smart App Control or a company antivirus/EDR may block unsigned programs. Do not attach the installer to e-mails: link to a download page over HTTPS that publishes SHA-256 checksums, or install together with the company.
@@ -57,3 +68,9 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 - Desktop runs only on the central computer. The local-network listener serves Agent routes only.
 - The existing seven-day lease licensing and `cloud/license-api` remain for later commercial licensing (TASK-041).
 - The pilot is not independently security-audited (TASK-043) and makes no compliance claims (TASK-044).
+- Pilot releases are signed with the owner's own update key in the existing `development` trust environment (key IDs `dev-…`); Setup, the worker and the Updater accept nothing else (owner decision of 2026-10-26). A production signing environment is later work.
+- Agents must be in the central computer's subnet: the firewall rule allows only the local subnet on the Domain and Private profiles.
+- The Agent runs as LocalService, which cannot read the Windows Security log, so the sign-in detections (repeated failed logons, RDP after failures) do not work in the standard installation; System, PowerShell and Defender detections do.
+- Agents on other computers cannot be upgraded in place: Agent Setup refuses a computer with an Agent. A newer Agent means uninstall, a new code and removing the old device entry.
+- Maintenance of the central installation (repair, upgrade, uninstall) must be run by the Windows administrator account that installed it.
+- There are no automatic updates, and the user interface is in English only.

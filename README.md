@@ -91,6 +91,8 @@ Current limits:
 
 ## Documentation
 
+- **Pilot documents for companies** (Polish and English): [SentinelAI dla firm](docs/pilot/SentinelAI-dla-firm.pl.md) · [SentinelAI for business](docs/pilot/SentinelAI-for-business.en.md) · [Przewodnik IT](docs/pilot/SentinelAI-przewodnik-IT.pl.md) · [IT guide](docs/pilot/SentinelAI-IT-guide.en.md) · [Pilot scope](docs/MVP.md) · [Pilot test checklist](docs/pilot/PILOT-TEST-CHECKLIST.md)
+
 - [Development status and verification](.agent/STATUS.md) · [Architectural decisions](.agent/DECISIONS.md)
 - [Single-EXE Windows setup](docs/SETUP.md) · [Manual pilot installation](docs/PILOT.md) · [Core Windows Service](docs/CORE-SERVICE.md) · [Desktop setup/sign-in](docs/DESKTOP-AUTH.md)
 - [Desktop operation, tray and auto-start](docs/DESKTOP-OPERATION.md) · [Devices](docs/DESKTOP-DEVICES.md) · [Alerts](docs/DESKTOP-ALERTS.md)

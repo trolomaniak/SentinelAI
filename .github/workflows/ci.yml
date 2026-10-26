@@ -310,18 +310,24 @@ jobs:
               --key-id dev-ci-pilot --customer 'SentinelAI CI Example' --days 30
             if ($LASTEXITCODE -ne 0) { throw 'Development pilot key issuance failed.' }
             [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'sentinelai-ci-pilot.key'), ([string]@($pilotKey)[-1]).Trim())
-            ./scripts/publish-setup-windows.ps1 -Version 1.0.0 -KeyId dev-ci-setup `
-              -DevelopmentPrivateKey (Join-Path $keys 'dev-ci-setup.private.pem') `
-              -PublicKeyPath (Join-Path $keys 'dev-ci-setup.public.pem') `
+            # MVP-4: the pilot release script builds both installers (central and Agent-only, one development
+            # signing key), copies the four pilot documents and writes SHA256SUMS.txt into one folder.
+            $release = Join-Path $env:RUNNER_TEMP 'sentinelai-pilot-release'
+            ./scripts/publish-pilot-release-windows.ps1 -Version 1.0.0 -KeyId dev-ci-setup `
+              -UpdateSigningPrivateKey (Join-Path $keys 'dev-ci-setup.private.pem') `
+              -UpdatePublicKeyPath (Join-Path $keys 'dev-ci-setup.public.pem') `
               -PilotLicensePublicKey ('dev-ci-pilot=' + (Join-Path $pilotKeys 'dev-ci-pilot.public.pem')) `
               -PilotContactCompany 'Example Pilot Company' -PilotContactEmail 'pilot@example.invalid' `
               -PilotContactPhone '+00 000 000 000' -PilotContactWebsite 'https://example.invalid' `
-              -OutputDirectory (Join-Path $env:RUNNER_TEMP 'sentinelai-setup-artifact')
-            # MVP-2: the Agent-only Setup, signed with the same development key as the central installation.
-            ./scripts/publish-setup-windows.ps1 -Version 1.0.0 -KeyId dev-ci-setup -Product Agent `
-              -DevelopmentPrivateKey (Join-Path $keys 'dev-ci-setup.private.pem') `
-              -PublicKeyPath (Join-Path $keys 'dev-ci-setup.public.pem') `
-              -OutputDirectory (Join-Path $env:RUNNER_TEMP 'sentinelai-agent-setup-artifact')
+              -OutputDirectory $release
+            # Every listed file matches its checksum, and nothing else is in the release.
+            $sums = @(Get-Content -LiteralPath (Join-Path $release 'SHA256SUMS.txt'))
+            if ($sums.Count -ne 6) { throw 'SHA256SUMS.txt must list the two installers and four documents.' }
+            foreach ($line in $sums) {
+              $hash, $name = $line -split '  ', 2
+              if ((Get-FileHash -LiteralPath (Join-Path $release $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) { throw ('Checksum mismatch: ' + $name) }
+            }
+            if (@(Get-ChildItem -LiteralPath $release -Force).Count -ne 7) { throw 'The release folder holds unexpected files.' }
           } catch {
             $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
             if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }
@@ -337,8 +343,8 @@ jobs:
         run: |
           try {
             ./tests/setup/AgentSetup.Acceptance.ps1 `
-              -ExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-setup-artifact/SentinelAI-Setup.exe') `
-              -AgentExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-agent-setup-artifact/SentinelAI-Agent-Setup.exe') `
+              -ExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-pilot-release/SentinelAI-Setup.exe') `
+              -AgentExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-pilot-release/SentinelAI-Agent-Setup.exe') `
               -PilotLicenseKeyPath (Join-Path $env:RUNNER_TEMP 'sentinelai-ci-pilot.key') `
               -TimeoutSeconds 300
           } catch {
@@ -351,12 +357,19 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: SentinelAI-Setup-win-x64
-          path: ${{ runner.temp }}/sentinelai-setup-artifact/SentinelAI-Setup.exe
+          path: ${{ runner.temp }}/sentinelai-pilot-release/SentinelAI-Setup.exe
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: SentinelAI-Agent-Setup-win-x64
-          path: ${{ runner.temp }}/sentinelai-agent-setup-artifact/SentinelAI-Agent-Setup.exe
+          path: ${{ runner.temp }}/sentinelai-pilot-release/SentinelAI-Agent-Setup.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SentinelAI-Pilot-Release-documents
+          path: |
+            ${{ runner.temp }}/sentinelai-pilot-release/SHA256SUMS.txt
+            ${{ runner.temp }}/sentinelai-pilot-release/*.md
           if-no-files-found: error
 
   setup-lifecycle-windows:
