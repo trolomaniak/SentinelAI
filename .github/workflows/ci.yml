@@ -144,7 +144,9 @@ jobs:
                 Where-Object { $_.ProviderName -in 'SentinelAI.Agent', '.NET Runtime', 'Application Error', 'Service Control Manager' } |
                 Select-Object -First 20 | ForEach-Object {
                   $types = @([regex]::Matches([string]$_.Message, '\b[A-Z][A-Za-z0-9]*(\.[A-Z][A-Za-z0-9]*)*Exception\b') | ForEach-Object Value | Select-Object -Unique)
-                  "$($_.ProviderName)/$($_.Id)/$($_.LevelDisplayName)" + $(if ($types.Count -gt 0) { ' ' + ($types -join ',') } else { '' })
+                  # Stack frame method names are code identifiers, never message text.
+                  $frames = @([regex]::Matches([string]$_.Message, '(?m)^\s*at ((?:SentinelAI|System|Microsoft)\.[A-Za-z0-9_.`<>]+)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique -First 8)
+                  "$($_.ProviderName)/$($_.Id)/$($_.LevelDisplayName)" + $(if ($types.Count -gt 0) { ' ' + ($types -join ',') } else { '' }) + $(if ($frames.Count -gt 0) { ' at ' + ($frames -join ' < ') } else { '' })
                 })
               throw "Agent service stopped while Core was unavailable (state=$($cim.State), exit=$($cim.ExitCode), serviceExit=$($cim.ServiceSpecificExitCode); events: $($events -join '; '))."
             }
