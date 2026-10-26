@@ -10,7 +10,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-Import-Module (Join-Path $PSScriptRoot 'CoreServiceInstaller.psm1') -Force -DisableNameChecking
+# Windows CI fixture for the Core service and Desktop acceptance; customers install through SentinelAI-Setup.exe.
+Import-Module (Join-Path $PSScriptRoot '../../installer/pilot/CoreServiceInstaller.psm1') -Force -DisableNameChecking
 try { Invoke-CoreServiceManagement @PSBoundParameters }
 catch {
     throw 'Core service management failed. Use elevated Windows x64 PowerShell and the matching protected signed pilot installation. Bootstrap the administrator in console mode first; stop that console before installing the service. Existing state is retained.'

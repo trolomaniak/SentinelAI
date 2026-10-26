@@ -992,7 +992,7 @@ function Invoke-PilotInstall {
             Write-PilotProtectedFile -Path $receiptPath -Content ($newReceipt | ConvertTo-Json -Compress) -Kind Receipt
         }
         if ($kind -eq 'Core') {
-            return [PSCustomObject]@{ component = 'Core'; version = $metadata.version; codeDirectory = $CodeDirectory; dataDirectory = $DataDirectory; configurationPath = $configurationPath; dashboardUrl = $origin }
+            return [PSCustomObject]@{ component = 'Core'; version = $metadata.version; codeDirectory = $CodeDirectory; dataDirectory = $DataDirectory; configurationPath = $configurationPath; coreUrl = $origin }
         }
         if ($null -ne $service -and $service.State -eq 'Running') {
             $identity = Wait-PilotAgentEnrollment -DataDirectory $DataDirectory -TimeoutSeconds $TimeoutSeconds
@@ -1013,7 +1013,7 @@ function Invoke-PilotInstall {
         }
         return [PSCustomObject]@{ component = 'Agent'; version = $metadata.version; serviceName = $script:ServiceName;
             serviceAccountSid = $script:ServiceSid; codeDirectory = $CodeDirectory; dataDirectory = $DataDirectory;
-            endpointId = $identity.endpointId; installationId = $identity.installationId; dashboardUrl = $origin }
+            endpointId = $identity.endpointId; installationId = $identity.installationId; coreUrl = $origin }
     } catch {
         if ($createdService) {
             try {

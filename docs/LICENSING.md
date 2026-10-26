@@ -23,7 +23,7 @@ Public trust keys still use `SentinelAI:Licensing:TrustedPublicKeys:<keyId>` wit
 | `TimeoutSeconds` | Complete request/response timeout, 1–60 seconds; default 10 |
 | `Automatic` | Start renewal on host startup and repeat automatically; default true; false supports controlled development tests/manual renewal |
 
-Configure URL, credential path, and at least one public trust key together. Empty renewal configuration makes no network requests. The client posts only Core's persisted organization/installation IDs to `/api/licenses/lease`, sends the separate activation bearer only to the fixed issuer, disables redirects, and retains normal TLS certificate verification. Responses are size-bounded and must contain exactly one signed lease. Credential files must be private to the account on Unix; operators must provision account-restricted ACLs on Windows. Never put credential values or private signing keys in Core configuration, logs, APIs, dashboard, or source control.
+Configure URL, credential path, and at least one public trust key together. Empty renewal configuration makes no network requests. The client posts only Core's persisted organization/installation IDs to `/api/licenses/lease`, sends the separate activation bearer only to the fixed issuer, disables redirects, and retains normal TLS certificate verification. Responses are size-bounded and must contain exactly one signed lease. Credential files must be private to the account on Unix; operators must provision account-restricted ACLs on Windows. Never put credential values or private signing keys in Core configuration, logs, APIs, Desktop, or source control.
 
 ## Persistence and time
 

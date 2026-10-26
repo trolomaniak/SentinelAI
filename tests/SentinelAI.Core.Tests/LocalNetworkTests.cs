@@ -269,7 +269,7 @@ internal static partial class LocalNetworkTests
         using (var health = await local.GetAsync("/api/health"))
             Check(health.StatusCode == HttpStatusCode.OK, "The loopback Desktop origin stopped serving health.");
 
-        // Administrator, authentication, health, dashboard and Desktop routes are refused on the local network,
+        // Administrator, authentication, health and Desktop routes and any other path are refused on the local network,
         // even with a valid administrator bearer and from this computer.
         foreach (var (method, path, bearer) in new (HttpMethod, string, bool)[]
                  {

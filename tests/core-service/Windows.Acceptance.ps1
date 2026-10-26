@@ -18,7 +18,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $installerDirectory = Join-Path $repositoryRoot 'installer/pilot'
-$managementScript = Join-Path $installerDirectory 'Manage-SentinelAICoreService.ps1'
+$managementScript = Join-Path $PSScriptRoot 'Manage-SentinelAICoreService.ps1'
 Import-Module (Join-Path $installerDirectory 'PilotInstaller.psm1') -Force -DisableNameChecking
 Assert-PilotSupportedHost
 if (-not [Environment]::UserInteractive) { throw 'Desktop-exit acceptance requires an interactive Windows session.' }
@@ -378,7 +378,7 @@ try {
     $client = [Net.Http.HttpClient]::new($handler)
     $client.Timeout = [TimeSpan]::FromSeconds(10)
 
-    $console = & (Join-Path $installerDirectory 'Start-SentinelAICore.ps1') -CodeDirectory $coreCode -DataDirectory $coreData -AdminCredential $credential -TimeoutSeconds ([Math]::Min(180, $TimeoutSeconds))
+    $console = & (Join-Path $PSScriptRoot 'Start-SentinelAICore.ps1') -CodeDirectory $coreCode -DataDirectory $coreData -AdminCredential $credential -TimeoutSeconds ([Math]::Min(180, $TimeoutSeconds))
     $consoleProcess = [Diagnostics.Process]::GetProcessById($console.ProcessId)
     $null = $consoleProcess.Handle
     Assert-CoreServiceAcceptance ([IO.Path]::GetFullPath($consoleProcess.MainModule.FileName) -ieq $coreExecutable) 'The bootstrap child is not the installed Core executable.'

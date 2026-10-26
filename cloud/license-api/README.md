@@ -1,6 +1,6 @@
 # Development License API
 
-This separate .NET 10 server issues locally verifiable seven-day signed leases. Core and Agent do not reference the issuer implementation or load its private key. Core's opt-in TASK-011 renewal client uses an operator-provisioned activation credential; Agent and dashboard never receive it. The server uses a static, startup-validated entitlement list for development and tests; billing and public production deployment remain separate work. Core's renewal, lease storage, and Safe Mode behavior are documented in [licensing operation](../../docs/LICENSING.md).
+This separate .NET 10 server issues locally verifiable seven-day signed leases. Core and Agent do not reference the issuer implementation or load its private key. Core's opt-in TASK-011 renewal client uses an operator-provisioned activation credential; Agent and Desktop never receive it. The server uses a static, startup-validated entitlement list for development and tests; billing and public production deployment remain separate work. Core's renewal, lease storage, and Safe Mode behavior are documented in [licensing operation](../../docs/LICENSING.md).
 
 ## Generate development material
 

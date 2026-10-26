@@ -1,6 +1,6 @@
 # Native Desktop Risk and Reports
 
-Sign in through [Desktop authentication](DESKTOP-AUTH.md), then open **Risk** or **Reports**. Both use Core's existing administrator APIs through the same private session and verified local connection. Desktop is the supported production interface; the dashboard remains only for development/diagnostic compatibility.
+Sign in through [Desktop authentication](DESKTOP-AUTH.md), then open **Risk** or **Reports**. Both use Core's existing administrator APIs through the same private session and verified local connection.
 
 ## Review Risk
 
@@ -48,7 +48,7 @@ On Windows x64 with the .NET 10 SDK:
 
 ```powershell
 dotnet run --project tests/SentinelAI.Desktop.Windows.Tests/SentinelAI.Desktop.Windows.Tests.csproj --configuration Release --runtime win-x64
-bash ./scripts/publish-desktop-windows.sh
+dotnet publish desktop/SentinelAI.Desktop/SentinelAI.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishTrimmed=false -p:DebugType=none -p:DebugSymbols=false --output artifacts/desktop/win-x64
 ```
 
 Portable tests cover Core field/decimal preservation, all contributing factors, ranked server paging, bounds, strict attachment metadata/UTF-8, opaque byte preservation, explicit file saving, cancellation/clearing and stale-session races. Existing Core/scoring/report regressions cover deterministic output, report privacy and Safe Mode independence. Native WPF tests cover actual Risk/Reports bindings, factors, pagination, layouts, report actions and retained/cleared session state.

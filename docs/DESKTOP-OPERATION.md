@@ -1,12 +1,10 @@
 # Native Desktop operation
 
-SentinelAI Desktop is the supported Windows production interface. Normal administrator setup, sign-in, endpoint review, incident review and status changes, deterministic Risk, report generation/saving, licensing and optional assistive AI use native controls. No browser, embedded web view or dashboard process is needed. Overview remains a placeholder; use the dedicated workspaces for current information.
+SentinelAI Desktop is the supported Windows production interface. Normal administrator setup, sign-in, endpoint review, incident review and status changes, deterministic Risk, report generation/saving, licensing and optional assistive AI use native controls. No browser or embedded web view is needed. Overview remains a placeholder; use the dedicated workspaces for current information.
 
 ## Open and reopen
 
-Publish using `./scripts/publish-desktop-windows.sh`, copy the complete `artifacts/desktop/win-x64` directory to the Windows x64 machine, and open `SentinelAI.Desktop.exe`. The application includes its runtime; keep its accompanying files together. This remains a development/pilot artifact without a new installer, shortcut installer or Authenticode release.
-
-For an initialized installation, start the existing [Core service](CORE-SERVICE.md) and installed Agent through their existing service configuration. Open Desktop and sign in with the Core administrator. Desktop's fixed supported origin is `http://127.0.0.1:5000` and its trusted installation uses the existing default paths. See [first-run setup and authentication](DESKTOP-AUTH.md) for the separate initial-administrator setup window and UAC boundary.
+[SentinelAI Setup](SETUP.md) installs Desktop with Core and Agent and adds the **Start → SentinelAI** shortcut. Both services start automatically with Windows. Open Desktop and sign in with the Core administrator. Desktop's fixed supported origin is `http://127.0.0.1:5000` and its trusted installation uses the existing default paths. See [first-run setup and authentication](DESKTOP-AUTH.md) for the separate initial-administrator setup window and UAC boundary.
 
 Normal Desktop activation is limited to one application for the current Windows user and interactive session. Opening the executable again requests **Open SentinelAI** on that existing application, restores its minimized or hidden window, and exits the duplicate process successfully. Activation carries only a bounded literal activation message; it cannot carry credentials, URLs, commands or navigation content. A separate initial-administrator setup process retains its existing setup-only boundary.
 
@@ -32,10 +30,6 @@ When explicitly enabled, tray notifications report an observed local Core/Agent 
 - [AI and licensing](DESKTOP-AI-LICENSING.md) show Core's current permission snapshot and provide explicit manual actions. Cloud AI requires both session consent and Core permission; failures leave local workspaces available.
 
 Saving a report completes inside Desktop using the native destination picker. Opening, printing or converting that exported HTML with an operator-selected offline viewer is optional document handling outside normal SentinelAI operation. Desktop never automatically opens it; browser printing/PDF is an optional compatibility capability rather than a required product step.
-
-## Development and diagnostic compatibility
-
-Core continues to serve the existing browser dashboard and unchanged HTTP contracts for development and diagnostics. The dashboard is not the supported production user interface. Its Node.js build/tests and assets remain in the repository to preserve compatibility; Node.js and a browser are not required to run the published Desktop. Console Core startup and custom-path/port workflows remain development/pilot diagnostic options. Remote dashboard access still requires separately configured HTTPS and the existing authentication rules.
 
 ## Verification
 

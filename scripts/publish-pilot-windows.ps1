@@ -6,7 +6,6 @@ param(
     [Parameter(Mandatory = $true)][ValidatePattern('^dev-[A-Za-z0-9_-]{1,48}$')][string]$KeyId,
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
     [string]$OutputDirectory,
-    [switch]$DirectoryHosts,
     # MVP-3: a prepared pilot-license directory (trust/<key ID>.pem public keys, optional contact.json) deployed next to Core.
     [string]$PilotLicenseDirectory
 )
@@ -46,16 +45,12 @@ try {
     foreach ($component in @('core', 'agent', 'updater')) {
         $project = switch ($component) { 'core' { 'core/SentinelAI.Core.csproj' }; 'agent' { 'agent/SentinelAI.Agent.csproj' }; 'updater' { 'updater/SentinelAI.Updater.csproj' } }
         $publish = Join-Path $OutputDirectory ($component + '-publish')
-        # Setup keeps all runtime code inside the signed/protected installation.
-        # The original manually delivered pilot retains its single-file default.
-        $singleFile = if ($DirectoryHosts) { 'false' } else { 'true' }
+        # Ordinary self-contained directories: Setup keeps all runtime code inside the signed, protected installation.
         Invoke-PilotDotnet -Arguments @('publish', (Join-Path $repo $project), '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'true',
-            ('-p:PublishSingleFile=' + $singleFile), '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:DebugType=none', '-p:DebugSymbols=false',
+            '-p:PublishSingleFile=false', '-p:DebugType=none', '-p:DebugSymbols=false',
             ('-p:Version=' + $Version), ('-p:AssemblyVersion=' + $Version + '.0'), '--output', $publish)
         $executable = 'SentinelAI.' + $(if ($component -eq 'core') { 'Core' } elseif ($component -eq 'agent') { 'Agent' } else { 'Updater' }) + '.exe'
         if (-not (Test-Path -LiteralPath (Join-Path $publish $executable) -PathType Leaf)) { throw 'The Windows executable was not published.' }
-        if ($component -eq 'core' -and (-not (Test-Path -LiteralPath (Join-Path $publish 'dashboard/index.html') -PathType Leaf) -or
-            -not (Test-Path -LiteralPath (Join-Path $publish 'dashboard/assets/app.js') -PathType Leaf))) { throw 'Published Core dashboard assets are missing.' }
         if ($component -eq 'core' -and -not [string]::IsNullOrWhiteSpace($PilotLicenseDirectory)) {
             Copy-Item -LiteralPath $PilotLicenseDirectory -Destination (Join-Path $publish 'pilot-license') -Recurse
         }
@@ -68,17 +63,13 @@ try {
             '--channel', $Channel, '--output', (Join-Path $OutputDirectory ($component + '.manifest.json')))
         Remove-Item -LiteralPath $publish -Recurse -Force
     }
-    Copy-Item -LiteralPath (Join-Path $repo 'installer/pilot') -Destination (Join-Path $OutputDirectory 'installer') -Recurse
-    Copy-Item -LiteralPath (Join-Path $repo 'docs/PILOT.md') -Destination (Join-Path $OutputDirectory 'PILOT.md')
-    Copy-Item -LiteralPath (Join-Path $repo 'docs/CORE-SERVICE.md') -Destination (Join-Path $OutputDirectory 'CORE-SERVICE.md')
-    Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-AUTH.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-AUTH.md')
-    Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-DEVICES.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-DEVICES.md')
-    Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-ALERTS.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-ALERTS.md')
-    Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-RISK-REPORTS.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-RISK-REPORTS.md')
-    Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-AI-LICENSING.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-AI-LICENSING.md')
-    Copy-Item -LiteralPath (Join-Path $repo 'docs/DESKTOP-OPERATION.md') -Destination (Join-Path $OutputDirectory 'DESKTOP-OPERATION.md')
+    # Setup loads only these two installer modules.
+    New-Item -ItemType Directory -Path (Join-Path $OutputDirectory 'installer') | Out-Null
+    foreach ($module in @('PilotInstaller.psm1', 'CoreServiceInstaller.psm1')) {
+        Copy-Item -LiteralPath (Join-Path $repo ('installer/pilot/' + $module)) -Destination (Join-Path $OutputDirectory 'installer')
+    }
     $complete = $true
-    Write-Output ('Development pilot bundle created: ' + $OutputDirectory)
+    Write-Output ('Signed development packages created: ' + $OutputDirectory)
 } catch {
     throw 'Pilot packaging failed. Check the version, development key outside source, SDK/package access and new output path. Partial artifacts are not a release.'
 } finally {

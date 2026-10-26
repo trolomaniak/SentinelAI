@@ -15,12 +15,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Restore and build solution and dashboard
+      - name: Restore and build the solution
         run: ./scripts/build.sh
-      - name: Run backend, desktop foundation and dashboard tests
+      - name: Run backend, desktop foundation and Setup tests
         run: |
           set +e
           ./scripts/test.sh > "$RUNNER_TEMP/sentinelai-regression-test.log" 2>&1
@@ -107,10 +104,14 @@ jobs:
             Write-Output "::notice title=Windows endpoint telemetry acceptance::$($lines -join ' ')"
           }
           exit $testExitCode
-      - name: Publish standalone Agent EXE
-        shell: bash
-        run: ./scripts/publish-agent-windows.sh
-      - name: Verify Agent EXE starts
+      - name: Publish the Agent for its process and service tests
+        shell: pwsh
+        run: |
+          # An internal test build, not a separate package: Agents ship only through Agent Setup.
+          dotnet publish agent/SentinelAI.Agent.csproj --configuration Release --runtime win-x64 --self-contained true `
+            -p:PublishSingleFile=false -p:DebugType=none -p:DebugSymbols=false --output ./artifacts/agent/win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Agent test publish failed.' }
+      - name: Verify the Agent starts
         shell: pwsh
         run: |
           $agent = Start-Process -FilePath (Resolve-Path ./artifacts/agent/win-x64/SentinelAI.Agent.exe).Path -PassThru
@@ -155,11 +156,6 @@ jobs:
             sc.exe delete $serviceName | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'Could not remove the temporary Agent service.' }
           }
-      - uses: actions/upload-artifact@v4
-        with:
-          name: SentinelAI.Agent-win-x64
-          path: artifacts/agent/win-x64/SentinelAI.Agent.exe
-          if-no-files-found: error
 
   core-service-windows:
     runs-on: windows-latest
@@ -187,7 +183,7 @@ jobs:
         run: |
           ./tests/core-service/Workflow.Tests.ps1
           ./tests/core-service/Health.Tests.ps1
-      - name: Prepare signed development pilot bundle
+      - name: Prepare signed development Core and Agent packages
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -202,8 +198,12 @@ jobs:
             Remove-Item -LiteralPath $keys -Recurse -Force
           }
       - name: Publish desktop for independent-lifetime acceptance
-        shell: bash
-        run: ./scripts/publish-desktop-windows.sh
+        shell: pwsh
+        run: |
+          # An internal test build, not a separate package: the product ships only through Setup.
+          dotnet publish desktop/SentinelAI.Desktop/SentinelAI.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true `
+            -p:PublishSingleFile=false -p:PublishTrimmed=false -p:DebugType=none -p:DebugSymbols=false --output ./artifacts/desktop/win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop test publish failed.' }
       - name: Verify native Core service lifecycle and recovery
         shell: pwsh
         run: |
@@ -258,17 +258,16 @@ jobs:
             Write-Output "::error title=Native WPF navigation test::$message"
           }
           exit $testExitCode
-      - name: Publish self-contained Windows desktop
-        shell: bash
-        run: ./scripts/publish-desktop-windows.sh
+      - name: Publish desktop for its process test
+        shell: pwsh
+        run: |
+          # An internal test build, not a separate package: the product ships only through Setup.
+          dotnet publish desktop/SentinelAI.Desktop/SentinelAI.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true `
+            -p:PublishSingleFile=false -p:PublishTrimmed=false -p:DebugType=none -p:DebugSymbols=false --output ./artifacts/desktop/win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop test publish failed.' }
       - name: Verify published desktop opens and shuts down gracefully
         shell: pwsh
         run: ./tests/desktop/Windows.Acceptance.ps1 -ExecutablePath ./artifacts/desktop/win-x64/SentinelAI.Desktop.exe
-      - uses: actions/upload-artifact@v4
-        with:
-          name: SentinelAI.Desktop-win-x64
-          path: artifacts/desktop/win-x64/
-          if-no-files-found: error
 
   setup-windows:
     runs-on: windows-latest

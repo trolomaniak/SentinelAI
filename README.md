@@ -2,13 +2,13 @@
 
 SentinelAI is a Windows-first, local-first security platform in development. It collects endpoint inventory and selected Windows configuration observations, evaluates deterministic security rules, and provides native incident review, risk prioritization and local reports.
 
-The operator interface is **SentinelAI.Desktop**, a native .NET 10 WPF application for Windows x64. Core and Agent run independently of the window. Normal operation requires no browser; the existing dashboard remains available for development and diagnostics.
+The operator interface is **SentinelAI.Desktop**, a native .NET 10 WPF application for Windows x64. Core and Agent run independently of the window. Normal operation requires no browser, and Core serves no browser interface.
 
 ## Current project state
 
 The current implementation includes native Desktop workflows and a single **`SentinelAI-Setup.exe`**. TASK-025 adds detection of owned installations, version-aware repair/upgrade, signed whole-deployment replacement with rollback, explicit recovery and uninstall with data retained by default. Actual Windows acceptance passed fresh installation, upgrade, health-failed rollback, damaged-file repair, retained-data uninstall/restore and explicitly confirmed data removal. See [development status](.agent/STATUS.md) for exact results.
 
-Distribution is at the **development/pilot stage**: Setup, a self-contained Desktop directory and development-signed packages can be built from source. There is no published release download; the earlier pilot release remains a draft with no uploaded assets. See [validation and limitations](#validation-and-limitations).
+Distribution is at the **development/pilot stage**: the two installers, `SentinelAI-Setup.exe` and `SentinelAI-Agent-Setup.exe`, are the only packages and can be built from source with development-signed payloads. There is no published release download; the earlier pilot release remains a draft with no uploaded assets. See [validation and limitations](#validation-and-limitations).
 
 ## Implemented functionality
 
@@ -45,7 +45,7 @@ Use a fresh Windows 11 x64 development/test machine and follow the [single-EXE s
 3. Wait for installation progress to complete. Setup starts Core and enrolls/starts Agent without manual ZIP extraction.
 4. Open Desktop from Setup or **Start → SentinelAI**, sign in with the account you created, and verify the exact endpoint and fresh observation times in Devices.
 
-Published applications include their .NET runtime. The target machine needs no SDK, Node.js or browser; Setup uses the stock Windows PowerShell. The [manual pilot installation guide](docs/PILOT.md) remains available for development and diagnostics, including separate Desktop publishing and [Core service operation](docs/CORE-SERVICE.md).
+Published applications include their .NET runtime. The target machine needs no SDK or browser; Setup uses the stock Windows PowerShell.
 
 For an existing owned Setup installation, close Desktop and follow the [maintenance guide](docs/SETUP.md#repair-upgrade-and-uninstall). Repair/upgrade require the matching installed trust root/channel and preserve security history, configuration, identity, enrollment and licensing state. Setup never treats retained data as a fresh deployment.
 
@@ -53,23 +53,16 @@ AI and license renewal require operator-provided service configuration and crede
 
 ## Build and test from source
 
-Build prerequisites are the **.NET 10 SDK**, **Bash** and **Node.js 20 or newer**. Install **PowerShell 7 (`pwsh`)** to run the portable pilot/service tests; `scripts/test.sh` skips those suites when it is absent.
+Build prerequisites are the **.NET 10 SDK** and **Bash**. Install **PowerShell 7 (`pwsh`)** to run the portable installer and service tests; `scripts/test.sh` skips those suites when it is absent.
 
 ```sh
 ./scripts/build.sh
 ./scripts/test.sh
 ```
 
-The build script restores/builds the solution and diagnostic dashboard. The test script runs Core/Agent, rules, scoring, licensing, AI, update, Desktop, Setup and dashboard regressions, plus the PowerShell suites when available. Building on Linux cross-compiles Windows projects; native WPF and Windows service acceptance execute on Windows. Publishing the final Setup EXE requires Windows and Visual Studio C++ build tools with the Windows SDK; see [Setup build instructions](docs/SETUP.md#build-the-development-artifact).
+The build script restores and builds the solution. The test script runs Core/Agent, rules, scoring, licensing, AI, update, Desktop and Setup regressions, plus the PowerShell suites when available. Building on Linux cross-compiles Windows projects; native WPF and Windows service acceptance execute on Windows. Publishing the final Setup EXE requires Windows and Visual Studio C++ build tools with the Windows SDK; see [Setup build instructions](docs/SETUP.md#build-the-development-artifact).
 
-```sh
-./scripts/publish-desktop-windows.sh
-./scripts/publish-agent-windows.sh
-```
-
-These commands produce the self-contained Desktop directory and Agent executable under `artifacts/`. Core/Agent bundle preparation is documented in the [pilot guide](docs/PILOT.md). Native WPF/GUI test commands and manual DPI checks are in [desktop/README.md](desktop/README.md).
-
-Console Core and the same-origin browser dashboard remain development/diagnostic options. The [console workflow](docs/PILOT.md#development-and-diagnostic-console-alternative) explains administrator bootstrap. The installed Desktop uses its fixed trusted local Core destination; it has no destination or credential editor.
+A pilot release (both installers, the four pilot documents and checksums) is built on Windows with `scripts/publish-pilot-release-windows.ps1`; see the [pilot test checklist](docs/pilot/PILOT-TEST-CHECKLIST.md). Native WPF/GUI test commands and manual DPI checks are in [desktop/README.md](desktop/README.md). The installed Desktop uses its fixed trusted local Core destination; it has no destination or credential editor.
 
 ## Validation and limitations
 
@@ -83,7 +76,7 @@ Current limits:
 - On the Windows Server CI runner the installed LocalService Agent collects every endpoint telemetry source except Security Center antivirus health, which servers do not provide. Client editions are not yet measured; a source an endpoint refuses is reported as access denied and is never treated as safe.
 - Monitored security settings are delivered within seconds of a reachable change, but other inventory can be stale, and posture is current state rather than an event history. Core does not retain complete inventory/heartbeat history or historical risk scores; reports distinguish current risk from retained incident activity.
 - Selected Windows security events are evaluated by twelve deterministic runtime rules whose alerts appear with the other alerts and in Risk; raw events are not shown in Desktop, reports or AI. The installed LocalService Agent cannot read the Security channel (logons, scheduled tasks, Security log clears) until a read grant is approved; it reports that channel as access denied, and the logon and scheduled task rules cannot fire.
-- Setup's fresh Agent enrollment/DPAPI/heartbeat/inventory/restart and complete maintenance lifecycle acceptance passed. The original TASK-015 console pilot's full uninstall/reinstall scenario remains unexecuted.
+- Setup's fresh Agent enrollment/DPAPI/heartbeat/inventory/restart and complete maintenance lifecycle acceptance passed.
 - Interactive UAC approval and physical multi-monitor DPI checks remain manual. Tray delivery and auto-start also depend on Windows shell/startup policy.
 - Pilot packages use development manifest signatures. Authenticode signing, production trust provisioning, automatic upgrades and state/account migrations remain outstanding. Unverified ownership is refused; failed transaction recovery requires explicit action.
 - Billing and enforcement of the signed endpoint limit are not implemented.
@@ -94,7 +87,7 @@ Current limits:
 - **Pilot documents for companies** (Polish and English): [SentinelAI dla firm](docs/pilot/SentinelAI-dla-firm.pl.md) · [SentinelAI for business](docs/pilot/SentinelAI-for-business.en.md) · [Przewodnik IT](docs/pilot/SentinelAI-przewodnik-IT.pl.md) · [IT guide](docs/pilot/SentinelAI-IT-guide.en.md) · [Pilot scope](docs/MVP.md) · [Pilot test checklist](docs/pilot/PILOT-TEST-CHECKLIST.md)
 
 - [Development status and verification](.agent/STATUS.md) · [Architectural decisions](.agent/DECISIONS.md)
-- [Single-EXE Windows setup](docs/SETUP.md) · [Manual pilot installation](docs/PILOT.md) · [Core Windows Service](docs/CORE-SERVICE.md) · [Desktop setup/sign-in](docs/DESKTOP-AUTH.md)
+- [Single-EXE Windows setup](docs/SETUP.md) · [Desktop setup/sign-in](docs/DESKTOP-AUTH.md)
 - [Desktop operation, tray and auto-start](docs/DESKTOP-OPERATION.md) · [Devices](docs/DESKTOP-DEVICES.md) · [Alerts](docs/DESKTOP-ALERTS.md)
 - [Native Risk/Reports](docs/DESKTOP-RISK-REPORTS.md) · [Scoring policy](scoring/README.md) · [Rule catalog](rules/README.md) · [Posture monitoring](docs/POSTURE-MONITOR.md) · [Security event collection](docs/SECURITY-EVENTS.md) · [Endpoint telemetry](docs/ENDPOINT-TELEMETRY.md) · [Report semantics](docs/REPORTING.md)
 - [Native AI/licensing](docs/DESKTOP-AI-LICENSING.md) · [AI Gateway/configuration](docs/AI.md) · [Licensing](docs/LICENSING.md) · [Development issuer](cloud/license-api/README.md)

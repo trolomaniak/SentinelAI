@@ -9,13 +9,13 @@ The default development listener is `http://127.0.0.1:5200`. Remote callers must
 - `SentinelAI:AiGateway:ClientCredentialSha256`: required 64-character SHA-256 hexadecimal digest of the credential string.
 - `SentinelAI:AiGateway:Model`: explicit provider model supporting Chat Completions and strict structured JSON output; required when a provider key is configured. There is no default model.
 - `SentinelAI:AiGateway:TimeoutSeconds`: whole request deadline, default 20, allowed 1–60 seconds.
-- `SENTINELAI_AI_PROVIDER_API_KEY`: provider key injected into the gateway process through cloud secret configuration. Never set this in Core, Agent, dashboard, tracked source, request bodies, or logs.
+- `SENTINELAI_AI_PROVIDER_API_KEY`: provider key injected into the gateway process through cloud secret configuration. Never set this in Core, Agent, Desktop, tracked source, request bodies, or logs.
 
 ASP.NET Core environment variable keys use double underscores, for example `SentinelAI__AiGateway__ClientCredentialSha256`. Unknown gateway configuration fields fail startup. Start from the repository root with `dotnet run --project cloud/ai-gateway/SentinelAI.AiGateway.csproj`; provision the credential digest before startup. Provider credentials can remain absent for local development: authorized requests return a generic `503` while local alert functionality continues. No live provider call is required to run the synthetic tests.
 
 ## Boundaries and behavior
 
-The endpoint accepts one authenticated Core client using a fixed-time SHA-256 digest comparison. Context is limited to the 13 current built-in configuration rules, each rule's explicitly allowed Boolean/integer evidence, normalized severity, platform `windows`, and coarse observation freshness. Exact fields are required and duplicate/unknown properties fail validation. No device, organization, account, hostname, address, log history, inventory dump, event timestamp, or arbitrary text is accepted. Core supplies context from stored alert evidence; dashboard callers cannot override it.
+The endpoint accepts one authenticated Core client using a fixed-time SHA-256 digest comparison. Context is limited to the 13 current built-in configuration rules, each rule's explicitly allowed Boolean/integer evidence, normalized severity, platform `windows`, and coarse observation freshness. Exact fields are required and duplicate/unknown properties fail validation. No device, organization, account, hostname, address, log history, inventory dump, event timestamp, or arbitrary text is accepted. Core supplies context from stored alert evidence; Desktop callers cannot override it.
 
 Requests are at most 4 KiB, including streamed bodies. Responses are at most 32 KiB; provider replies are read with a 64 KiB limit. All gateway responses carry `Cache-Control: no-store`. Authenticated traffic is limited to 30 requests per minute per source IP and 12 per minute for the configured Core credential. A maximum of four provider requests run concurrently; excess calls return `429` immediately. Provider calls use one bounded deadline and no automatic retries.
 

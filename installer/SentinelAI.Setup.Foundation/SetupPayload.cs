@@ -88,8 +88,8 @@ public static class SetupPayload
             }
         }
         string[] required = product == SetupMetadata.AgentProduct
-            ? ["setup/SetupWorker.ps1", "setup/AgentSetupWorker.ps1", "bundle/installer/Install-SentinelAIPilot.ps1", "bundle/agent.zip", "bundle/updater/SentinelAI.Updater.exe"]
-            : ["setup/SetupWorker.ps1", "desktop/SentinelAI.Desktop.exe", "bundle/installer/Install-SentinelAIPilot.ps1"];
+            ? ["setup/SetupWorker.ps1", "setup/AgentSetupWorker.ps1", "bundle/installer/PilotInstaller.psm1", "bundle/agent.zip", "bundle/updater/SentinelAI.Updater.exe"]
+            : ["setup/SetupWorker.ps1", "desktop/SentinelAI.Desktop.exe", "bundle/installer/PilotInstaller.psm1"];
         foreach (var path in required)
             if (!paths.TryGetValue(path, out var directory) || directory) throw new InvalidDataException("Incomplete setup archive.");
         // Agent Setup installs the Agent and Updater only: no Core package and no Desktop.
