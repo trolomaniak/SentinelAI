@@ -285,15 +285,17 @@ jobs:
           ./tests/setup/Lifecycle.Tests.ps1
           ./tests/setup/AgentWorker.Tests.ps1
           ./tests/setup/TrustedPath.Tests.ps1
+          ./tests/setup/AccountAccess.Tests.ps1
           ./tests/pilot/BoundedProcess.Tests.ps1
           ./tests/setup/HangProbe.Tests.ps1
-      - name: Run the bounded Updater process and hang probe tests under Windows PowerShell 5.1
+      - name: Run the bounded Updater process, hang probe and account access tests under Windows PowerShell 5.1
         # The Setup worker and the native acceptance scripts run under Windows PowerShell 5.1.
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           ./tests/pilot/BoundedProcess.Tests.ps1
           ./tests/setup/HangProbe.Tests.ps1
+          ./tests/setup/AccountAccess.Tests.ps1
       - name: Publish one native Setup EXE with a private self-contained runtime
         shell: pwsh
         run: |

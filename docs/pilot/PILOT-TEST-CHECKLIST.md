@@ -76,7 +76,8 @@ These steps move A's clock forward. Core never lets its time go backwards, so A'
   1. With the pilot ended (step 4), select **Uninstall SentinelAI** in Desktop. Desktop closes, and UAC appears.
   2. Setup opens with **Uninstall** selected and **Keep security history and protected configuration** checked. Select **Continue**.
   3. Check that the services, the firewall rule and `%ProgramFiles%\SentinelAI` are gone, and that `%ProgramData%\SentinelAI\Core\sentinelai.db` remains.
-- [ ] Run the same `SentinelAI-Setup.exe` again: it offers **Repair**. Repair, sign in, and check that the history and the ended pilot are still there. Enter the 30-day key: the pilot is active again (with fewer days left, because of step 4).
+- [ ] Sign in to Windows on A with a different administrator account than the one that installed SentinelAI, and run the same `SentinelAI-Setup.exe` again: it offers **Repair**. Repair, sign in, and check that the history and the ended pilot are still there. Enter the 30-day key: the pilot is active again (with fewer days left, because of step 4).
+- [ ] Check that no folder names a Windows account: `icacls "%ProgramFiles%\SentinelAI" /T` and `icacls "%ProgramData%\SentinelAI" /T` list only `BUILTIN\Administrators`, `NT AUTHORITY\SYSTEM`, the service accounts and, for Desktop, `BUILTIN\Users`.
 - [ ] Uninstall with data removed:
   1. Uninstall again from **Settings → Apps → SentinelAI**.
   2. Clear **Keep security history and protected configuration**, type **DELETE** and select **Continue**.

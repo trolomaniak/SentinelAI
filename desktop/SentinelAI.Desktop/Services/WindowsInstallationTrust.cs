@@ -8,7 +8,7 @@ using SentinelAI.Desktop.Foundation;
 
 namespace SentinelAI.Desktop.Services;
 
-/// <summary>Checks the existing pilot installation using the invoking operator's authority.</summary>
+/// <summary>Checks the existing local Core installation using the invoking operator's authority.</summary>
 internal static class WindowsInstallationTrust
 {
     internal const string CoreServiceSid = "S-1-5-80-1772522954-4099193962-4247269631-2556497313-4219375900";
@@ -16,14 +16,18 @@ internal static class WindowsInstallationTrust
     internal static string DataDirectory { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SentinelAI", "Core");
     internal static string ExecutablePath { get; } = Path.Combine(CodeDirectory, "SentinelAI.Core.exe");
     internal static string ConfigurationPath { get; } = Path.Combine(DataDirectory, "pilot-config.json");
+    internal static string SetupReceiptPath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SentinelAI", "Setup", "setup-installation.json");
     internal static Uri Origin { get; } = new("http://127.0.0.1:5000/");
     private static readonly string[] SystemWriters = ["S-1-5-32-544", "S-1-5-18", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"];
 
     internal static FileStream ValidateOperatorInstallation()
     {
-        using var identity = WindowsIdentity.GetCurrent();
         var writers = new HashSet<string>(SystemWriters, StringComparer.Ordinal);
-        if (identity.User is not null) writers.Add(identity.User.Value);
+        if (TrustsCurrentAccount())
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            if (identity.User is not null) writers.Add(identity.User.Value);
+        }
         ValidatePath(CodeDirectory, writers, serviceOnAncestors: false);
         var pending = new Queue<string>();
         pending.Enqueue(CodeDirectory);
@@ -74,6 +78,22 @@ internal static class WindowsInstallationTrust
             return executable;
         }
         catch { executable.Dispose(); throw; }
+    }
+
+    /// <summary>
+    /// Only the separate console pilot grants its installing operator access, because its Core runs as that operator's
+    /// console process. Setup's central installation names no Windows account, so there (and in Setup itself) only
+    /// Administrators, SYSTEM, TrustedInstaller and the scoped Core service may own or write it: an elevated process must
+    /// not trust what its own account's non-elevated programs could change. A process that cannot read Setup's
+    /// administrator-only receipt is not elevated, and its own account then adds no authority over itself.
+    /// </summary>
+    private static bool TrustsCurrentAccount()
+    {
+#if SENTINELAI_SETUP
+        return false;
+#else
+        return !File.Exists(SetupReceiptPath);
+#endif
     }
 
     internal static string InstalledSetupPath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "SentinelAI Setup", "SentinelAI-Setup.exe");

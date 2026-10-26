@@ -49,7 +49,8 @@ function Import-SetupInstallerModules {
         if ($item.PSIsContainer -or $item.Length -gt 262144 -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Invalid bootstrap module.' }
     }
     $pilotSource = [IO.File]::ReadAllText((Join-Path $WorkDirectory 'bundle\installer\PilotInstaller.psm1'))
-    $pilot = New-Module -Name SentinelAISetupPilot -ScriptBlock ([ScriptBlock]::Create($pilotSource))
+    # Administrators only: Setup's installations name no Windows account in their ACLs and trust none.
+    $pilot = New-Module -Name SentinelAISetupPilot -ArgumentList @($true) -ScriptBlock ([ScriptBlock]::Create($pilotSource))
     Import-Module $pilot -Global -DisableNameChecking
     # Pass the already authenticated bootstrap module object, not a file-selected import.
     $coreSource = [IO.File]::ReadAllText((Join-Path $WorkDirectory 'bundle\installer\CoreServiceInstaller.psm1'))

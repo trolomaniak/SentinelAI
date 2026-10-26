@@ -168,11 +168,15 @@ function Assert-LifecyclePreserved {
     foreach ($path in $script:baseline.Files.Keys) { Assert-SetupAcceptance ($current.Files[$path] -ceq $script:baseline.Files[$path]) 'Lifecycle reset protected configuration, Agent identity or DPAPI enrollment state.' }
 }
 function Assert-LifecycleAcls {
-    $writers = @('S-1-5-32-544', 'S-1-5-18', $script:operatorSid)
+    $writers = @('S-1-5-32-544', 'S-1-5-18')
     Assert-ProtectedTree $script:programRoot $writers
+    Assert-ProtectedTree $script:dataRoot ($writers + @($script:coreSid, $script:localServiceSid))
     Assert-ProtectedTree $script:coreData ($writers + @($script:coreSid))
     Assert-ProtectedTree $script:agentData ($writers + @($script:localServiceSid))
     Assert-ProtectedTree $script:setupData $writers
+    foreach ($root in @($script:programRoot, $script:dataRoot, $script:shortcutRoot, (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'SentinelAI Setup'))) {
+        Assert-NoAccountAccess $root
+    }
     $mutation = [int]([Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor
         [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership)
     $read = [int][Security.AccessControl.FileSystemRights]::Read
@@ -182,6 +186,32 @@ function Assert-LifecycleAcls {
     Assert-ServiceAcl (Join-Path $script:desktopCode 'SentinelAI.Desktop.exe') 'S-1-5-32-545' $execute $mutation
     Assert-ServiceAcl (Join-Path $script:coreData 'pilot-config.json') $script:coreSid $read $mutation
     Assert-ServiceAcl (Join-Path $script:agentData 'pilot-config.json') $script:localServiceSid $read $mutation
+}
+# Central installations made by an earlier Setup granted the account that installed them full control of
+# Core's folders and the shared roots. Recreate that state as another administrator would have left it (a
+# synthetic account, not this runner's), exactly as the earlier Container, Code, DataDirectory and
+# protected-file kinds wrote it; the next maintenance must accept it and remove it.
+$script:legacyAccountSid = 'S-1-5-21-1000-1000-1000-1001'
+function Add-LifecycleLegacyAccountAccess {
+    $account = New-Object Security.Principal.SecurityIdentifier($script:legacyAccountSid)
+    $entries = @($script:programRoot, $script:dataRoot, $script:setupData, $script:coreData, $script:coreCode) +
+        @(Get-ChildItem -LiteralPath $script:coreCode -Recurse -Force | ForEach-Object { $_.FullName }) +
+        @(Get-ChildItem -LiteralPath $script:coreData -Force -File | ForEach-Object { $_.FullName })
+    foreach ($path in $entries) {
+        $directory = [IO.Directory]::Exists($path)
+        # The running Core service creates and removes its SQLite journal.
+        try { $acl = if ($directory) { [IO.Directory]::GetAccessControl($path) } else { [IO.File]::GetAccessControl($path) } }
+        catch { if (Test-Path -LiteralPath $path) { throw }; continue }
+        # Files the service created inherit the data directory's entry.
+        if (-not $directory -and -not $acl.AreAccessRulesProtected) { continue }
+        if ($directory) { $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($account, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))) }
+        else { $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($account, 'FullControl', 'Allow'))) }
+        if ($directory) { [IO.Directory]::SetAccessControl($path, $acl) } else { [IO.File]::SetAccessControl($path, $acl) }
+    }
+    foreach ($path in @($script:dataRoot, (Join-Path $script:coreCode 'SentinelAI.Core.exe'), (Join-Path $script:coreData 'pilot-config.json'))) {
+        Assert-SetupAcceptance (@((Get-Acl -LiteralPath $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+            Where-Object { $_.IdentityReference.Value -ceq $script:legacyAccountSid }).Count -ge 1) 'The earlier-installation access was not recreated.'
+    }
 }
 function Read-LifecycleCodeFingerprint {
     $items = @(Get-ChildItem -LiteralPath $script:programRoot -Recurse -File -Force | Sort-Object FullName)
@@ -383,6 +413,10 @@ try {
         try { $lifecycleKeyName = $key.Key.KeyName } finally { $key.Dispose(); $certificate.Dispose() }
     }
     Assert-LifecycleLocalNetwork
+    # The fresh installation names no Windows account; an earlier one installed by another administrator
+    # is upgraded by this one, and the upgrade removes that administrator's access.
+    Assert-LifecycleAcls
+    Add-LifecycleLegacyAccountAccess
     $since = [DateTimeOffset]::UtcNow
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Upgrade'
     Open-LifecycleCore; Wait-ExactEndpoint $endpointId $since

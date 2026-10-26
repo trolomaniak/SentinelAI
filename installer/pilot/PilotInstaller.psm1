@@ -1,5 +1,14 @@
+# Setup's central installation and Agent Setup load this module administrators-only: their ACLs name no
+# Windows account and their checks trust none, so any administrator maintains them. The separate console
+# pilot (the default) runs Core as the installing operator's non-elevated console process, so its Core
+# folders, configuration and parents also grant that account full control.
+param([bool]$AdministratorsOnly = $false)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:OperatorAccess = -not $AdministratorsOnly
+# The one account an earlier central installation granted full control. Setup's maintenance accepts it
+# only until it removed that account's entries (Set-PilotLegacyOperatorSid).
+$script:LegacyOperatorSid = $null
 $script:ServiceName = 'SentinelAIAgent'
 $script:ServiceAccount = 'NT AUTHORITY\LocalService'
 $script:ServiceSid = 'S-1-5-19'
@@ -31,6 +40,50 @@ function Assert-PilotSupportedHost {
 function Get-PilotCurrentOperatorSid {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     try { return $identity.User.Value } finally { $identity.Dispose() }
+}
+
+# The account granted access to the console pilot's Core; none for an administrators-only installation.
+function Get-PilotOperatorAccessSid {
+    if ($script:OperatorAccess) { return Get-PilotCurrentOperatorSid }
+}
+
+# Accounts whose ownership and write access the installation checks accept besides the built-in ones.
+function Get-PilotTrustedAccountSids {
+    $accounts = @(Get-PilotOperatorAccessSid)
+    if ($null -ne $script:LegacyOperatorSid) { $accounts += $script:LegacyOperatorSid }
+    return $accounts
+}
+
+function Get-PilotSharedProgramsPath { return [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms) }
+
+function Set-PilotLegacyOperatorSid {
+    param([AllowNull()][string]$Sid)
+    if ([string]::IsNullOrEmpty($Sid)) { $script:LegacyOperatorSid = $null; return }
+    # Only an ordinary local, domain or Microsoft Entra account, never a group or built-in identity.
+    if ($script:OperatorAccess -or $Sid -cnotmatch '\AS-1-(?:5-21|12-1)-\d+-\d+-\d+-\d+\z') { throw 'Invalid legacy installation account.' }
+    $script:LegacyOperatorSid = $Sid
+}
+
+# Removes one account's explicit Allow entries and ownership from an existing entry. Its other entries,
+# their inheritance and the DACL protection are unchanged; Windows updates the inherited copies below it.
+function Remove-PilotAccountAccess {
+    param([Parameter(Mandatory=$true)][string]$Path, [Parameter(Mandatory=$true)][string]$Sid)
+    $attributes = [IO.File]::GetAttributes($Path)
+    if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Links and reparse points are unsupported.' }
+    $container = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+    $acl = Get-PilotAcl -Path $Path -Container $container
+    $account = New-Object Security.Principal.SecurityIdentifier($Sid)
+    $changed = $false
+    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ceq $Sid) {
+        $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier($script:AdministratorsSid)))
+        $changed = $true
+    }
+    foreach ($rule in $acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier])) {
+        if ($rule.IdentityReference.Value -ceq $Sid -and $rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow) { $changed = $true }
+    }
+    if (-not $changed) { return }
+    [void]$acl.RemoveAccessRuleAll((New-Object Security.AccessControl.FileSystemAccessRule($account, 'FullControl', 'Allow')))
+    Set-PilotAcl -Path $Path -Container $container -Acl $acl
 }
 
 function Initialize-PilotNativeHelpers {
@@ -166,8 +219,7 @@ function Assert-PilotTrustedPath {
     if ($ServiceWriteSid -and (-not $ServiceWriteRoot -or $ServiceWriteSid -notmatch '\AS-1-5-80-(\d+-){4}\d+\z')) {
         throw 'A scoped virtual-service SID and data root are required.'
     }
-    $operator = Get-PilotCurrentOperatorSid
-    $trusted = @($script:AdministratorsSid, $script:SystemSid, $script:TrustedInstallerSid, $operator)
+    $trusted = @($script:AdministratorsSid, $script:SystemSid, $script:TrustedInstallerSid) + @(Get-PilotTrustedAccountSids)
     $pending = New-Object 'System.Collections.Generic.Queue[string]'
     # Entries found by listing a directory, as opposed to the requested path and its ancestors.
     $listed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -226,10 +278,20 @@ function Assert-PilotTrustedPath {
             [string]::Equals($current.TrimEnd('\'), $standardData, [StringComparison]::OrdinalIgnoreCase)) {
             $rights = $rights -band (-bnot [int][Security.AccessControl.FileSystemRights]::Write)
         }
+        # Windows' shared Start Menu Programs folder is the one ancestor some computers let the account running
+        # Setup write (owner decision of 2026-10-26). It may write there, never own it; Setup's own Start Menu
+        # folder below stays protected. At worst that account could change what SentinelAI's shortcut opens,
+        # never what runs as a service.
+        $currentWriters = $currentTrusted
+        $sharedPrograms = (Get-PilotSharedProgramsPath).TrimEnd('\')
+        if ($isAncestor -and $isContainer -and $sharedPrograms.Length -ne 0 -and
+            [string]::Equals($current.TrimEnd('\'), $sharedPrograms, [StringComparison]::OrdinalIgnoreCase)) {
+            $currentWriters += @(Get-PilotCurrentOperatorSid)
+        }
         foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
             if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
                 ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
-                ($rule.FileSystemRights -band $rights) -ne 0 -and $rule.IdentityReference.Value -notin $currentTrusted) {
+                ($rule.FileSystemRights -band $rights) -ne 0 -and $rule.IdentityReference.Value -notin $currentWriters) {
                 throw 'An existing installation path grants write access outside the trusted installer accounts.'
             }
         }
@@ -251,6 +313,33 @@ function Get-PilotAcl {
     return [IO.File]::GetAccessControl($Path)
 }
 
+# Windows can make the extracting administrator's own account the owner of each extracted entry. Installed
+# code is owned by Administrators instead, so no account keeps owner rights and any administrator's
+# checks accept it.
+function Set-PilotAdministratorsOwner {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    $administrators = New-Object Security.Principal.SecurityIdentifier($script:AdministratorsSid)
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Recurse -Force)) {
+        $acl = Get-PilotAcl -Path $entry.FullName -Container $entry.PSIsContainer
+        if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne $script:AdministratorsSid) {
+            $acl.SetOwner($administrators)
+            Set-PilotAcl -Path $entry.FullName -Container $entry.PSIsContainer -Acl $acl
+        }
+    }
+}
+
+function Set-PilotAcl {
+    param([Parameter(Mandatory=$true)][string]$Path, [bool]$Container, [Parameter(Mandatory=$true)]$Acl)
+    # Writes only the sections changed on an object read by Get-PilotAcl, so an existing service owner
+    # is never rewritten (Set-Acl can try to set the owner it read back).
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        if ($Container) { [IO.FileSystemAclExtensions]::SetAccessControl((New-Object IO.DirectoryInfo($Path)), $Acl) }
+        else { [IO.FileSystemAclExtensions]::SetAccessControl((New-Object IO.FileInfo($Path)), $Acl) }
+        return
+    }
+    if ($Container) { [IO.Directory]::SetAccessControl($Path, $Acl) } else { [IO.File]::SetAccessControl($Path, $Acl) }
+}
+
 function Get-PilotDirectoryAclDefinition {
     param([Parameter(Mandatory=$true)][ValidateSet('CoreCode','CoreData','AgentCode','AgentData','AgentRoot','Container')][string]$Kind)
     $acl = New-Object Security.AccessControl.DirectorySecurity
@@ -262,10 +351,13 @@ function Get-PilotDirectoryAclDefinition {
         $rule = New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl', $inheritance, $propagation, 'Allow')
         [void]$acl.AddAccessRule($rule)
     }
-    # AgentRoot (Agent Setup's own roots) has no entry for the installing account: any administrator can maintain it.
+    # Only the console pilot grants its installing account: AgentRoot (Agent Setup's own roots) and every
+    # administrators-only installation have no such entry, so any administrator can maintain them.
     if ($Kind -like 'Core*' -or $Kind -eq 'Container') {
-        $rule = New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier((Get-PilotCurrentOperatorSid))), 'FullControl', $inheritance, $propagation, 'Allow')
-        [void]$acl.AddAccessRule($rule)
+        foreach ($sid in @(Get-PilotOperatorAccessSid)) {
+            $rule = New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl', $inheritance, $propagation, 'Allow')
+            [void]$acl.AddAccessRule($rule)
+        }
     }
     if ($Kind -like 'Agent*' -or $Kind -eq 'Container') {
         $rights = if ($Kind -eq 'AgentData') { 'Modify' } else { 'ReadAndExecute' }
@@ -303,7 +395,9 @@ function Set-PilotFileAcl {
         [void]$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'Allow')))
     }
     if ($Kind -eq 'CoreConfig') {
-        [void]$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier((Get-PilotCurrentOperatorSid))), 'FullControl', 'Allow')))
+        foreach ($sid in @(Get-PilotOperatorAccessSid)) {
+            [void]$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'Allow')))
+        }
     }
     if ($Kind -in 'AgentConfig', 'AgentToken') {
         $rights = if ($Kind -eq 'AgentToken') { 'Read, Delete' } else { 'Read' }
@@ -889,6 +983,7 @@ function Invoke-PilotInstall {
             if (Test-Path -LiteralPath $CodeDirectory) { Remove-Item -LiteralPath $CodeDirectory -Force }
             Move-Item -LiteralPath $prepared -Destination $CodeDirectory
             Set-PilotDirectoryAcl -Path $CodeDirectory -Kind ($kind + 'Code')
+            Set-PilotAdministratorsOwner -Path $CodeDirectory
             $newReceipt = @{ format = 'sentinelai-pilot-v1'; component = $kind; version = $metadata.version;
                 codeDirectory = $CodeDirectory; dataDirectory = $DataDirectory; coreUrl = $origin;
                 environment = $Environment; channel = $Channel;

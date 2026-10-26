@@ -55,6 +55,7 @@ function New-Fixture {
         function script:Get-PilotCurrentOperatorSid { return 'S-1-5-21-100-200-300-1001' }
         function script:Set-PilotDirectoryAcl { $script:TestState.Events.Add('directory-acl') }
         function script:Set-PilotFileAcl { $script:TestState.Events.Add('file-acl') }
+        function script:Set-PilotAdministratorsOwner { param([string]$Path); $script:TestState.Events.Add('code-owner') }
         function script:New-PilotDirectoryWithAcl {
             param([string]$Path, [string]$Kind)
             [void][IO.Directory]::CreateDirectory($Path)
@@ -209,6 +210,7 @@ try {
     $output = @(Invoke-PilotInstall @options *>&1)
     Assert-Test ($fixture.State.Service.State -eq 'Running') 'The Agent workflow did not start the service.'
     Assert-Test ($fixture.State.Events.IndexOf('prepare') -lt $fixture.State.Events.IndexOf('register')) 'Service registration preceded authenticated package preparation.'
+    Assert-Test ($fixture.State.Events.Contains('code-owner') -and $fixture.State.Events.IndexOf('code-owner') -lt $fixture.State.Events.IndexOf('register')) 'Installed Agent code was not given to Administrators before registration.'
     Assert-Test ($fixture.State.Service.StartName -eq 'NT AUTHORITY\LocalService') 'The Agent workflow changed the service account.'
     $configurationPath = Assert-NoSecrets $fixture $output
     Assert-Test (-not (Test-Path -LiteralPath (Join-Path $fixture.State.DataDirectory 'pilot-enrollment-token'))) 'The consumed token handoff was retained.'

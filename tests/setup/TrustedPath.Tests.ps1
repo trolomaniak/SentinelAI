@@ -46,16 +46,24 @@ function Import-TrustedPathTestFunctions([string]$Path, [hashtable]$Names) {
 }
 Import-TrustedPathTestFunctions (Join-Path $repo 'installer/pilot/PilotInstaller.psm1') @{
     'Assert-PilotTrustedPath' = 'Assert-PilotTrustedPath'; 'Initialize-PilotNativeHelpers' = 'Initialize-PilotNativeHelpers'
-    'Get-PilotAcl' = 'Get-PilotAclSource' }
+    'Get-PilotAcl' = 'Get-PilotAclSource'; 'Get-PilotTrustedAccountSids' = 'Get-PilotTrustedAccountSids'
+    'Get-PilotOperatorAccessSid' = 'Get-PilotOperatorAccessSid'; 'Set-PilotLegacyOperatorSid' = 'Set-PilotLegacyOperatorSid' }
 $script:ServiceSid = 'S-1-5-19'
 $script:AdministratorsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'
 $script:TrustedInstallerSid = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+# Setup loads the module administrators-only; the console pilot's operator access is checked separately below.
+$script:OperatorAccess = $false
+$script:LegacyOperatorSid = $null
+$script:operatorSid = 'S-1-5-21-1000-1000-1000-1001'
+$script:legacySid = 'S-1-5-21-2000-2000-2000-1002'
 
 # OS boundary stubs. The test hook runs after a directory is listed and before each
 # inspection, and can remove or replace an entry there, as a running service would.
 function Invoke-TrustedPathHook([string]$Stage, [string]$Path) { if ($null -ne $script:hook) { & $script:hook $Stage $Path } }
-function Get-PilotCurrentOperatorSid { return 'S-1-5-21-1000-1000-1000-1001' }
+function Get-PilotCurrentOperatorSid { return $script:operatorSid }
+$script:sharedPrograms = ''
+function Get-PilotSharedProgramsPath { return $script:sharedPrograms }
 function Get-ChildItem {
     param([string]$LiteralPath, [switch]$Force)
     $children = @(Microsoft.PowerShell.Management\Get-ChildItem -LiteralPath $LiteralPath -Force:$Force)
@@ -248,6 +256,88 @@ try {
     $fixture = New-TrustedPathTestFixture
     $script:rules[$fixture.Checkpoint] = @(New-TrustedPathTestRule 'S-1-5-32-545' ([Security.AccessControl.FileSystemRights]::Modify))
     Reject-TrustedPathTest { Assert-TrustedPathTestAgent $fixture } 'An existing installation path grants write access outside the trusted installer accounts.' 'An Agent temporary writable by Users was accepted.'
+
+    # Administrators only: the account running maintenance is no writer or owner of an installation,
+    # because its own non-elevated programs could otherwise change what the services run.
+    $untrustedOwner = 'An existing installation path has an untrusted owner. Provision a protected location first.'
+    $untrustedWriter = 'An existing installation path grants write access outside the trusted installer accounts.'
+    $fixture = New-TrustedPathTestFixture
+    $script:rules[$fixture.Core] = @(New-TrustedPathTestRule $script:operatorSid ([Security.AccessControl.FileSystemRights]::FullControl))
+    Reject-TrustedPathTest { Assert-TrustedPathTestCore $fixture } $untrustedWriter 'The current operator was trusted as a Core data writer.'
+    $fixture = New-TrustedPathTestFixture
+    $script:owners[(Join-Path $fixture.Core 'pilot-config.json')] = $script:operatorSid
+    Reject-TrustedPathTest { Assert-TrustedPathTestCore $fixture } $untrustedOwner 'The current operator was trusted as a Core configuration owner.'
+    $fixture = New-TrustedPathTestFixture
+    $script:rules[[IO.Path]::GetDirectoryName($fixture.Core)] = @(New-TrustedPathTestRule $script:operatorSid ([Security.AccessControl.FileSystemRights]::FullControl))
+    Reject-TrustedPathTest { Assert-TrustedPathTestCore $fixture } $untrustedWriter 'The current operator was trusted as a writer of a shared root.'
+    # The console pilot alone grants its installing operator, so only there that account is trusted.
+    $script:OperatorAccess = $true
+    try {
+        Assert-TrustedPathTest ((@(Get-PilotTrustedAccountSids) -join ',') -ceq $script:operatorSid -and (@(Get-PilotOperatorAccessSid) -join ',') -ceq $script:operatorSid) 'The console pilot did not trust its operator.'
+        $fixture = New-TrustedPathTestFixture
+        $script:rules[$fixture.Core] = @(New-TrustedPathTestRule $script:operatorSid ([Security.AccessControl.FileSystemRights]::FullControl))
+        Assert-TrustedPathTestCore $fixture
+        Reject-TrustedPathTest { Set-PilotLegacyOperatorSid -Sid $script:legacySid } 'Invalid legacy installation account.' 'The console pilot accepted a legacy installation account.'
+    } finally { $script:OperatorAccess = $false }
+    Assert-TrustedPathTest (@(Get-PilotTrustedAccountSids).Count -eq 0 -and @(Get-PilotOperatorAccessSid).Count -eq 0) 'An administrators-only installation trusted an account.'
+
+    # Setup maintenance accepts the one account an earlier central installation granted, until it is removed:
+    # whoever installed it, never the account running maintenance by itself, never a second account.
+    foreach ($sid in @('S-1-5-32-545', 'S-1-1-0', 'S-1-5-11', 'S-1-5-18', 'S-1-5-21-1-2-3', 'S-1-5-21-1-2-3-4-5', 'S-1-5-80-1-2-3-4-5', 's-1-5-21-1-2-3-4', 'S-1-5-21-1-2-3-4 ')) {
+        Reject-TrustedPathTest { Set-PilotLegacyOperatorSid -Sid $sid } 'Invalid legacy installation account.' ('A group, built-in or malformed legacy account was accepted: ' + $sid)
+    }
+    Assert-TrustedPathTest ($null -eq $script:LegacyOperatorSid) 'A rejected legacy account was kept.'
+    Set-PilotLegacyOperatorSid -Sid 'S-1-12-1-100-200-300-400'
+    Assert-TrustedPathTest ($script:LegacyOperatorSid -ceq 'S-1-12-1-100-200-300-400') 'A Microsoft Entra legacy account was not accepted.'
+    Set-PilotLegacyOperatorSid -Sid $script:legacySid
+    try {
+        $fixture = New-TrustedPathTestFixture
+        $script:rules[$fixture.Core] = @(New-TrustedPathTestRule $script:legacySid ([Security.AccessControl.FileSystemRights]::FullControl))
+        $script:rules[[IO.Path]::GetDirectoryName($fixture.Core)] = @(New-TrustedPathTestRule $script:legacySid ([Security.AccessControl.FileSystemRights]::FullControl))
+        $script:owners[(Join-Path $fixture.Core 'pilot-config.json')] = $script:legacySid
+        Assert-TrustedPathTestCore $fixture
+        $fixture = New-TrustedPathTestFixture
+        $script:rules[$fixture.Core] = @((New-TrustedPathTestRule $script:legacySid ([Security.AccessControl.FileSystemRights]::FullControl)),
+            (New-TrustedPathTestRule 'S-1-5-21-3000-3000-3000-1003' ([Security.AccessControl.FileSystemRights]::FullControl)))
+        Reject-TrustedPathTest { Assert-TrustedPathTestCore $fixture } $untrustedWriter 'A second account was trusted beside the legacy account.'
+        $fixture = New-TrustedPathTestFixture
+        $script:rules[$fixture.Core] = @(New-TrustedPathTestRule $script:operatorSid ([Security.AccessControl.FileSystemRights]::FullControl))
+        Reject-TrustedPathTest { Assert-TrustedPathTestCore $fixture } $untrustedWriter 'The current operator was trusted during legacy maintenance.'
+    } finally { Set-PilotLegacyOperatorSid -Sid $null }
+    Assert-TrustedPathTest ($null -eq $script:LegacyOperatorSid) 'The legacy account was not cleared.'
+    $fixture = New-TrustedPathTestFixture
+    $script:rules[$fixture.Core] = @(New-TrustedPathTestRule $script:legacySid ([Security.AccessControl.FileSystemRights]::FullControl))
+    Reject-TrustedPathTest { Assert-TrustedPathTestCore $fixture } $untrustedWriter 'A cleared legacy account was still trusted.'
+
+    # Windows' shared Start Menu Programs folder may be writable by the account running Setup, and only that
+    # folder, only as a parent, only as a writer: never as owner, never another account, never Setup's own folder.
+    $fixture = New-TrustedPathTestFixture
+    $programs = Join-Path ([IO.Path]::GetDirectoryName($fixture.Core)) 'Programs'
+    $menu = Join-Path $programs 'SentinelAI'
+    New-Item -ItemType Directory -Path $menu | Out-Null
+    [IO.File]::WriteAllText((Join-Path $menu 'SentinelAI.lnk'), 'synthetic')
+    $script:sharedPrograms = $programs
+    try {
+        $writable = [Security.AccessControl.FileSystemRights]::Modify
+        $script:rules[$programs] = @(New-TrustedPathTestRule $script:operatorSid $writable)
+        Assert-PilotTrustedPath -Path $menu -Tree
+        Assert-PilotTrustedPath -Path (Join-Path $programs 'NotYetCreated')
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $programs } $untrustedWriter 'The shared Programs folder was trusted as a target rather than a parent.'
+        $script:rules[$programs] = @(New-TrustedPathTestRule 'S-1-5-21-3000-3000-3000-1003' $writable)
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'Another account was trusted on the shared Programs folder.'
+        $script:rules[$programs] = @(New-TrustedPathTestRule 'S-1-5-32-545' $writable)
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'Users were trusted on the shared Programs folder.'
+        $script:rules.Remove($programs)
+        $script:owners[$programs] = $script:operatorSid
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedOwner 'The account running Setup was trusted as owner of the shared Programs folder.'
+        $script:owners.Remove($programs)
+        $script:rules[$menu] = @(New-TrustedPathTestRule $script:operatorSid $writable)
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'The account running Setup was trusted on Setup''s own Start Menu folder.'
+        $script:rules.Remove($menu)
+        $parent = [IO.Path]::GetDirectoryName($programs)
+        $script:rules[$parent] = @(New-TrustedPathTestRule $script:operatorSid $writable)
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'The account running Setup was trusted on a parent of the shared Programs folder.'
+    } finally { $script:sharedPrograms = '' }
 
     # Live churn: a writer thread repeatedly creates, writes and removes the Core
     # journal and replaces the Agent checkpoint through an exclusive temporary file,

@@ -399,6 +399,38 @@ function Stop-SetupDescendantProcesses([object[]]$Roots) {
         Write-Host ('SetupOrphans: Powershell={0}; Conhost={1}; Updater={2}; Other={3}' -f $counts.powershell, $counts.conhost, $counts.updater, $counts.other)
     } catch { Write-Host 'SetupOrphans: ProbeFailed=True' }
 }
+function Get-SetupAncestorTrustSummary {
+    # Setup trusts only Administrators, SYSTEM and TrustedInstaller as owners and writers of the existing
+    # ancestors of its targets. Fixed labels and classes only; never paths, account names or SIDs.
+    $trusted = @('S-1-5-32-544', 'S-1-5-18', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $commonData = [Environment]::GetFolderPath('CommonApplicationData')
+    $labels = [ordered]@{ SystemDrive = [IO.Path]::GetPathRoot($commonData); ProgramFiles = [Environment]::GetFolderPath('ProgramFiles')
+        ProgramData = $commonData; Microsoft = Join-Path $commonData 'Microsoft'; MicrosoftWindows = Join-Path $commonData 'Microsoft\Windows'
+        StartMenu = Split-Path -Parent ([Environment]::GetFolderPath('CommonPrograms')); Programs = [Environment]::GetFolderPath('CommonPrograms') }
+    $entries = foreach ($label in $labels.Keys) {
+        $path = $labels[$label]
+        if (-not (Test-Path -LiteralPath $path -PathType Container)) { $label + '=Absent'; continue }
+        try {
+            $acl = Get-Acl -LiteralPath $path
+            $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+            $ownerClass = if ($owner -cin $trusted) { 'Trusted' } elseif ($owner -cmatch '\AS-1-(?:5-21|12-1)-') { 'Account' } else { 'Other' }
+            # The ancestor rule: creating names is allowed, and on ProgramData also writing files.
+            $mask = [int]([Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+                [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+                [Security.AccessControl.FileSystemRights]::TakeOwnership) -band (-bnot [int][Security.AccessControl.FileSystemRights]::AppendData)
+            if ($label -ceq 'ProgramData') { $mask = $mask -band (-bnot [int][Security.AccessControl.FileSystemRights]::Write) }
+            $account = 0; $other = 0
+            foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+                if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+                    ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0 -or
+                    ([int]$rule.FileSystemRights -band $mask) -eq 0 -or $rule.IdentityReference.Value -cin $trusted) { continue }
+                if ($rule.IdentityReference.Value -cmatch '\AS-1-(?:5-21|12-1)-') { $account++ } else { $other++ }
+            }
+            '{0}=Owner:{1},AccountWriters:{2},OtherWriters:{3}' -f $label, $ownerClass, $account, $other
+        } catch { $label + '=Unreadable' }
+    }
+    return ($entries -join '; ')
+}
 function Get-SetupFailureSummary {
     # Only exact known public UI literals and fixed presence flags may enter CI
     # diagnostics. Never include native error text, exceptions, stdin or secrets.
@@ -424,11 +456,12 @@ function Get-SetupFailureSummary {
         $corePresent = $null -ne (Get-SetupService 'SentinelAICore')
         $agentPresent = $null -ne (Get-SetupService 'SentinelAIAgent')
     } catch { $serviceProbeSucceeded = $false }
-    return ('The actual Setup executable reported a safe installation failure. Stage="{0}"; ServiceProbeSucceeded={1}; CoreServicePresent={2}; AgentServicePresent={3}; CoreCodePresent={4}; CoreDataPresent={5}; AgentCodePresent={6}; AgentDataPresent={7}; DesktopCodePresent={8}; UpdaterCodePresent={9}.' -f
+    return ('The actual Setup executable reported a safe installation failure. Stage="{0}"; ServiceProbeSucceeded={1}; CoreServicePresent={2}; AgentServicePresent={3}; CoreCodePresent={4}; CoreDataPresent={5}; AgentCodePresent={6}; AgentDataPresent={7}; DesktopCodePresent={8}; UpdaterCodePresent={9}; Ancestors: {10}.' -f
         $stage, $serviceProbeSucceeded, $corePresent, $agentPresent,
         (Test-Path -LiteralPath $script:coreCode -PathType Container), (Test-Path -LiteralPath $script:coreData -PathType Container),
         (Test-Path -LiteralPath $script:agentCode -PathType Container), (Test-Path -LiteralPath $script:agentData -PathType Container),
-        (Test-Path -LiteralPath $script:desktopCode -PathType Container), (Test-Path -LiteralPath $script:updaterCode -PathType Container))
+        (Test-Path -LiteralPath $script:desktopCode -PathType Container), (Test-Path -LiteralPath $script:updaterCode -PathType Container),
+        (Get-SetupAncestorTrustSummary))
 }
 function Get-SetupTimeoutSummary {
     # Same disclosure rule as Get-SetupFailureSummary: fixed literals, service
@@ -596,6 +629,20 @@ function Assert-PoisonedCallerUntouched {
         $sentinel = Join-Path $directory 'sentinel.txt'
         Assert-SetupAcceptance ((Test-Path -LiteralPath $sentinel -PathType Leaf) -and
             [IO.File]::ReadAllText($sentinel) -ceq 'Synthetic caller-controlled runtime sentinel.') 'Setup changed caller-controlled runtime sentinels.'
+    }
+}
+# Administrators only: no owner or access entry, explicit or inherited, names a local, domain or Microsoft
+# Entra account (the installing operator included), so no non-elevated program can change the installation
+# and any administrator can maintain it.
+function Assert-NoAccountAccess([string]$Root) {
+    if (-not (Test-Path -LiteralPath $Root)) { return }
+    $account = '\AS-1-(?:5-21|12-1)-'
+    foreach ($item in @((Get-Item -LiteralPath $Root -Force)) + @(Get-ChildItem -LiteralPath $Root -Recurse -Force)) {
+        # Running services replace transient files, which can vanish between enumeration and inspection.
+        try { $acl = Get-Acl -LiteralPath $item.FullName } catch { if (Test-Path -LiteralPath $item.FullName) { throw }; continue }
+        Assert-SetupAcceptance ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cnotmatch $account) 'A Windows account owns an installed path.'
+        Assert-SetupAcceptance (@($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+            Where-Object { $_.IdentityReference.Value -cmatch $account }).Count -eq 0) 'An installed path has an access entry for a Windows account.'
     }
 }
 function Assert-ServiceAcl([string]$Path, [string]$Sid, [int]$Required, [int]$Forbidden) {
@@ -913,13 +960,17 @@ try {
         (Join-Path $setupData 'public-key.pem'), (Join-Path $setupData 'setup-installation.json'), $shortcutPath)) {
         Assert-SetupAcceptance (Test-Path -LiteralPath $path -PathType Leaf) 'A required component, configuration, ownership receipt, state or Start Menu shortcut was not installed.'
     }
-    $writers = @('S-1-5-32-544', 'S-1-5-18', $operatorSid)
+    # Not the installing operator: Core's code and data are writable only by Administrators and SYSTEM.
+    $writers = @('S-1-5-32-544', 'S-1-5-18')
     Assert-ProtectedTree $programRoot $writers
     Assert-ProtectedTree $dataRoot ($writers + @($coreSid, $localServiceSid))
     Assert-ProtectedTree $coreData ($writers + @($coreSid))
     Assert-ProtectedTree $agentData ($writers + @($localServiceSid))
     Assert-ProtectedTree $setupData $writers
     Assert-ProtectedTree $shortcutRoot $writers
+    $installedSetupRoot = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'SentinelAI Setup'
+    Assert-ProtectedTree $installedSetupRoot $writers
+    foreach ($root in @($programRoot, $dataRoot, $shortcutRoot, $installedSetupRoot)) { Assert-NoAccountAccess $root }
     $readExecute = [int][Security.AccessControl.FileSystemRights]::ReadAndExecute
     $read = [int][Security.AccessControl.FileSystemRights]::Read
     $modify = [int][Security.AccessControl.FileSystemRights]::Modify

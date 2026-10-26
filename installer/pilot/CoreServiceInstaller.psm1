@@ -18,7 +18,12 @@ $script:CoreFirewallRuleName = 'SentinelAI-Core-LocalNetwork'
 function Get-CoreServiceAclRules {
     param([ValidateSet('Code','DataDirectory','DataFile','ProtectedFile','RetainedFile')][string]$Kind, [bool]$Directory = $false)
     $inheritance = if ($Directory) { 'ContainerInherit, ObjectInherit' } else { 'None' }
-    foreach ($sid in @('S-1-5-32-544','S-1-5-18',(Get-PilotCurrentOperatorSid)) | Select-Object -Unique) {
+    # The service-managed Core names no Windows account: any administrator maintains it, and no
+    # non-elevated program can change what runs as the Core service. Only files restored to the
+    # console pilot (RetainedFile) return to its installing operator.
+    $writers = @('S-1-5-32-544','S-1-5-18')
+    if ($Kind -eq 'RetainedFile') { $writers += @(Get-PilotOperatorAccessSid) }
+    foreach ($sid in $writers | Select-Object -Unique) {
         [pscustomobject]@{ Sid = $sid; Rights = 'FullControl'; Inheritance = $inheritance; Propagation = 'None' }
     }
     if ($Kind -eq 'RetainedFile') { return }

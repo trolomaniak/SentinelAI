@@ -15,7 +15,7 @@
 
 | Location | Contents |
 | --- | --- |
-| `%ProgramFiles%\SentinelAI\{Core,Agent,Desktop,Updater}` | Program code of the central installation, writable by Administrators, SYSTEM and the Windows account that installed or last repaired or upgraded SentinelAI (see section 10). `Core\pilot-license` holds the pilot public keys and the contact details. |
+| `%ProgramFiles%\SentinelAI\{Core,Agent,Desktop,Updater}` | Program code of the central installation, writable only by Administrators and SYSTEM (see section 10). `Core\pilot-license` holds the pilot public keys and the contact details. |
 | `%ProgramData%\SentinelAI\Core` | Core's SQLite database `sentinelai.db`, configuration and ownership receipts. The database holds the administrator account (password hash), devices, alerts and the pilot key. |
 | `%ProgramData%\SentinelAI\Agent` | The central computer's Agent: enrollment state and its credential, protected with the LocalService account's DPAPI. |
 | `%ProgramData%\SentinelAI\Setup` | Setup's pinned public trust key and ownership receipt. No passwords or tokens. |
@@ -146,7 +146,7 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
   3. **Keep security history and protected configuration** is checked by default. Uninstall then removes the services, the firewall rule, the program files and the shortcut, and keeps the database, the configuration and Core's certificate. A later Setup of the same release line restores the installation with the same identity, and the existing Agents trust it again.
   4. To delete the data as well, clear the checkbox and type **DELETE**. This also deletes Core's certificate and key; existing Agents can then never connect again.
 
-  Run maintenance with the same Windows administrator account that installed SentinelAI: the central installation's folder permissions include that account. Desktop's **Uninstall SentinelAI** button, shown when the pilot has ended, opens the same Setup flow and closes Desktop.
+  Any Windows administrator account can run maintenance, not only the one that installed SentinelAI. Desktop's **Uninstall SentinelAI** button, shown when the pilot has ended, opens the same Setup flow and closes Desktop.
 
 ## 7. Pilot key and its expiry
 
@@ -162,6 +162,7 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
 - To **upgrade**, close Desktop, run the newer Setup on the central computer and choose **Upgrade**. Setup verifies the signed package, replaces Core, the central computer's Agent, Desktop and the Updater together, and restores the previous version automatically if the new one does not start healthy. Data, the administrator account, enrollments, the pilot key and Core's certificate are kept.
 - To **repair**, run the same version of Setup and choose **Repair**. This also recreates the firewall rule if it was removed or changed.
 - An older Setup can only uninstall; it cannot downgrade.
+- An installation made by an earlier Setup also gave the Windows account that installed it full control of Core's folders. The first upgrade, repair or uninstall, run by any administrator, removes that access.
 - **Agents on other computers** cannot be updated in place in the pilot: Agent Setup refuses a computer that already has an Agent (exit code 7). To install a newer Agent:
   1. Uninstall the old Agent.
   2. Install the new Agent Setup with a new code. The computer then appears as a new device.
@@ -210,7 +211,7 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
 - **Least privilege.**
   - The Agent runs as LocalService and only reads; it writes only its own state and never changes Windows settings or your files.
   - Core runs under its own virtual service account.
-  - Program folders are writable only by Administrators and SYSTEM, with one exception on the central computer: Core's program and data folders also give full control to the Windows account that installed (or last repaired or upgraded) SentinelAI, even when that account runs programs without elevation. Use a dedicated administrator account for installation and maintenance.
+  - Program and data folders are writable only by Administrators and SYSTEM, and by each service only where it writes its own state. No folder gives the Windows account that installed SentinelAI its own access, so that account's programs running without elevation cannot change what Core or the Agent runs, and any administrator can maintain the installation.
 - **Signed packages.** Setup verifies the signature and hash of every package against the public key built into it, and replaces program code transactionally with automatic rollback.
 - **Administrator access.** Desktop requires the SentinelAI administrator account created during setup.
 - **Minimal data.**
