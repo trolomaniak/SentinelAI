@@ -1214,7 +1214,7 @@ try {
                     }
                 } finally {
                     if ($null -ne (Get-SetupService 'SentinelAICore')) {
-                        & (Join-Path $installer 'Manage-SentinelAICoreService.ps1') -Action Uninstall -CodeDirectory $coreCode -DataDirectory $coreData -TimeoutSeconds 60 | Out-Null
+                        & (Join-Path $repositoryRoot 'tests/core-service/Manage-SentinelAICoreService.ps1') -Action Uninstall -CodeDirectory $coreCode -DataDirectory $coreData -TimeoutSeconds 60 | Out-Null
                     }
                 }
                 Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAIAgent') -and $null -eq (Get-SetupService 'SentinelAICore')) 'An owned acceptance service remained registered after cleanup.'

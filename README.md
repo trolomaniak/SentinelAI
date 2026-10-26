@@ -34,7 +34,7 @@ Distribution is at the **development/pilot stage**: the two installers, `Sentine
 - **Desktop** (`desktop/`) is the native operator workspace. Closing it clears its in-memory authentication session and exits the GUI; Core and Agent continue. Reopening requires a fresh sign-in. Desktop does not start, stop or configure either service.
 - **Optional services** (`cloud/`) contain a separate development License API and AI Gateway. Core keeps their configured destinations and credentials; provider keys stay in the gateway. AI receives minimized evidence and does not determine detections or risk scores.
 
-The pilot installs one central computer per company (Windows 10 22H2 or Windows 11 x64) with Core, Desktop, Updater and its own Agent; Agents on the other computers of the local network report to it over HTTPS on port 5443 and trust Core only by its certificate's SHA-256 fingerprint ([central computer](docs/SETUP.md#central-computer-and-the-local-network)). Desktop connects to the trusted local installation at `http://127.0.0.1:5000`. See [architecture](docs/ARCHITECTURE.md), [Core service operation](docs/CORE-SERVICE.md) and [AI privacy/configuration](docs/AI.md).
+The pilot installs one central computer per company (Windows 10 22H2 or Windows 11 x64) with Core, Desktop, Updater and its own Agent; Agents on the other computers of the local network report to it over HTTPS on port 5443 and trust Core only by its certificate's SHA-256 fingerprint ([central computer](docs/SETUP.md#central-computer-and-the-local-network)). Desktop connects to the trusted local installation at `http://127.0.0.1:5000`. See [architecture](docs/ARCHITECTURE.md), [Setup](docs/SETUP.md) and [AI privacy/configuration](docs/AI.md).
 
 ## Run the Windows pilot
 
