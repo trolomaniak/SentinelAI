@@ -91,7 +91,7 @@ try {
     foreach ($path in @($locations.Menu, $locations.InstallerCode, $files.Shortcut, $files.Installer)) {
         Set-AccessTestAcl $path @(@($admins, 'FullControl'), @($system, 'FullControl'), @($users, 'ReadAndExecute'))
     }
-    Assert-AccessTest ((Get-AccessTestRules $files.Database $legacy).Count -gt 0 -and (Get-AccessTestRules $files.Database $legacy)[0].IsInherited) 'The fixture did not inherit the account into Core''s database.'
+    Assert-AccessTest (@(Get-AccessTestRules $files.Database $legacy).Count -gt 0 -and @(Get-AccessTestRules $files.Database $legacy)[0].IsInherited) 'The fixture did not inherit the account into Core''s database.'
     Assert-AccessTest ((Get-SetupLifecycleLegacyOperatorSid $locations) -ceq $legacy) 'The earlier installing account was not recognized on the real shared data root.'
     $before = @{}
     foreach ($path in Get-AccessTestEntries $locations) {
@@ -121,7 +121,7 @@ try {
     Assert-AccessTest ($null -eq (Get-SetupLifecycleLegacyOperatorSid $locations)) 'The shared data root still identifies the earlier installing account.'
     # Repeating the removal finds nothing to change.
     Remove-SetupLifecycleLegacyAccess $locations $legacy
-    Assert-AccessTest ((Get-AccessTestRules $locations.DataRoot $legacy).Count -eq 0) 'A repeated removal restored access.'
+    Assert-AccessTest (@(Get-AccessTestRules $locations.DataRoot $legacy).Count -eq 0) 'A repeated removal restored access.'
 
     # The account's ownership goes to Administrators; another account keeps its entry.
     $owned = Join-Path $root 'owned.json'
@@ -130,7 +130,7 @@ try {
     Remove-PilotAccountAccess -Path $owned -Sid $current
     $acl = Get-AccessTestAcl $owned
     Assert-AccessTest ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ceq $admins) 'An account-owned entry was not given to Administrators.'
-    Assert-AccessTest ((Get-AccessTestRules $owned $current).Count -eq 0 -and (Get-AccessTestRules $owned $legacy).Count -eq 1) 'Removal did not affect exactly one account.'
+    Assert-AccessTest (@(Get-AccessTestRules $owned $current).Count -eq 0 -and @(Get-AccessTestRules $owned $legacy).Count -eq 1) 'Removal did not affect exactly one account.'
 
     # Installed code is owned by Administrators whichever account extracted it; access entries are unchanged.
     $extracted = Join-Path $root 'Extracted'
@@ -155,7 +155,7 @@ try {
     $message = $null
     try { Remove-SetupLifecycleLegacyAccess $locations $legacy } catch { $message = $_.Exception.Message }
     Assert-AccessTest ($message -ceq 'Links and reparse points are unsupported.') ('A linked entry was not refused (got: ' + $message + ')')
-    Assert-AccessTest ((Get-AccessTestRules $outside $legacy).Count -eq 1) 'An entry reached through a link was changed.'
+    Assert-AccessTest (@(Get-AccessTestRules $outside $legacy).Count -eq 1) 'An entry reached through a link was changed.'
     Write-Output ('Setup account access native tests passed: ' + $script:checks + ' assertions.')
 } finally {
     if ($null -ne $held) { $held.Dispose() }
