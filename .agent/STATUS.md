@@ -2,7 +2,7 @@
 
 ## Completed
 
-- Administrators-only central installation (owner-approved security-boundary change of 2026-10-26) is implemented on `claude/amazing-clarke-i7z9hq`, based on main `0762f17`, not merged; Windows CI pending (see "Administrators-only central installation implementation and validation"). TASK-030 is not started.
+- Administrators-only central installation (owner-approved security-boundary change of 2026-10-26) is implemented on `claude/amazing-clarke-i7z9hq`, based on main `0762f17`, not merged; all six CI jobs passed on `e4f2551` (see "Administrators-only central installation implementation and validation"). TASK-030 is not started.
 - MVP-4 (pilot documentation and release checklist) merged to main through PR #42 at `0762f17` (see "MVP-4 implementation and validation").
 - MVP-3 (pilot license key) merged to main through [PR #41](https://github.com/trolomaniak/SentinelAI/pull/41) at `bbe7fa6` (see "MVP-3 implementation and validation").
 - MVP-2 (Agent installer, enrollment codes and uninstall) merged to main through [PR #40](https://github.com/trolomaniak/SentinelAI/pull/40) at `e31d819` (see "MVP-2 implementation and validation").
@@ -164,6 +164,15 @@
     - Mutation checks: dropping the clear after removal, or changing the shared data root first, each fails the lifecycle suite.
   - New Windows-only `tests/setup/AccountAccess.Tests.ps1` (CI under PowerShell 7 and Windows PowerShell 5.1): real ACL removal over a recreated earlier installation, an exclusively held SQLite sidecar, deny entries kept, ownership reset, extracted-code ownership and link refusal.
   - Windows acceptance: `tests/setup/Windows.Acceptance.ps1` asserts that no owner or access entry names an account in the installed trees; `tests/setup/Lifecycle.Acceptance.ps1` recreates an earlier installation made by another (synthetic) administrator, upgrades it as the runner and asserts the account is gone.
+- **CI.** All six jobs passed in [push CI `40415022607`](https://github.com/trolomaniak/SentinelAI/actions/runs/40415022607) on `e4f2551`:
+  - Linux build, including the C# validator and the Setup host's default owner;
+  - `AccountAccess.Tests.ps1` under PowerShell 7 and Windows PowerShell 5.1 with real ACLs;
+  - the native single-EXE Setup installation, with no owner or access entry naming an account in the installed trees, and Agent Setup;
+  - the lifecycle acceptance: a recreated earlier installation made by another (synthetic) administrator, upgraded by the runner with that account removed, then health rollback, repair, retained-data uninstall and restore, and confirmed removal;
+  - the console-pilot Core service and Desktop authentication acceptances, unchanged in behavior.
+- **Problems CI exposed and fixed on the way:**
+  - In `5785fb1`, the new test counted rules a function had unrolled. Fixed in `310528a`.
+  - In `5785fb1`, every fresh installation was refused, because Windows' shared Start Menu `Programs` folder is writable by the runner's account; the new fixed-label ancestor diagnostic in `310528a` found it. Fixed in `e4f2551` with the owner-approved exception.
 
 ## MVP-4 implementation and validation
 
