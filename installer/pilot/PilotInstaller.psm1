@@ -54,6 +54,8 @@ function Get-PilotTrustedAccountSids {
     return $accounts
 }
 
+function Get-PilotSharedProgramsPath { return [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms) }
+
 function Set-PilotLegacyOperatorSid {
     param([AllowNull()][string]$Sid)
     if ([string]::IsNullOrEmpty($Sid)) { $script:LegacyOperatorSid = $null; return }
@@ -276,10 +278,20 @@ function Assert-PilotTrustedPath {
             [string]::Equals($current.TrimEnd('\'), $standardData, [StringComparison]::OrdinalIgnoreCase)) {
             $rights = $rights -band (-bnot [int][Security.AccessControl.FileSystemRights]::Write)
         }
+        # Windows' shared Start Menu Programs folder is the one ancestor some computers let the account running
+        # Setup write (owner decision of 2026-10-26). It may write there, never own it; Setup's own Start Menu
+        # folder below stays protected. At worst that account could change what SentinelAI's shortcut opens,
+        # never what runs as a service.
+        $currentWriters = $currentTrusted
+        $sharedPrograms = (Get-PilotSharedProgramsPath).TrimEnd('\')
+        if ($isAncestor -and $isContainer -and $sharedPrograms.Length -ne 0 -and
+            [string]::Equals($current.TrimEnd('\'), $sharedPrograms, [StringComparison]::OrdinalIgnoreCase)) {
+            $currentWriters += @(Get-PilotCurrentOperatorSid)
+        }
         foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
             if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
                 ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
-                ($rule.FileSystemRights -band $rights) -ne 0 -and $rule.IdentityReference.Value -notin $currentTrusted) {
+                ($rule.FileSystemRights -band $rights) -ne 0 -and $rule.IdentityReference.Value -notin $currentWriters) {
                 throw 'An existing installation path grants write access outside the trusted installer accounts.'
             }
         }

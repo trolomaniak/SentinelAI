@@ -62,6 +62,8 @@ $script:legacySid = 'S-1-5-21-2000-2000-2000-1002'
 # inspection, and can remove or replace an entry there, as a running service would.
 function Invoke-TrustedPathHook([string]$Stage, [string]$Path) { if ($null -ne $script:hook) { & $script:hook $Stage $Path } }
 function Get-PilotCurrentOperatorSid { return $script:operatorSid }
+$script:sharedPrograms = ''
+function Get-PilotSharedProgramsPath { return $script:sharedPrograms }
 function Get-ChildItem {
     param([string]$LiteralPath, [switch]$Force)
     $children = @(Microsoft.PowerShell.Management\Get-ChildItem -LiteralPath $LiteralPath -Force:$Force)
@@ -306,6 +308,36 @@ try {
     $fixture = New-TrustedPathTestFixture
     $script:rules[$fixture.Core] = @(New-TrustedPathTestRule $script:legacySid ([Security.AccessControl.FileSystemRights]::FullControl))
     Reject-TrustedPathTest { Assert-TrustedPathTestCore $fixture } $untrustedWriter 'A cleared legacy account was still trusted.'
+
+    # Windows' shared Start Menu Programs folder may be writable by the account running Setup, and only that
+    # folder, only as a parent, only as a writer: never as owner, never another account, never Setup's own folder.
+    $fixture = New-TrustedPathTestFixture
+    $programs = Join-Path ([IO.Path]::GetDirectoryName($fixture.Core)) 'Programs'
+    $menu = Join-Path $programs 'SentinelAI'
+    New-Item -ItemType Directory -Path $menu | Out-Null
+    [IO.File]::WriteAllText((Join-Path $menu 'SentinelAI.lnk'), 'synthetic')
+    $script:sharedPrograms = $programs
+    try {
+        $writable = [Security.AccessControl.FileSystemRights]::Modify
+        $script:rules[$programs] = @(New-TrustedPathTestRule $script:operatorSid $writable)
+        Assert-PilotTrustedPath -Path $menu -Tree
+        Assert-PilotTrustedPath -Path (Join-Path $programs 'NotYetCreated')
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $programs } $untrustedWriter 'The shared Programs folder was trusted as a target rather than a parent.'
+        $script:rules[$programs] = @(New-TrustedPathTestRule 'S-1-5-21-3000-3000-3000-1003' $writable)
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'Another account was trusted on the shared Programs folder.'
+        $script:rules[$programs] = @(New-TrustedPathTestRule 'S-1-5-32-545' $writable)
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'Users were trusted on the shared Programs folder.'
+        $script:rules.Remove($programs)
+        $script:owners[$programs] = $script:operatorSid
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedOwner 'The account running Setup was trusted as owner of the shared Programs folder.'
+        $script:owners.Remove($programs)
+        $script:rules[$menu] = @(New-TrustedPathTestRule $script:operatorSid $writable)
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'The account running Setup was trusted on Setup''s own Start Menu folder.'
+        $script:rules.Remove($menu)
+        $parent = [IO.Path]::GetDirectoryName($programs)
+        $script:rules[$parent] = @(New-TrustedPathTestRule $script:operatorSid $writable)
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'The account running Setup was trusted on a parent of the shared Programs folder.'
+    } finally { $script:sharedPrograms = '' }
 
     # Live churn: a writer thread repeatedly creates, writes and removes the Core
     # journal and replaces the Agent checkpoint through an exclusive temporary file,
