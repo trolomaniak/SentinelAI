@@ -542,6 +542,7 @@ try {
         # MVP-7: the manifest the update server offers. The central computer's update task verifies it with the key pinned at
         # installation before it runs this exact Setup.
         $script:SetupPublishingPhase = 'update-manifest'
+        Write-Output ('Setup executable size for the update manifest: ' + (Get-Item -LiteralPath (Join-Path $OutputDirectory $setupName)).Length + ' bytes')
         $setupManifest = Join-Path $OutputDirectory 'SentinelAI-Setup.manifest.json'
         Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'tools/update-dev/SentinelAI.UpdateDev.csproj'), '--configuration', 'Release', '--', 'sign',
             '--private-key', $DevelopmentPrivateKey, '--key-id', $KeyId, '--package', (Join-Path $OutputDirectory $setupName), '--version', $Version,

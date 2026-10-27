@@ -51,7 +51,7 @@ public interface ICentralUpdateHost
 /// </summary>
 public sealed class CentralUpdateApplier(CentralUpdateLayout layout, ICentralUpdateHost host, TimeProvider time)
 {
-    public const string ArtifactId = "sentinelai-setup-win-x64";
+    public const string ArtifactId = UpdateManifestFormat.SetupArtifactId;
     public const int MaximumAttempts = 3;
     private const int MaximumDocumentBytes = 4096;
 

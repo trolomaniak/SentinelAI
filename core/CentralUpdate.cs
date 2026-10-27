@@ -157,7 +157,7 @@ public sealed class CentralUpdateService(
     public const string ManifestFileName = "SentinelAI-Setup.manifest.json";
     public const string PackageFileName = "SentinelAI-Setup.exe";
     public const string AutoInstallMarker = "auto-install";
-    public const string ArtifactId = "sentinelai-setup-win-x64";
+    public const string ArtifactId = UpdateManifestFormat.SetupArtifactId;
     public static readonly TimeSpan FirstCheckDelay = TimeSpan.FromMinutes(2);
     public static readonly TimeSpan CheckInterval = TimeSpan.FromHours(6);
     public static readonly TimeSpan RetryInterval = TimeSpan.FromHours(1);

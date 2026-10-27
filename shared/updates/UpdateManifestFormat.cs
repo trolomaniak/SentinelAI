@@ -9,6 +9,14 @@ public static class UpdateManifestFormat
     public const string Format = "sentinelai-update-v1";
     public const int MaximumDocumentBytes = 8_192;
     public const long MaximumArtifactBytes = 512L * 1024 * 1024;
+    /// <summary>
+    /// MVP-7: the full Setup executable carries its whole payload (itself at most 512 MiB) plus the Setup host's runtime,
+    /// so this one artifact may be up to 1 GiB; every package keeps the 512 MiB bound.
+    /// </summary>
+    public const string SetupArtifactId = "sentinelai-setup-win-x64";
+    public const long MaximumSetupArtifactBytes = 1024L * 1024 * 1024;
+
+    public static long MaximumBytes(string? artifactId) => artifactId == SetupArtifactId ? MaximumSetupArtifactBytes : MaximumArtifactBytes;
     internal const int SignatureBytes = 64;
 
     /// <summary>Canonical UTF-8 JSON covering format, key ID and every manifest field.</summary>
@@ -77,7 +85,7 @@ public static class UpdateManifestFormat
     internal static bool ValidateManifest(UpdateManifest? manifest) => manifest is not null &&
         TryVersion(manifest.Version, out _) && IsIdentifier(manifest.ArtifactId) &&
         IsArtifactUrl(manifest.ArtifactUrl) && IsHash(manifest.Sha256) &&
-        manifest.SizeBytes is > 0 and <= MaximumArtifactBytes && IsChannel(manifest.Channel) && IsEnvironment(manifest.Environment);
+        manifest.SizeBytes > 0 && manifest.SizeBytes <= MaximumBytes(manifest.ArtifactId) && IsChannel(manifest.Channel) && IsEnvironment(manifest.Environment);
 
     internal static bool IsIdentifier(string? value) => value is { Length: > 0 and <= 64 } &&
         value.All(character => character is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-');

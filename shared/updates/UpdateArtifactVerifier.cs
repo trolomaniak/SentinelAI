@@ -34,7 +34,7 @@ public static class UpdateArtifactVerifier
             while ((read = await source.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
             {
                 size += read;
-                if (size > verified.Manifest.SizeBytes || size > UpdateManifestFormat.MaximumArtifactBytes)
+                if (size > verified.Manifest.SizeBytes || size > UpdateManifestFormat.MaximumBytes(verified.Manifest.ArtifactId))
                     throw new UpdateValidationException();
                 hash.AppendData(buffer, 0, read);
                 await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
