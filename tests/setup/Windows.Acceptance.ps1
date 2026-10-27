@@ -451,17 +451,21 @@ function Get-SetupFailureSummary {
             }
         }
     } catch { }
-    $serviceProbeSucceeded = $true; $corePresent = $false; $agentPresent = $false
+    $serviceProbeSucceeded = $true; $corePresent = $false; $agentPresent = $false; $coreRunning = $false
     try {
-        $corePresent = $null -ne (Get-SetupService 'SentinelAICore')
+        $core = Get-SetupService 'SentinelAICore'
+        $corePresent = $null -ne $core
+        $coreRunning = $corePresent -and [string]$core.State -ceq 'Running'
         $agentPresent = $null -ne (Get-SetupService 'SentinelAIAgent')
     } catch { $serviceProbeSucceeded = $false }
-    return ('The actual Setup executable reported a safe installation failure. Stage="{0}"; ServiceProbeSucceeded={1}; CoreServicePresent={2}; AgentServicePresent={3}; CoreCodePresent={4}; CoreDataPresent={5}; AgentCodePresent={6}; AgentDataPresent={7}; DesktopCodePresent={8}; UpdaterCodePresent={9}; Ancestors: {10}.' -f
+    $updateTaskPresent = $false
+    try { $updateTaskPresent = (Get-SetupCentralUpdateTask).Count -ne 0 } catch { }
+    return ('The actual Setup executable reported a safe installation failure. Stage="{0}"; ServiceProbeSucceeded={1}; CoreServicePresent={2}; CoreServiceRunning={11}; AgentServicePresent={3}; CoreCodePresent={4}; CoreDataPresent={5}; AgentCodePresent={6}; AgentDataPresent={7}; DesktopCodePresent={8}; UpdaterCodePresent={9}; UpdateTaskPresent={12}; Ancestors: {10}.' -f
         $stage, $serviceProbeSucceeded, $corePresent, $agentPresent,
         (Test-Path -LiteralPath $script:coreCode -PathType Container), (Test-Path -LiteralPath $script:coreData -PathType Container),
         (Test-Path -LiteralPath $script:agentCode -PathType Container), (Test-Path -LiteralPath $script:agentData -PathType Container),
         (Test-Path -LiteralPath $script:desktopCode -PathType Container), (Test-Path -LiteralPath $script:updaterCode -PathType Container),
-        (Get-SetupAncestorTrustSummary))
+        (Get-SetupAncestorTrustSummary), $coreRunning, $updateTaskPresent)
 }
 function Get-SetupTimeoutSummary {
     # Same disclosure rule as Get-SetupFailureSummary: fixed literals, service

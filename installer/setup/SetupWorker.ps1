@@ -388,7 +388,8 @@ function Sync-SetupCentralUpdateTask {
     # An unchanged task is left as it is: each re-registration is an audited change on this monitored computer.
     $updater = Join-Path $Locations.UpdaterCode 'SentinelAI.Updater.exe'
     if (Test-SetupScheduledTask $script:CentralUpdateTaskName $updater 'apply-central-update') { return }
-    $triggers = '<CalendarTrigger><StartBoundary>2026-01-01T02:00:00</StartBoundary><RandomDelay>PT2H</RandomDelay><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay><Enabled>true</Enabled></CalendarTrigger>'
+    # Schema order: the trigger's common elements, then RandomDelay, then the schedule.
+    $triggers = '<CalendarTrigger><StartBoundary>2026-01-01T02:00:00</StartBoundary><Enabled>true</Enabled><RandomDelay>PT2H</RandomDelay><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger>'
     Register-SetupScheduledTask $script:CentralUpdateTaskName (New-SetupUpdateTaskDefinition -Description 'Installs a SentinelAI update downloaded from the provider''s update server.' `
         -Triggers $triggers -Updater $updater -Arguments 'apply-central-update' -CatchUp $false)
 }
