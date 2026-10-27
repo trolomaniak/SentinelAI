@@ -351,7 +351,8 @@ function Unregister-SetupScheduledTask {
 function New-SetupUpdateTaskDefinition {
     param([string]$Description, [string]$Triggers, [string]$Updater, [string]$Arguments, [bool]$CatchUp)
     $command = [Security.SecurityElement]::Escape('"' + $Updater + '"')
-    $catchUp = if ($CatchUp) { 'true' } else { 'false' }
+    # PowerShell names ignore case: a $catchUp local would be the [bool] parameter and render True, which Task Scheduler rejects.
+    $startWhenAvailable = if ($CatchUp) { 'true' } else { 'false' }
     return @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -362,7 +363,7 @@ function New-SetupUpdateTaskDefinition {
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <StartWhenAvailable>$catchUp</StartWhenAvailable>
+    <StartWhenAvailable>$startWhenAvailable</StartWhenAvailable>
     <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
     <Enabled>true</Enabled>
   </Settings>

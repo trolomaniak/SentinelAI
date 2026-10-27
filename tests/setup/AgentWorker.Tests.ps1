@@ -182,4 +182,11 @@ Reject-AgentTest { Remove-AgentSetupInstallation $locations } 'a service the pil
 Assert-AgentTest (($script:events -join ',') -ceq 'update-task-hold,remove-service,update-task-resume') 'nothing is deleted while an unproven Agent service remains'
 
 [IO.Directory]::Delete($script:work, $true)
+# MVP-7: Task Scheduler accepts only lowercase XML booleans; the nightly task does not catch up, the Agent task does.
+foreach ($case in @(@{ CatchUp = $false; Text = 'false' }, @{ CatchUp = $true; Text = 'true' })) {
+    $xml = [xml](New-SetupUpdateTaskDefinition -Description 'Synthetic.' -Triggers '<BootTrigger><Enabled>true</Enabled></BootTrigger>' `
+        -Updater 'C:\Program Files\SentinelAI\Updater\SentinelAI.Updater.exe' -Arguments 'apply-agent-update' -CatchUp $case.CatchUp)
+    Assert-AgentTest ($xml.Task.Settings.StartWhenAvailable -ceq $case.Text -and $xml.Task.Settings.Enabled -ceq 'true' -and
+        $xml.Task.Principals.Principal.UserId -ceq 'S-1-5-18' -and $xml.Task.Actions.Exec.Command -ceq '"C:\Program Files\SentinelAI\Updater\SentinelAI.Updater.exe"') ('update task XML with catch-up ' + $case.Text)
+}
 Write-Output ('Agent Setup worker assertions passed: ' + $script:checks)
