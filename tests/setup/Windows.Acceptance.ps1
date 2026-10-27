@@ -875,7 +875,67 @@ function Test-SetupLocalNetwork {
     }
 }
 
+# MVP-6: Setup gives the Agent service its own SID, that SID read access to the Security log and success auditing of
+# "Other Object Access Events" (4698); uninstall restores Windows' own state, captured here before Setup runs.
+$script:agentServiceSid = 'S-1-5-80-3260565588-2217304288-1438658577-528527895-932542736'
+$script:otherObjectAccessAudit = [Guid]'0cce9227-69ae-11d9-bed3-505054503030'
+if ($null -eq ('SentinelAI.Setup.Acceptance.Audit' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace SentinelAI.Setup.Acceptance {
+    public static class Audit {
+        [StructLayout(LayoutKind.Sequential)] private struct Policy { public Guid SubCategory; public uint Value; public Guid Category; }
+        [DllImport("advapi32.dll", SetLastError=true)] private static extern bool AuditQuerySystemPolicy([In] Guid[] subCategories, uint count, out IntPtr policy);
+        [DllImport("advapi32.dll")] private static extern void AuditFree(IntPtr buffer);
+        [DllImport("ntdll.dll")] private static extern int RtlAdjustPrivilege(int privilege, bool enable, bool thread, out bool previous);
+        public static uint Get(Guid subCategory) {
+            bool previous;
+            if (RtlAdjustPrivilege(8, true, false, out previous) != 0) throw new InvalidOperationException("No security privilege.");
+            IntPtr buffer;
+            if (!AuditQuerySystemPolicy(new[] { subCategory }, 1, out buffer)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            try { return ((Policy)Marshal.PtrToStructure(buffer, typeof(Policy))).Value & 3; } finally { AuditFree(buffer); }
+        }
+    }
+}
+'@
+}
+function Get-SetupSecurityLogAces {
+    $configuration = New-Object Diagnostics.Eventing.Reader.EventLogConfiguration('Security')
+    try { $descriptor = New-Object Security.AccessControl.RawSecurityDescriptor($configuration.SecurityDescriptor) } finally { $configuration.Dispose() }
+    return @($descriptor.DiscretionaryAcl | ForEach-Object {
+        if ($_ -is [Security.AccessControl.CommonAce]) { [string]$_.AceQualifier + ';' + [string]$_.AceFlags + ';' + $_.AccessMask + ';' + $_.SecurityIdentifier.Value }
+        else { 'other;' + $_.AceType } })
+}
+function Assert-SetupSecurityLogAccess([bool]$Granted, [string]$When) {
+    $aces = @(Get-SetupSecurityLogAces)
+    $agent = @($aces | Where-Object { $_.EndsWith(';' + $script:agentServiceSid) })
+    $others = @($aces | Where-Object { -not $_.EndsWith(';' + $script:agentServiceSid) })
+    Assert-SetupAcceptance (($others -join '|') -ceq ($script:securityLogBaseline -join '|')) ($When + ': other Security log access entries changed.')
+    $audit = [SentinelAI.Setup.Acceptance.Audit]::Get($script:otherObjectAccessAudit)
+    $baselineValue = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\SentinelAI\Agent' -Name OtherObjectAccessAuditBaseline -ErrorAction SilentlyContinue
+    if ($Granted) {
+        $sidType = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\SentinelAIAgent' -Name ServiceSidType -ErrorAction SilentlyContinue
+        Assert-SetupAcceptance ($null -ne $sidType -and [int]$sidType.ServiceSidType -eq 1) ($When + ': the Agent service has no unrestricted service SID.')
+        Assert-SetupAcceptance ($agent.Count -eq 1 -and $agent[0] -ceq ('AccessAllowed;None;1;' + $script:agentServiceSid)) ($When + ': the Security log does not grant the Agent service SID read access only.')
+        Assert-SetupAcceptance (($audit -band 1) -eq 1 -and ($audit -band 2) -eq ($script:auditBaseline -band 2)) ($When + ': success auditing of Other Object Access Events is off, or its failure auditing changed.')
+        Assert-SetupAcceptance ($null -ne $baselineValue -and [int]$baselineValue.OtherObjectAccessAuditBaseline -eq $script:auditBaseline) ($When + ': Setup did not record the audit setting it found.')
+    } else {
+        Assert-SetupAcceptance ($agent.Count -eq 0) ($When + ': the Agent service SID kept its Security log access entry.')
+        Assert-SetupAcceptance ($audit -eq $script:auditBaseline) ($When + ': the Other Object Access Events audit setting was not restored.')
+        Assert-SetupAcceptance ($null -eq $baselineValue) ($When + ': the recorded audit setting remained.')
+    }
+}
+function Get-SetupAgentAlerts([Guid]$EndpointId, [string]$RuleId) {
+    $page = Invoke-SetupCoreRequest ('/api/admin/alerts?endpointId=' + $EndpointId.ToString('D') + '&limit=100') 'GET' $null $script:accessToken | ConvertFrom-Json
+    return @($page.alerts | Where-Object { [string]$_.ruleId -ceq $RuleId })
+}
+
 try {
+    $script:securityLogBaseline = @(Get-SetupSecurityLogAces | Where-Object { -not $_.EndsWith(';' + $script:agentServiceSid) })
+    $script:auditBaseline = [SentinelAI.Setup.Acceptance.Audit]::Get($script:otherObjectAccessAudit)
+    Assert-SetupSecurityLogAccess $false 'Before Setup'
     foreach ($directory in @($poisonedExtraction, $poisonedTemp)) {
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
         $acl = Get-Acl -LiteralPath $directory
@@ -1061,15 +1121,23 @@ try {
     Wait-ExactEndpoint $endpointId $restartSince
     Assert-SetupAcceptance ((Read-SetupStateDigest $statePath) -ceq $stateDigest -and
         (Read-SetupStateDigest (Join-Path $agentData 'installation-id')) -ceq $identityDigest) 'The Agent restart changed persistent enrollment or installation identity.'
-    # Under LocalService the Agent collects System end to end and is denied Security (the unchanged boundary);
-    # the real PowerShell and Defender readability is printed rather than assumed.
+    # Under LocalService the Agent collects System end to end, and Security through its own service SID's read entry
+    # (MVP-6); the real PowerShell and Defender readability is printed rather than assumed.
+    Assert-SetupSecurityLogAccess $true 'Central installation'
     Wait-SetupAcceptance {
         $sources = @(Get-AgentEventSources $endpointId)
         $system = @($sources | Where-Object { [string]$_.channel -ceq 'System' })
         $security = @($sources | Where-Object { [string]$_.channel -ceq 'Security' })
         $system.Count -eq 1 -and [string]$system[0].state -ceq 'collecting' -and $null -ne $system[0].checkpointRecordId -and
-            $security.Count -eq 1 -and [string]$security[0].state -ceq 'accessDenied'
-    } 'The installed LocalService Agent did not report System collecting and Security access denied.' $script:TimeoutSeconds
+            $security.Count -eq 1 -and [string]$security[0].state -ceq 'collecting' -and $null -ne $security[0].checkpointRecordId
+    } 'The installed LocalService Agent did not report System and Security collecting.' $script:TimeoutSeconds
+    # A scheduled task outside \Microsoft\ is audited as Security 4698 and raises SA-EVT-PERSIST-003.
+    $taskProbe = '\SentinelAIAcceptance' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    try {
+        & schtasks.exe /Create /TN $taskProbe /TR 'C:\Windows\System32\cmd.exe /c exit 0' /SC ONCE /ST 23:59 /F | Out-Null
+        Assert-SetupAcceptance ($LASTEXITCODE -eq 0) 'Could not create the scheduled task marker.'
+    } finally { & schtasks.exe /Delete /TN $taskProbe /F | Out-Null }
+    Wait-SetupAcceptance { @(Get-SetupAgentAlerts $endpointId 'SA-EVT-PERSIST-003').Count -ge 1 } 'The scheduled task marker did not raise SA-EVT-PERSIST-003 through the Security log.' $script:TimeoutSeconds
     $systemStoredBefore = [long]@(Get-AgentEventSources $endpointId | Where-Object { [string]$_.channel -ceq 'System' })[0].storedObservations
     $eventProbe = 'SentinelAIEventProbe' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
     try {

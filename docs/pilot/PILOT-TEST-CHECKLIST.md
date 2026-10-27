@@ -1,6 +1,6 @@
 # Pilot release test checklist (internal)
 
-Run this checklist for every pilot release before it is sent to a company. Use at least two real computers in one network: **A**, the central computer, and **B**, an Agent computer. One must run Windows 10 22H2 x64 and the other Windows 11 x64; swap the roles on the next release. Record the release version, the date, both Windows builds and the result of each step. Use only test computers and synthetic data, never a customer's computers.
+Run this checklist for every pilot release before it is sent to a company. Use at least two real computers in one network: **A**, the central computer, and **B**, an Agent computer. One must run Windows 10 22H2 x64 and the other Windows 11 x64; swap the roles on the next release. At least one must use a Polish display language. Record the release version, the date, both Windows builds and the result of each step. Use only test computers and synthetic data, never a customer's computers.
 
 ## 0. Build and publish
 
@@ -33,6 +33,7 @@ Run this checklist for every pilot release before it is sent to a company. Use a
   - create two codes for the computer name and two for A's IPv4 address;
   - check **Copy codes** and **Save codes as files**;
   - revoke one code.
+- [ ] Before installing on B, note the output of `auditpol /get /subcategory:{0CCE9227-69AE-11D9-BED3-505054503030}` in an elevated PowerShell (normally no auditing).
 - [ ] On B, run Agent Setup with the revoked code: it is refused and nothing changes.
 - [ ] Run Agent Setup interactively with a valid code. It installs, and B appears in **Devices** on A within a minute.
 - [ ] Uninstall the Agent on B from **Settings → Apps → SentinelAI Agent**. Remove B in Desktop.
@@ -49,6 +50,12 @@ Run this checklist for every pilot release before it is sent to a company. Use a
   - or create and delete a test service with a program path in a temporary folder.
 - [ ] Within a few minutes, **Alerts** on A shows the alert for B with its evidence and recommended action, and **Risk** ranks B.
 - [ ] Set the alert to **Investigating**, then **Resolved**. Restore the setting on B.
+- [ ] On B, in an elevated PowerShell, create and delete a scheduled task and a never-started test driver entry:
+  ```powershell
+  schtasks /Create /TN \SentinelAITest /TR "cmd.exe /c exit 0" /SC ONCE /ST 23:59 /F; schtasks /Delete /TN \SentinelAITest /F
+  sc.exe create SentinelAITestDriver type= kernel binPath= C:\Users\Public\sentinelai-test.sys start= demand; sc.exe delete SentinelAITestDriver
+  ```
+  Within a few minutes **Alerts** shows "Scheduled task created outside the Microsoft task folder" and "Driver installed outside the Windows system folders" for B, also on the Polish computer.
 - [ ] In **Reports**, generate and save a report for the current month and open it.
 
 ## 4. Pilot key near and after the end
@@ -68,7 +75,8 @@ These steps move A's clock forward. Core never lets its time go backwards, so A'
 - [ ] Uninstall the Agent on B silently from an elevated PowerShell: `(Start-Process "$env:ProgramFiles\SentinelAI Agent\Setup\SentinelAI-Agent-Setup.exe" -ArgumentList '/uninstall', '/quiet' -Wait -PassThru).ExitCode` must be 0. Check:
   - the service is gone;
   - `%ProgramFiles%\SentinelAI Agent` and `%ProgramData%\SentinelAI Agent` are gone, and the running Setup copy waits in `%ProgramData%\SentinelAI-Setup` for deletion at the next restart;
-  - the **SentinelAI Agent** entry in **Settings → Apps** is gone.
+  - the **SentinelAI Agent** entry in **Settings → Apps** is gone;
+  - `auditpol /get /subcategory:{0CCE9227-69AE-11D9-BED3-505054503030}` shows what you noted before installing, and `wevtutil gl Security` no longer lists `S-1-5-80-3260565588-2217304288-1438658577-528527895-932542736` under `channelAccess`.
 
 ## 6. Uninstalling the central installation
 

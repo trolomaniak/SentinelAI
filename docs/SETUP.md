@@ -69,7 +69,7 @@ If rollback cannot finish, Setup reports failure and retains recovery material. 
 
 Core uses `NT SERVICE\SentinelAICore`, delayed automatic startup and its existing recovery policy. Agent uses automatic `NT AUTHORITY\LocalService`. Core listens at `http://127.0.0.1:5000` for the local Desktop and Agent and, in the central role, at HTTPS port 5443 on every IPv4 interface for Agents on the local network. Setup does not provision cloud credentials, licensing entitlements or automatic updates. Desktop preferences and AI consent retain their default-off behavior.
 
-Under LocalService, the Agent collects the selected System, PowerShell and Defender events where those channels are readable and reports the Security channel as access denied; Setup grants no additional event log access (see [security event collection](SECURITY-EVENTS.md#channel-access-and-localservice)).
+Under LocalService, the Agent collects the selected System, PowerShell and Defender events where those channels are readable. Setup gives the Agent service its own SID with read-only access to the Security channel and enables success auditing of Other Object Access Events (4698); uninstall removes the access and restores the audit setting it found (see [security event collection](SECURITY-EVENTS.md#channel-access-and-localservice)).
 
 ## Central computer and the local network
 

@@ -75,6 +75,7 @@ public sealed class SecurityEventPipeline : BackgroundService
     private readonly ILogger<SecurityEventPipeline> _logger;
     private readonly SecurityEventTimings _timings;
     private readonly SecurityEventCatalog _catalog = SecurityEventCatalog.Production;
+    private readonly ServiceControlManagerText _serviceText;
     private readonly ChannelState[] _channels;
     private readonly Dictionary<string, ChannelState> _byName;
 
@@ -104,8 +105,10 @@ public sealed class SecurityEventPipeline : BackgroundService
     private SecurityEventPipelineSnapshot _snapshot;
 
     public SecurityEventPipeline(AgentOptions options, IEventLogAccess access, EventCheckpointStore checkpoints,
-        AgentLink link, ISecurityEventUploader uploader, TimeProvider time, ILogger<SecurityEventPipeline> logger)
+        AgentLink link, ISecurityEventUploader uploader, TimeProvider time, ILogger<SecurityEventPipeline> logger,
+        ServiceControlManagerText? serviceText = null)
     {
+        _serviceText = serviceText ?? ServiceControlManagerText.English;
         _options = options;
         _access = access;
         _checkpoints = checkpoints;
@@ -472,7 +475,7 @@ public sealed class SecurityEventPipeline : BackgroundService
                     }
 
                     var result = SecurityEventNormalizer.Normalize(definition, header, predicateValues,
-                        ReadFieldsSafe(cursor, definition.Fields, cancellationToken));
+                        ReadFieldsSafe(cursor, definition.Fields, cancellationToken), _serviceText);
                     if (result.Outcome == NormalizationOutcome.NotSelected)
                     {
                         state.FieldsDiscarded += result.FieldsDiscarded;

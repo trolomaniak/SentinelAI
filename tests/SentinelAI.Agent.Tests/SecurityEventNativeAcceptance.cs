@@ -42,6 +42,7 @@ internal static class SecurityEventNativeAcceptance
         }
 
         PrintChannelAccess();
+        VerifyServiceControlManagerText();
         var cleanupFailures = new List<string>();
         await DeleteStaleTestLogsAsync(cleanupFailures);
         Ensure(cleanupFailures.Count == 0, "A test-only event log from an earlier run could not be deleted.");
@@ -133,15 +134,14 @@ internal static class SecurityEventNativeAcceptance
                         "The marker service installation was not reflected in Core.", Latency);
                     var latency = stopwatch.ElapsedMilliseconds;
                     var rows = await ServiceRowsAsync(events, endpointId, serviceB);
-                    // SCM inserts the type and start type as display text in the system language.
-                    var english = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName == "en";
+                    // SCM inserts the type and start type as display text in the system language; the Agent
+                    // recognizes it through services.exe's messages in every installed language.
                     Ensure(rows.Count == 1 && rows[0].ServiceInstall is
                            {
                                ImageFileName: "cmd.exe", ImageLocation: ServiceImageLocations.Windows,
-                               AccountKind: ServiceAccountKinds.LocalSystem
-                           } install &&
-                           (install.ServiceType == ServiceTypes.UserModeService || !english && install.ServiceType is null) &&
-                           install.StartType is ServiceStartTypes.Demand or null,
+                               AccountKind: ServiceAccountKinds.LocalSystem, ServiceType: ServiceTypes.UserModeService,
+                               StartType: ServiceStartTypes.Demand
+                           },
                         "The marker service installation was not normalized as expected.");
                     recordB = rows[0].RecordId;
                     Ensure((await ServiceRowsAsync(events, endpointId, serviceA)).Count == 0,
@@ -710,6 +710,166 @@ internal static class SecurityEventNativeAcceptance
 
     private static Task WaitForAsync(Func<bool> condition, string message, TimeSpan timeout) =>
         WaitForAsync(() => Task.FromResult(condition()), message, timeout);
+
+    /// <summary>
+    /// Each SCM message ID must give its English text in en-US, the runner's language. On a mismatch the
+    /// message tables of the en-US resources are searched, and every ID whose text is one of the expected
+    /// texts is printed, so the table can be corrected from this output.
+    /// </summary>
+    private static void VerifyServiceControlManagerText()
+    {
+        var english = Path.Combine(Environment.SystemDirectory, "en-US", "services.exe.mui");
+        Ensure(File.Exists(english), "The runner has no en-US services.exe.mui.");
+        var strings = ServiceControlManagerText.ReadStrings(english, 0x0409,
+            ServiceControlManagerText.Messages.Select(message => message.Id));
+        var wrong = ServiceControlManagerText.Messages
+            .Where(message => message.Id != 0 && (!strings.TryGetValue(message.Id, out var text) ||
+                ServiceControlManagerText.Key(text) != ServiceControlManagerText.Key(message.English)))
+            .Select(message => $"{message.English} (0x{message.Id:X8})").ToList();
+
+        if (wrong.Count > 0)
+        {
+            // Message tables and string tables of every en-US resource file; the files holding most of the
+            // expected texts are printed with each matching resource ID.
+            var expected = ServiceControlManagerText.Messages.Select(message => ServiceControlManagerText.Key(message.English))
+                .ToHashSet(StringComparer.Ordinal);
+            var directory = Path.Combine(Environment.SystemDirectory, "en-US");
+            var scanned = 0;
+            var matches = new List<(string File, int Distinct, string Found)>();
+            foreach (var file in Directory.EnumerateFiles(directory, "*.mui").OrderBy(file => file, StringComparer.Ordinal))
+            {
+                scanned++;
+                var found = Resources(file).Where(entry => expected.Contains(ServiceControlManagerText.Key(entry.Text))).ToList();
+                var distinct = found.Select(entry => ServiceControlManagerText.Key(entry.Text)).Distinct().Count();
+                if (distinct >= 3)
+                    matches.Add((Path.GetFileName(file), distinct,
+                        string.Join("; ", found.Select(entry => $"{entry.Kind} 0x{entry.Id:X8}={entry.Text.Trim()}"))));
+            }
+
+            Console.WriteLine($"Native event SCM text search: {scanned} en-US resource files, services.exe.mui " +
+                              (File.Exists(Path.Combine(directory, "services.exe.mui")) ? "present" : "absent") + ", " +
+                              $"{Resources(Path.Combine(directory, "services.exe.mui")).Count} resources in it.");
+            foreach (var match in matches.OrderByDescending(match => match.Distinct).Take(6))
+                Console.WriteLine($"Native event SCM text candidates in {match.File} ({match.Distinct} texts): {match.Found}");
+        }
+
+        Ensure(wrong.Count == 0, "SCM string IDs do not give their English text: " + string.Join(", ", wrong) + ".");
+        var loaded = ServiceControlManagerText.Load();
+        Ensure(ServiceControlManagerText.Messages.All(message => message.StartType
+                ? loaded.StartType(message.English) == message.Value
+                : loaded.ServiceType(message.English) == message.Value),
+            "The loaded SCM texts do not recognize English.");
+        // The service-type strings next to the verified ones, so a missing text such as "file system driver" can be placed.
+        var neighbours = ServiceControlManagerText.ReadStrings(english, 0x0409, Enumerable.Range(0x130, 16).Select(id => (uint)id));
+        Console.WriteLine($"Native event SCM texts: {ServiceControlManagerText.Messages.Count(message => message.Id != 0)} string IDs verified, " +
+                          $"{loaded.Count} texts recognized in {CultureInfo.InstalledUICulture.Name}; services.exe strings 0x130-0x13F: " +
+                          string.Join("; ", neighbours.OrderBy(entry => entry.Key).Select(entry => $"0x{entry.Key:X3}={entry.Value.Trim()}")) + ".");
+    }
+
+    /// <summary>Every message table (RT_MESSAGETABLE) and string table (RT_STRING) entry of a resource file.</summary>
+    private static List<(string Kind, uint Id, string Text)> Resources(string path)
+    {
+        var entries = new List<(string Kind, uint Id, string Text)>();
+        var module = LoadLibraryExW(path, IntPtr.Zero, 0x22);
+        if (module == IntPtr.Zero) return entries;
+        try
+        {
+            foreach (var (type, kind) in new[] { (11, "message"), (6, "string") })
+            {
+                var names = new List<IntPtr>();
+                EnumResourceNamesProc callback = (_, _, name, _) => { names.Add(name); return names.Count < 4096; };
+                EnumResourceNamesW(module, type, callback, IntPtr.Zero);
+                GC.KeepAlive(callback);
+                foreach (var name in names)
+                {
+                    if (name.ToInt64() >> 16 != 0) continue;
+                    var bytes = ResourceBytes(module, name, type);
+                    if (bytes is null) continue;
+                    if (type == 11) MessageEntries(bytes, entries);
+                    else StringEntries(bytes, (uint)(name.ToInt64() - 1) * 16, entries);
+                }
+            }
+        }
+        finally
+        {
+            FreeLibrary(module);
+        }
+
+        return entries;
+    }
+
+    private static byte[]? ResourceBytes(IntPtr module, IntPtr name, int type)
+    {
+        var resource = FindResourceW(module, name, (IntPtr)type);
+        if (resource == IntPtr.Zero) return null;
+        var size = SizeofResource(module, resource);
+        var data = LockResource(LoadResource(module, resource));
+        if (data == IntPtr.Zero || size < 4) return null;
+        var bytes = new byte[size];
+        System.Runtime.InteropServices.Marshal.Copy(data, bytes, 0, (int)size);
+        return bytes;
+    }
+
+    private static void MessageEntries(byte[] bytes, List<(string Kind, uint Id, string Text)> entries)
+    {
+        var blocks = BitConverter.ToInt32(bytes, 0);
+        for (var block = 0; block < blocks && 4 + block * 12 + 12 <= bytes.Length; block++)
+        {
+            var low = BitConverter.ToUInt32(bytes, 4 + block * 12);
+            var high = BitConverter.ToUInt32(bytes, 8 + block * 12);
+            var offset = BitConverter.ToInt32(bytes, 12 + block * 12);
+            for (var id = low; id <= high && id >= low && offset + 4 <= bytes.Length; id++)
+            {
+                var length = BitConverter.ToUInt16(bytes, offset);
+                var unicode = (BitConverter.ToUInt16(bytes, offset + 2) & 1) != 0;
+                if (length < 4 || offset + length > bytes.Length) break;
+                var text = unicode
+                    ? Encoding.Unicode.GetString(bytes, offset + 4, length - 4)
+                    : Encoding.ASCII.GetString(bytes, offset + 4, length - 4);
+                entries.Add(("message", id, text.TrimEnd('\0')));
+                offset += length;
+            }
+        }
+    }
+
+    private static void StringEntries(byte[] bytes, uint firstId, List<(string Kind, uint Id, string Text)> entries)
+    {
+        var offset = 0;
+        for (var index = 0u; index < 16 && offset + 2 <= bytes.Length; index++)
+        {
+            var length = BitConverter.ToUInt16(bytes, offset);
+            offset += 2;
+            if (offset + length * 2 > bytes.Length) break;
+            if (length > 0) entries.Add(("string", firstId + index, Encoding.Unicode.GetString(bytes, offset, length * 2)));
+            offset += length * 2;
+        }
+    }
+
+    private delegate bool EnumResourceNamesProc(IntPtr module, IntPtr type, IntPtr name, IntPtr parameter);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool EnumResourceNamesW(IntPtr module, IntPtr type, EnumResourceNamesProc callback, IntPtr parameter);
+
+    private static bool EnumResourceNamesW(IntPtr module, int type, EnumResourceNamesProc callback, IntPtr parameter) =>
+        EnumResourceNamesW(module, (IntPtr)type, callback, parameter);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool FreeLibrary(IntPtr module);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern IntPtr LockResource(IntPtr data);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint SizeofResource(IntPtr module, IntPtr resource);
 
     private static void Ensure(bool condition, string message)
     {

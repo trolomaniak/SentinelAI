@@ -292,6 +292,29 @@ internal static class SecurityEventPipelineTests
               Normalize(service, new() { ["StartType"] = "3" }).Observation!.ServiceInstall!.StartType == ServiceStartTypes.Demand &&
               Normalize(service, new() { ["StartType"] = 2 }).Observation!.ServiceInstall!.StartType == ServiceStartTypes.Auto,
             "Service start types were not mapped.");
+        // Synthetic localized SCM texts, as Load() reads them from services.exe for each installed display language.
+        var localizedText = new ServiceControlManagerText([
+            ("Sterownik trybu jądra", false, ServiceTypes.KernelDriver), ("Uruchamianie ręczne", true, ServiceStartTypes.Demand),
+            ("Wyłączony%0", true, ServiceStartTypes.Disabled), ("Start bei Bedarf", true, ServiceStartTypes.Demand),
+            ("Zweideutig", true, ServiceStartTypes.Auto), ("zweideutig", true, ServiceStartTypes.Demand)]);
+        Check(Normalize(service, new() { ["ServiceType"] = "  sterownik TRYBU jądra ", ["StartType"] = "Uruchamianie ręczne" },
+                  text: localizedText) is { FieldsDiscarded: 0 } polish &&
+              polish.Observation!.ServiceInstall is { ServiceType: ServiceTypes.KernelDriver, StartType: ServiceStartTypes.Demand } &&
+              Normalize(service, new() { ["StartType"] = "Start bei Bedarf" }, text: localizedText)
+                  .Observation!.ServiceInstall!.StartType == ServiceStartTypes.Demand &&
+              Normalize(service, new() { ["ServiceType"] = "kernel mode driver", ["StartType"] = "auto start" }, text: localizedText)
+                  .Observation!.ServiceInstall is { ServiceType: ServiceTypes.KernelDriver, StartType: ServiceStartTypes.Auto } &&
+              Normalize(service, new() { ["ServiceType"] = "Sterownik trybu jądra" }) is { FieldsDiscarded: 1 } englishOnly &&
+              englishOnly.Observation!.ServiceInstall!.ServiceType is null,
+            "Localized SCM service texts were not recognized through the loaded languages.");
+        Check(Normalize(startType, new() { ["param3"] = "Wyłączony" }, text: localizedText).Observation!.ServiceStartType!
+                  .NewStartType == ServiceStartTypes.Disabled &&
+              Normalize(startType, new() { ["param3"] = "Zweideutig" }, text: localizedText) is { FieldsDiscarded: 1 } ambiguous &&
+              ambiguous.Observation!.ServiceStartType!.NewStartType is null &&
+              ServiceControlManagerText.English.StartType("DISABLED") == ServiceStartTypes.Disabled &&
+              ServiceControlManagerText.English.Count == ServiceControlManagerText.Messages.Count &&
+              (OperatingSystem.IsWindows() || ReferenceEquals(ServiceControlManagerText.Load(), ServiceControlManagerText.English)),
+            "Localized 7040 start types, ambiguous texts or the English fallback are wrong.");
         Check(SecurityEventCatalog.Production.Find(SecurityEventChannels.Security, "Test-Only-Provider", 4624, 0) is null &&
               SecurityEventCatalog.Production.Find(SecurityEventChannels.Security, "microsoft-windows-security-auditing", 4624, 0)
                   is not null &&
@@ -2413,13 +2436,13 @@ internal static class SecurityEventPipelineTests
     }
 
     private static NormalizationResult Normalize(SecurityEventFixtures.Fixture fixture,
-        Dictionary<string, object?>? overrides = null, int? version = null)
+        Dictionary<string, object?>? overrides = null, int? version = null, ServiceControlManagerText? text = null)
     {
         var fields = new Dictionary<string, object?>(fixture.Fields);
         foreach (var (name, value) in overrides ?? []) fields[name] = value;
         var definition = Definition(fixture);
         return SecurityEventNormalizer.Normalize(definition, Header(fixture, 7) with { Version = version ?? fixture.Version },
-            Render(definition.Predicate, fields), Render(definition.Fields, fields));
+            Render(definition.Predicate, fields), Render(definition.Fields, fields), text);
     }
 
     private static SecurityEventDefinition Definition(SecurityEventFixtures.Fixture fixture) =>

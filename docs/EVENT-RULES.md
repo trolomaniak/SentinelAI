@@ -23,13 +23,13 @@ Every rule's evidence also includes `event.channel`, `event.eventId` and `event.
 | SA-EVT-DEF-001 | Microsoft Defender detected malware | high | Defender/Operational collected; Microsoft Defender is the active antivirus | Defender reports a detection (1116) |
 | SA-EVT-DEF-002 | Microsoft Defender could not remediate a threat | critical | As DEF-001 | Defender reports that an action against a threat failed (1118, 1119) |
 | SA-EVT-PROT-001 | Microsoft Defender protection disabled | high | As DEF-001 | Real-time, antispyware or antivirus protection is disabled (5001, 5010, 5012) |
-| SA-EVT-PROT-002 | Protection service start type set to disabled | high | System collected; English service control messages (start type is null on localized systems) | A monitored protection service (7040 for WinDefend, WdNisSvc, Sense, MpsSvc, BFE, EventLog, wscsvc or SecurityHealthService) is set to start disabled |
+| SA-EVT-PROT-002 | Protection service start type set to disabled | high | System collected | A monitored protection service (7040 for WinDefend, WdNisSvc, Sense, MpsSvc, BFE, EventLog, wscsvc or SecurityHealthService) is set to start disabled |
 | SA-EVT-PROT-003 | Microsoft Defender exclusion added | medium | As DEF-001 | A path, process, extension or address exclusion is added (5007) |
 | SA-EVT-LOG-001 | Windows event log cleared | high | Security collected (1102) or System collected (104) | The Security log or another event log is cleared |
 | SA-EVT-PS-001 | PowerShell flagged a suspicious script block | medium | PowerShell/Operational collected; Windows PowerShell 5.1 | PowerShell logs a script block at warning level (4104, level 3), which it does automatically for content it considers suspicious |
 | SA-EVT-PERSIST-001 | Service installed from a user-writable or remote location | high | System collected | A service is installed (7045) whose program is in a user profile, a temporary folder or a network location |
 | SA-EVT-PERSIST-002 | Driver installed outside the Windows system folders | high | System collected | A kernel or file system driver service is installed (7045) whose program location is known and is not a Windows system folder (a temporary folder under Windows counts as outside) |
-| SA-EVT-PERSIST-003 | Scheduled task created outside the Microsoft task folder | low | Security collected; object access auditing for scheduled tasks (Audit Other Object Access Events) | A scheduled task is created (4698) outside `\Microsoft\` |
+| SA-EVT-PERSIST-003 | Scheduled task created outside the Microsoft task folder | low | Security collected; Audit Other Object Access Events (Setup enables it) | A scheduled task is created (4698) outside `\Microsoft\` |
 
 ### Evidence, reasons and recommended actions
 
@@ -69,7 +69,7 @@ Absent evidence fields mean the value was not collected or not readable. The rul
 
 ## Missing telemetry is not safety
 
-A rule that cannot see its channel cannot fire, and no alert is never the same as "nothing happened". On a default installation the LocalService Agent cannot read the Security channel (see [channel access](SECURITY-EVENTS.md#channel-access-and-localservice)), so SA-EVT-LOGON-001, SA-EVT-RDP-001 and SA-EVT-PERSIST-003 cannot fire, and SA-EVT-LOG-001 sees only System 104. Gaps (overwritten, reset, dropped or rejected records, coverage restarts) also hide events from every rule.
+A rule that cannot see its channel cannot fire, and no alert is never the same as "nothing happened". Setup gives the installed Agent read access to the Security channel and enables the auditing 4698 needs (see [channel access](SECURITY-EVENTS.md#channel-access-and-localservice)); where a domain Group Policy removes either, SA-EVT-LOGON-001, SA-EVT-RDP-001 and SA-EVT-PERSIST-003 cannot fire and SA-EVT-LOG-001 sees only System 104. Gaps (overwritten, reset, dropped or rejected records, coverage restarts) also hide events from every rule.
 
 Risk coverage states this for each endpoint. Its caution names the event channels that are not collecting (including `not reported` and statuses older than two hours, marked `stale`) and how many of the 12 event rules can fire, for example `11 of 12 event rules can fire; channels not collecting: Microsoft-Windows-PowerShell/Operational (accessDenied)`. The event-sources route lists gaps and per-channel states. Audit policy is not reported, so a disabled audit category (for example scheduled task auditing) is indistinguishable from no activity.
 

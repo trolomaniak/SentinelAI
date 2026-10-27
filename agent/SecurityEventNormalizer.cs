@@ -34,9 +34,12 @@ public static class SecurityEventNormalizer
         return passes;
     }
 
+    /// <param name="serviceText">The SCM texts to recognize; English when null.</param>
     public static NormalizationResult Normalize(SecurityEventDefinition definition, EventRecordHeader header,
-        IReadOnlyList<object?>? predicateValues, IReadOnlyList<object?>? fieldValues)
+        IReadOnlyList<object?>? predicateValues, IReadOnlyList<object?>? fieldValues,
+        ServiceControlManagerText? serviceText = null)
     {
+        serviceText ??= ServiceControlManagerText.English;
         var predicate = new FieldValues(definition.Predicate, predicateValues);
         if (!Predicate(definition, predicate, out var carried))
             return new(NormalizationOutcome.NotSelected, null, 0, predicate.Discarded);
@@ -87,15 +90,16 @@ public static class SecurityEventNormalizer
                 observation = observation with
                 {
                     ServiceInstall = new ServiceInstallEvent(Text(fields["ServiceName"], 256, ref fields.Discarded),
-                        image.FileName, image.Location, ServiceType(fields["ServiceType"], ref fields.Discarded),
-                        StartType(fields["StartType"], ref fields.Discarded), AccountKind(fields["AccountName"], ref fields.Discarded))
+                        image.FileName, image.Location, ServiceType(fields["ServiceType"], serviceText, ref fields.Discarded),
+                        StartType(fields["StartType"], serviceText, ref fields.Discarded),
+                        AccountKind(fields["AccountName"], ref fields.Discarded))
                 };
                 break;
             case SecurityEventKinds.ProtectionServiceStartTypeChanged:
                 observation = observation with
                 {
                     ServiceStartType = new ServiceStartTypeEvent((string?)carried,
-                        StartType(fields["param3"], ref fields.Discarded))
+                        StartType(fields["param3"], serviceText, ref fields.Discarded))
                 };
                 break;
             case SecurityEventKinds.ScriptBlockFlagged:
@@ -250,33 +254,21 @@ public static class SecurityEventNormalizer
         };
     }
 
-    public static string? ServiceType(object? value, ref int discarded)
+    /// <summary>SCM service-type text in any loaded display language.</summary>
+    public static string? ServiceType(object? value, ServiceControlManagerText text, ref int discarded)
     {
         if (IsAbsent(value)) return null;
-        var type = (value as string)?.Trim().ToUpperInvariant() switch
-        {
-            "USER MODE SERVICE" => ServiceTypes.UserModeService,
-            "KERNEL MODE DRIVER" => ServiceTypes.KernelDriver,
-            "FILE SYSTEM DRIVER" => ServiceTypes.FileSystemDriver,
-            _ => null
-        };
+        var type = value is string name ? text.ServiceType(name) : null;
         if (type is null) discarded++;
         return type;
     }
 
-    /// <summary>English SCM start-type text or its numeric value; localized text maps to null.</summary>
-    public static string? StartType(object? value, ref int discarded)
+    /// <summary>SCM start-type text in any loaded display language, or its numeric value.</summary>
+    public static string? StartType(object? value, ServiceControlManagerText text, ref int discarded)
     {
         if (IsAbsent(value)) return null;
-        var type = (value as string)?.Trim().ToUpperInvariant() switch
-        {
-            "BOOT START" => ServiceStartTypes.Boot,
-            "SYSTEM START" => ServiceStartTypes.System,
-            "AUTO START" => ServiceStartTypes.Auto,
-            "DEMAND START" => ServiceStartTypes.Demand,
-            "DISABLED" => ServiceStartTypes.Disabled,
-            _ => Integer(value) is long number and >= 0 and <= 4 ? ServiceStartTypes.All[(int)number] : null
-        };
+        var type = (value is string name ? text.StartType(name) : null) ??
+                   (Integer(value) is long number and >= 0 and <= 4 ? ServiceStartTypes.All[(int)number] : null);
         if (type is null) discarded++;
         return type;
     }

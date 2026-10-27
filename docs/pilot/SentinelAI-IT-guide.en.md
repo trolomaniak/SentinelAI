@@ -25,6 +25,16 @@
 
 All data stays on the central computer. Core makes no outbound connections in the pilot: there is no cloud service, license server, telemetry to the vendor or automatic update.
 
+**Windows settings Setup changes for the Agent**
+
+So that the Agent can read the events its detections need, both installers change three Windows settings, and repair and upgrade keep them:
+
+- The `SentinelAIAgent` service gets its own service SID, `NT SERVICE\SentinelAIAgent` (SID type *unrestricted*).
+- That SID gets read-only access to the Windows **Security** log, and to nothing else. No account, group membership or other log changes.
+- **Audit Other Object Access Events** is set to audit **Success**, so Windows records the creation of scheduled tasks (event 4698). Failure auditing stays as it was.
+
+Uninstalling the Agent or the central installation removes the Security log access, and turns success auditing off again if it was off before Setup. A domain Group Policy that sets the audit policy or the Security log's access takes precedence and can undo these settings at its next refresh; if you manage them centrally, set the same values there.
+
 ## 2. Network
 
 - **One port.** Core listens on TCP **5443** (HTTPS) on every IPv4 interface of the central computer, for Agents only. Every administrator, sign-in and Desktop function is served only on `http://127.0.0.1:5000`, which is reachable from the central computer itself. Requests for them on port 5443 are answered with `404`.
@@ -197,8 +207,10 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
   - For antivirus or EDR products, allow the files by their SHA-256 hash from `SHA256SUMS.txt`, following your company policy.
 - Setup does not switch off application control, constrained language mode or other security controls; if they block it, Setup reports a failure.
 
-**The Agent reports the Security log as "access denied"**
-- This is expected. The Agent runs as LocalService, which cannot read the Windows Security log, so the detections based on it (failed and Remote Desktop sign-ins, scheduled task creation, clearing of the Security log) do not work in the standard installation. Detections from the System, PowerShell and Microsoft Defender logs do work, except two that read English Windows texts and therefore work only on English Windows: driver installations and changes to how protection services start.
+**The Agent reports the Security log as "access denied", or new scheduled tasks raise no alert**
+- Setup grants the Agent read access to the Security log and turns on the auditing of new scheduled tasks (section 1). On the central computer, run Setup and choose **Repair**; on another computer, reinstall the Agent.
+- If a domain Group Policy sets **Configure log access** for the Security log, add read access for `NT SERVICE\SentinelAIAgent` there. If it sets the advanced audit policy, enable **Audit Other Object Access Events** for Success there.
+- `auditpol /get /subcategory:{0CCE9227-69AE-11D9-BED3-505054503030}` shows the current setting in any Windows language.
 
 ## 10. Security model summary
 
@@ -209,7 +221,7 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
   - Codes are never logged, and Agent Setup checks the pin before it sends the token.
   - Each Agent's credential is protected with DPAPI under its LocalService account.
 - **Least privilege.**
-  - The Agent runs as LocalService and only reads; it writes only its own state and never changes Windows settings or your files.
+  - The Agent runs as LocalService and only reads; it writes only its own state and never changes Windows settings or your files. Its own service SID may read the Security log, and no other log or object (section 1).
   - Core runs under its own virtual service account.
   - Program and data folders are writable only by Administrators and SYSTEM, and by each service only where it writes its own state. No folder gives the Windows account that installed SentinelAI its own access, so that account's programs running without elevation cannot change what Core or the Agent runs, and any administrator can maintain the installation.
 - **Signed packages.** Setup verifies the signature and hash of every package against the public key built into it, and replaces program code transactionally with automatic rollback.

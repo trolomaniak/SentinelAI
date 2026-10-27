@@ -19,7 +19,7 @@ Działa dziś tylko to, co jest wymienione poniżej:
 - **Windows Update:** ustawienie aktualizacji automatycznych oraz kiedy ostatnio wyszukano i zainstalowano aktualizacje.
 - **Oczekujące ponowne uruchomienie:** czy Windows czeka na restart, aby dokończyć aktualizacje.
 - **Ryzykowne ustawienia:** na przykład wyłączona Kontrola konta użytkownika (UAC), Pulpit zdalny bez uwierzytelniania na poziomie sieci, stary protokół udostępniania plików SMB1, automatyczne logowanie oraz konta lokalnych administratorów.
-- **Wykrywanie zdarzeń bezpieczeństwa:** na przykład znalezienie złośliwego oprogramowania przez Microsoft Defender albo jego wyłączenie, wyczyszczenie dziennika zdarzeń, instalacja usługi lub sterownika z nietypowego miejsca, podejrzany skrypt oznaczony przez PowerShell. Wykrycia wymagające dziennika Zabezpieczenia Windows (powtarzające się nieudane logowania, ryzykowne logowania przez Pulpit zdalny, nowe zaplanowane zadania i wyczyszczenie dziennika Zabezpieczenia) nie działają w standardowej instalacji, ponieważ konto usługi Agenta nie może czytać tego dziennika. Dwa wykrycia odczytują angielskie teksty Windows, więc w Windows w innym języku, na przykład polskim, nie działają: instalacja sterowników i zmiana sposobu uruchamiania usług ochrony.
+- **Wykrywanie zdarzeń bezpieczeństwa:** na przykład znalezienie złośliwego oprogramowania przez Microsoft Defender albo jego wyłączenie, wyczyszczenie dziennika zdarzeń, instalacja usługi lub sterownika z nietypowego miejsca, podejrzany skrypt oznaczony przez PowerShell. Obejmuje to wykrycia z dziennika Zabezpieczenia Windows (powtarzające się nieudane logowania, ryzykowne logowania przez Pulpit zdalny, nowe zaplanowane zadania i wyczyszczenie dziennika Zabezpieczenia): instalator daje Agentowi prawo tylko do odczytu tego dziennika i włącza w Windows inspekcję tworzenia zaplanowanych zadań, a odinstalowanie cofa obie zmiany. Wykrycia działają w Windows w każdym języku, także polskim.
 - **Ocena ryzyka:** każdy komputer dostaje ocenę od 0 do 100 z wyjaśnieniem, a ocena firmy to ocena jej najbardziej zagrożonego komputera.
 - **Alerty i incydenty:** każde ustalenie staje się alertem z dowodami i zalecanym działaniem. Oznaczacie go jako badany, zaakceptowany lub rozwiązany.
 - **Raporty:** raport bezpieczeństwa za wybrany okres, zapisywany jako plik HTML.
@@ -75,7 +75,7 @@ Alerty powstają dla ryzykownych ustawień i wykryć. Pozostałe wartości, taki
 
 **Czy SentinelAI spowolni nasze komputery?** Agent odczytuje stały zestaw ustawień i zdarzeń: krótki komunikat o stanie co 30 sekund, inwentarz urządzenia co sześć godzin i w ciągu kilku sekund po zmianie monitorowanego ustawienia, stan zabezpieczeń co godzinę, a nowe zdarzenia na bieżąco.
 
-**Czy SentinelAI coś zmienia na naszych komputerach?** Nie. Tylko odczytuje; nigdy nie zmienia ustawień Windows ani Waszych plików. Zmianę ustawienia lub usunięcie zagrożenia zawsze wykonujecie sami.
+**Czy SentinelAI coś zmienia na naszych komputerach?** Agent tylko odczytuje; nigdy nie zmienia ustawień Windows ani Waszych plików. Zmianę ustawienia lub usunięcie zagrożenia zawsze wykonujecie sami. Sam instalator zmienia tylko to, czego wymaga monitorowanie: regułę zapory na komputerze centralnym, a na każdym komputerze prawo Agenta do odczytu dziennika Zabezpieczenia i inspekcję tworzenia zaplanowanych zadań. Odinstalowanie cofa te zmiany.
 
 **Czy widzicie nasze dane?** Nie. Wszystko zostaje na Waszym komputerze centralnym i nic nie jest do nas wysyłane.
 
