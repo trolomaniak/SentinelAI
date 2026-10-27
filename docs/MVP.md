@@ -65,7 +65,7 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 
 ## Detection on every Windows (MVP-6)
 
-- The Agent recognizes the Service Control Manager's service-type and start-type texts (7045, 7040) in every installed display language through services.exe's own messages, so the driver-installation and protection-service rules work on Polish and every other Windows.
+- The Agent recognizes the Service Control Manager's service-type and start-type texts (7045, 7040) in every installed display language through services.exe's own strings, so the driver-installation and protection-service rules work on Polish and every other Windows ("file system driver" is recognized in English only).
 - Setup and Agent Setup give the Agent service its own SID (`NT SERVICE\SentinelAIAgent`) with read-only access to the Security log, and turn on success auditing of Other Object Access Events (4698). Repair and upgrade keep both; uninstall removes the access and restores the audit setting it found.
 - Details: [Security event collection](SECURITY-EVENTS.md#channel-access-and-localservice).
 

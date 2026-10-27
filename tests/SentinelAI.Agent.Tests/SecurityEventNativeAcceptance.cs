@@ -718,23 +718,14 @@ internal static class SecurityEventNativeAcceptance
     /// </summary>
     private static void VerifyServiceControlManagerText()
     {
-        var module = LoadLibraryExW(Path.Combine(Environment.SystemDirectory, "services.exe"),
-            IntPtr.Zero, 0x22);
-        Ensure(module != IntPtr.Zero, "services.exe could not be loaded as a resource file.");
-        var wrong = new List<string>();
-        try
-        {
-            foreach (var message in ServiceControlManagerText.Messages)
-            {
-                var text = ServiceControlManagerText.Format(module, message.Id, 0x0409);
-                if (text is null || ServiceControlManagerText.Key(text) != ServiceControlManagerText.Key(message.English))
-                    wrong.Add($"{message.English} (0x{message.Id:X8})");
-            }
-        }
-        finally
-        {
-            FreeLibrary(module);
-        }
+        var english = Path.Combine(Environment.SystemDirectory, "en-US", "services.exe.mui");
+        Ensure(File.Exists(english), "The runner has no en-US services.exe.mui.");
+        var strings = ServiceControlManagerText.ReadStrings(english, 0x0409,
+            ServiceControlManagerText.Messages.Select(message => message.Id));
+        var wrong = ServiceControlManagerText.Messages
+            .Where(message => message.Id != 0 && (!strings.TryGetValue(message.Id, out var text) ||
+                ServiceControlManagerText.Key(text) != ServiceControlManagerText.Key(message.English)))
+            .Select(message => $"{message.English} (0x{message.Id:X8})").ToList();
 
         if (wrong.Count > 0)
         {
@@ -762,14 +753,17 @@ internal static class SecurityEventNativeAcceptance
                 Console.WriteLine($"Native event SCM text candidates in {match.File} ({match.Distinct} texts): {match.Found}");
         }
 
-        Ensure(wrong.Count == 0, "SCM message IDs do not give their English text: " + string.Join(", ", wrong) + ".");
+        Ensure(wrong.Count == 0, "SCM string IDs do not give their English text: " + string.Join(", ", wrong) + ".");
         var loaded = ServiceControlManagerText.Load();
         Ensure(ServiceControlManagerText.Messages.All(message => message.StartType
                 ? loaded.StartType(message.English) == message.Value
                 : loaded.ServiceType(message.English) == message.Value),
             "The loaded SCM texts do not recognize English.");
-        Console.WriteLine($"Native event SCM texts: {ServiceControlManagerText.Messages.Count} message IDs verified, " +
-                          $"{loaded.Count} texts recognized in {CultureInfo.InstalledUICulture.Name}.");
+        // The service-type strings next to the verified ones, so a missing text such as "file system driver" can be placed.
+        var neighbours = ServiceControlManagerText.ReadStrings(english, 0x0409, Enumerable.Range(0x130, 16).Select(id => (uint)id));
+        Console.WriteLine($"Native event SCM texts: {ServiceControlManagerText.Messages.Count(message => message.Id != 0)} string IDs verified, " +
+                          $"{loaded.Count} texts recognized in {CultureInfo.InstalledUICulture.Name}; services.exe strings 0x130-0x13F: " +
+                          string.Join("; ", neighbours.OrderBy(entry => entry.Key).Select(entry => $"0x{entry.Key:X3}={entry.Value.Trim()}")) + ".");
     }
 
     /// <summary>Every message table (RT_MESSAGETABLE) and string table (RT_STRING) entry of a resource file.</summary>

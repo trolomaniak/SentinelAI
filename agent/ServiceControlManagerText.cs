@@ -7,23 +7,26 @@ namespace SentinelAI.Agent;
 
 /// <summary>
 /// The Service Control Manager writes the service type and start type of System 7045 and 7040 as text in the
-/// system's display language. Each text is a message of services.exe, so loading those messages for every
-/// installed display language recognizes them on Windows in any language. English is always recognized, and a
-/// text that means two different values in the loaded languages is not recognized at all.
+/// system's display language. Each text is a string of services.exe, so reading those strings from the
+/// services.exe.mui of every installed display language recognizes them on Windows in any language. English is
+/// always recognized, and a text that means two different values in the loaded languages is not recognized at all.
 /// </summary>
 public sealed class ServiceControlManagerText
 {
-    /// <summary>Message IDs in services.exe; the Windows Agent test checks each against its English text.</summary>
+    /// <summary>
+    /// String IDs in services.exe; the Windows Agent test checks each against its en-US text. "file system
+    /// driver" is not among services.exe's strings, so it is recognized in English only (ID 0).
+    /// </summary>
     public static readonly IReadOnlyList<Message> Messages =
     [
-        new(0, "user mode service", false, ServiceTypes.UserModeService),
-        new(0, "kernel mode driver", false, ServiceTypes.KernelDriver),
+        new(0x135, "user mode service", false, ServiceTypes.UserModeService),
+        new(0x134, "kernel mode driver", false, ServiceTypes.KernelDriver),
         new(0, "file system driver", false, ServiceTypes.FileSystemDriver),
-        new(0, "boot start", true, ServiceStartTypes.Boot),
-        new(0, "system start", true, ServiceStartTypes.System),
-        new(0, "auto start", true, ServiceStartTypes.Auto),
-        new(0, "demand start", true, ServiceStartTypes.Demand),
-        new(0, "disabled", true, ServiceStartTypes.Disabled)
+        new(0x41, "boot start", true, ServiceStartTypes.Boot),
+        new(0x42, "system start", true, ServiceStartTypes.System),
+        new(0x43, "auto start", true, ServiceStartTypes.Auto),
+        new(0x44, "demand start", true, ServiceStartTypes.Demand),
+        new(0x45, "disabled", true, ServiceStartTypes.Disabled)
     ];
 
     public static ServiceControlManagerText English { get; } =
@@ -56,7 +59,7 @@ public sealed class ServiceControlManagerText
 
     public string? StartType(string text) => _startTypes.GetValueOrDefault(Key(text));
 
-    /// <summary>English plus each installed display language's text; English alone when any of it fails.</summary>
+    /// <summary>English plus each installed display language's text; English alone when reading them fails.</summary>
     public static ServiceControlManagerText Load()
     {
         if (!OperatingSystem.IsWindows()) return English;
@@ -64,8 +67,8 @@ public sealed class ServiceControlManagerText
         {
             return new ServiceControlManagerText(LoadInstalledLanguages());
         }
-        catch (Exception exception) when (exception is ExternalException or DllNotFoundException or
-                                              EntryPointNotFoundException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ExternalException or
+                                              DllNotFoundException or EntryPointNotFoundException)
         {
             return English;
         }
@@ -79,25 +82,35 @@ public sealed class ServiceControlManagerText
         return trimmed.ToString().ToUpperInvariant();
     }
 
-    private static FrozenDictionary<string, string> Known(Dictionary<string, string?> map) =>
-        map.Where(entry => entry.Value is not null)
-            .ToFrozenDictionary(entry => entry.Key, entry => entry.Value!, StringComparer.Ordinal);
-
+    /// <summary>The services.exe strings with the given IDs in one resource file's language.</summary>
     [SupportedOSPlatform("windows")]
-    private static List<(string Text, bool StartType, string Value)> LoadInstalledLanguages()
+    public static Dictionary<uint, string> ReadStrings(string path, ushort language, IEnumerable<uint> ids)
     {
-        var texts = new List<(string Text, bool StartType, string Value)>();
-        var module = LoadLibraryExW(Path.Combine(Environment.SystemDirectory, "services.exe"), IntPtr.Zero,
-            LoadLibraryAsDatafile | LoadLibraryAsImageResource);
-        if (module == IntPtr.Zero) return texts;
+        var strings = new Dictionary<uint, string>();
+        var module = LoadLibraryExW(path, IntPtr.Zero, LoadLibraryAsDatafile | LoadLibraryAsImageResource);
+        if (module == IntPtr.Zero) return strings;
         try
         {
-            foreach (var language in InstalledLanguages())
+            // RT_STRING stores strings in blocks of 16: block n holds IDs (n - 1) * 16 to n * 16 - 1.
+            foreach (var block in ids.Where(id => id != 0).GroupBy(id => id / 16 + 1))
             {
-                foreach (var message in Messages)
+                var resource = FindResourceExW(module, (IntPtr)StringTable, (IntPtr)block.Key, language);
+                if (resource == IntPtr.Zero) continue;
+                var size = (int)SizeofResource(module, resource);
+                var data = LockResource(LoadResource(module, resource));
+                if (data == IntPtr.Zero || size <= 0) continue;
+                var bytes = new byte[size];
+                Marshal.Copy(data, bytes, 0, size);
+                var offset = 0;
+                for (var index = 0u; index < 16 && offset + 2 <= bytes.Length; index++)
                 {
-                    if (Format(module, message.Id, language) is { } text)
-                        texts.Add((text, message.StartType, message.Value));
+                    var length = BitConverter.ToUInt16(bytes, offset);
+                    offset += 2;
+                    if (offset + length * 2 > bytes.Length) break;
+                    var id = (block.Key - 1) * 16 + index;
+                    if (length > 0 && block.Contains(id))
+                        strings[id] = System.Text.Encoding.Unicode.GetString(bytes, offset, length * 2);
+                    offset += length * 2;
                 }
             }
         }
@@ -106,51 +119,39 @@ public sealed class ServiceControlManagerText
             FreeLibrary(module);
         }
 
-        return texts;
+        return strings;
     }
 
-    [SupportedOSPlatform("windows")]
-    public static string? Format(IntPtr module, uint id, ushort language)
-    {
-        if (id == 0) return null;
-        var buffer = new char[256];
-        // MAX_WIDTH_MASK drops the message's own line breaks; inserts are never expanded.
-        var length = FormatMessageW(FormatFromModule | FormatIgnoreInserts | FormatMaxWidthMask, module, id, language,
-            buffer, buffer.Length, IntPtr.Zero);
-        return length > 0 ? new string(buffer, 0, length) : null;
-    }
+    private static FrozenDictionary<string, string> Known(Dictionary<string, string?> map) =>
+        map.Where(entry => entry.Value is not null)
+            .ToFrozenDictionary(entry => entry.Key, entry => entry.Value!, StringComparer.Ordinal);
 
+    /// <summary>Every System32\&lt;language&gt;\services.exe.mui, read in that directory's language.</summary>
     [SupportedOSPlatform("windows")]
-    private static List<ushort> InstalledLanguages()
+    private static List<(string Text, bool StartType, string Value)> LoadInstalledLanguages()
     {
-        var languages = new List<ushort>();
-        EnumUiLanguagesProc callback = (name, _) =>
+        var texts = new List<(string Text, bool StartType, string Value)>();
+        var ids = Messages.Select(message => message.Id).ToArray();
+        foreach (var directory in Directory.EnumerateDirectories(Environment.SystemDirectory).Take(1024))
         {
-            if (Marshal.PtrToStringUni(name) is { } hex &&
-                ushort.TryParse(hex, System.Globalization.NumberStyles.HexNumber,
-                    System.Globalization.CultureInfo.InvariantCulture, out var language) &&
-                !languages.Contains(language))
+            var file = Path.Combine(directory, "services.exe.mui");
+            var language = LocaleNameToLCID(Path.GetFileName(directory), 0);
+            if (language is 0 or > 0xFFFF || !File.Exists(file)) continue;
+            var strings = ReadStrings(file, (ushort)language, ids);
+            foreach (var message in Messages)
             {
-                languages.Add(language);
+                if (strings.TryGetValue(message.Id, out var text)) texts.Add((text, message.StartType, message.Value));
             }
+        }
 
-            return languages.Count < 64;
-        };
-        EnumUILanguagesW(callback, MuiLanguageId, IntPtr.Zero);
-        GC.KeepAlive(callback);
-        return languages;
+        return texts;
     }
 
     public sealed record Message(uint Id, string English, bool StartType, string Value);
 
     private const uint LoadLibraryAsDatafile = 0x2;
     private const uint LoadLibraryAsImageResource = 0x20;
-    private const uint FormatFromModule = 0x800;
-    private const uint FormatIgnoreInserts = 0x200;
-    private const uint FormatMaxWidthMask = 0xFF;
-    private const uint MuiLanguageId = 0x4;
-
-    private delegate bool EnumUiLanguagesProc(IntPtr language, IntPtr parameter);
+    private const int StringTable = 6;
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -160,12 +161,23 @@ public sealed class ServiceControlManagerText
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern bool FreeLibrary(IntPtr module);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern int FormatMessageW(uint flags, IntPtr source, uint id, uint language, [Out] char[] buffer,
-        int size, IntPtr arguments);
+    private static extern IntPtr FindResourceExW(IntPtr module, IntPtr type, IntPtr name, ushort language);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern bool EnumUILanguagesW(EnumUiLanguagesProc callback, uint flags, IntPtr parameter);
+    private static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern IntPtr LockResource(IntPtr data);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint SizeofResource(IntPtr module, IntPtr resource);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int LocaleNameToLCID(string name, uint flags);
 }
