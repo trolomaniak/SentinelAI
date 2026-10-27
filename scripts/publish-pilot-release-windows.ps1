@@ -1,6 +1,8 @@
 #requires -Version 5.1
 # MVP-4 pilot release: builds SentinelAI-Setup.exe and SentinelAI-Agent-Setup.exe with the owner's keys and contact
 # details, and gathers them with the four pilot documents and SHA256SUMS.txt in one new folder, ready to upload.
+# MVP-7: with -UpdateServerUrl, Core can check that HTTPS server (off until an administrator enables it), and the folder
+# also holds SentinelAI-Setup.manifest.json: upload it to that URL and SentinelAI-Setup.exe to <URL>/<version>/.
 # Inputs are the update public key and the pilot public keys; the only private key it reads is the update signing key,
 # which signs the packages and is never copied. The pilot license private key is never an input.
 [CmdletBinding()]
@@ -15,7 +17,8 @@ param(
     [string]$PilotContactEmail = '',
     [string]$PilotContactPhone = '',
     [string]$PilotContactWebsite = '',
-    [Parameter(Mandatory = $true)][string]$OutputDirectory
+    [Parameter(Mandatory = $true)][string]$OutputDirectory,
+    [string]$UpdateServerUrl = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +26,7 @@ Set-StrictMode -Version Latest
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $documents = @('SentinelAI-dla-firm.pl.md', 'SentinelAI-for-business.en.md', 'SentinelAI-przewodnik-IT.pl.md', 'SentinelAI-IT-guide.en.md')
 $installers = @('SentinelAI-Setup.exe', 'SentinelAI-Agent-Setup.exe')
+$updateFiles = @(if ($UpdateServerUrl.Length -gt 0) { 'SentinelAI-Setup.manifest.json' })
 $work = $null
 $created = $false
 $complete = $false
@@ -44,13 +48,14 @@ try {
     }
     & (Join-Path $PSScriptRoot 'publish-setup-windows.ps1') @common -OutputDirectory (Join-Path $work 'central') `
         -PilotLicensePublicKey $PilotLicensePublicKey -PilotContactCompany $PilotContactCompany -PilotContactEmail $PilotContactEmail `
-        -PilotContactPhone $PilotContactPhone -PilotContactWebsite $PilotContactWebsite
+        -PilotContactPhone $PilotContactPhone -PilotContactWebsite $PilotContactWebsite -UpdateServerUrl $UpdateServerUrl
     & (Join-Path $PSScriptRoot 'publish-setup-windows.ps1') @common -OutputDirectory (Join-Path $work 'agent') -Product Agent
 
     New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
     $created = $true
     Copy-Item -LiteralPath (Join-Path $work 'central/SentinelAI-Setup.exe') -Destination $OutputDirectory
     Copy-Item -LiteralPath (Join-Path $work 'agent/SentinelAI-Agent-Setup.exe') -Destination $OutputDirectory
+    foreach ($name in $updateFiles) { Copy-Item -LiteralPath (Join-Path $work ('central/' + $name)) -Destination $OutputDirectory }
     foreach ($document in $documents) { Copy-Item -LiteralPath (Join-Path $repo ('docs/pilot/' + $document)) -Destination $OutputDirectory }
     # The business documents carry the same contact details as the installers instead of their placeholder line.
     # ASCII-only source: Windows PowerShell 5.1 reads a script without a byte order mark as ANSI.
@@ -67,7 +72,7 @@ try {
     }
 
     # sha256sum format: lowercase hash, two spaces, file name; Get-FileHash output can be compared with it directly.
-    $lines = foreach ($name in $installers + $documents) {
+    $lines = foreach ($name in $installers + $updateFiles + $documents) {
         $stream = [IO.File]::OpenRead((Join-Path $OutputDirectory $name))
         $sha256 = [Security.Cryptography.SHA256]::Create()
         try { [BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() + '  ' + $name }
@@ -75,8 +80,9 @@ try {
     }
     [IO.File]::WriteAllText((Join-Path $OutputDirectory 'SHA256SUMS.txt'), (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
 
-    # The release holds exactly the two installers, the four documents and the checksums: no key, script or intermediate file.
-    $expected = @($installers + $documents + @('SHA256SUMS.txt') | Sort-Object)
+    # The release holds exactly the two installers, the update manifest when requested, the four documents and the
+    # checksums: no key, script or intermediate file.
+    $expected = @($installers + $updateFiles + $documents + @('SHA256SUMS.txt') | Sort-Object)
     $actual = @(Get-ChildItem -LiteralPath $OutputDirectory -Force | ForEach-Object { $_.Name } | Sort-Object)
     if (($expected -join '|') -cne ($actual -join '|')) { throw 'The release folder does not hold exactly the expected files.' }
     foreach ($name in $installers) { if ((Get-Item -LiteralPath (Join-Path $OutputDirectory $name)).Length -le 0) { throw 'An installer is empty.' } }

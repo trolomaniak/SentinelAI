@@ -7,17 +7,22 @@ param(
     [Parameter(Mandatory = $true)][string]$InitialExecutablePath,
     [Parameter(Mandatory = $true)][string]$UpgradeExecutablePath,
     [Parameter(Mandatory = $true)][string]$UnhealthyExecutablePath,
+    # MVP-7: a newer healthy Setup and its signed update manifest, as the provider's update server offers them.
+    [Parameter(Mandatory = $true)][string]$CentralUpdateExecutablePath,
+    [Parameter(Mandatory = $true)][string]$CentralUpdateManifestPath,
     [ValidateRange(60, 900)][int]$TimeoutSeconds = 900
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-foreach ($name in @('InitialExecutablePath', 'UpgradeExecutablePath', 'UnhealthyExecutablePath')) {
+foreach ($name in @('InitialExecutablePath', 'UpgradeExecutablePath', 'UnhealthyExecutablePath', 'CentralUpdateExecutablePath')) {
     $path = (Resolve-Path -LiteralPath (Get-Variable -Name $name -ValueOnly)).ProviderPath
     if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or [IO.Path]::GetFileName($path) -cne 'SentinelAI-Setup.exe') {
-        throw 'Lifecycle acceptance requires the three actual published Setup executables.'
+        throw 'Lifecycle acceptance requires the four actual published Setup executables.'
     }
     Set-Variable -Name $name -Value $path
 }
+$CentralUpdateManifestPath = (Resolve-Path -LiteralPath $CentralUpdateManifestPath).ProviderPath
+if ([IO.Path]::GetFileName($CentralUpdateManifestPath) -cne 'SentinelAI-Setup.manifest.json') { throw 'Lifecycle acceptance requires the signed Setup update manifest.' }
 $context = $null
 . (Join-Path $PSScriptRoot 'Windows.Acceptance.ps1') -ExecutablePath $InitialExecutablePath -TimeoutSeconds $TimeoutSeconds `
     -PreserveInstallation -InstallationContext ([ref]$context)
@@ -480,8 +485,60 @@ try {
     Assert-LifecycleAcls
     Assert-LifecycleLocalNetwork
     Assert-SetupSecurityLogAccess $true 'Restore'
+
+    # MVP-7: the nightly SYSTEM task installs a newer Setup that Core downloaded from the provider's server (staged here
+    # exactly as Core stores it): it closes Desktop, runs the verified copy quietly and keeps data, identity and enrollment.
+    Assert-SetupAcceptance ((Get-SetupCentralUpdateTask).Count -eq 1) 'The restored installation has no nightly update task.'
+    $updates = Invoke-SetupCoreRequest '/api/admin/updates/settings' 'POST' '{"checkEnabled":true,"autoInstall":true}' $accessToken | ConvertFrom-Json
+    Assert-SetupAcceptance ($updates.checkEnabled -eq $true -and $updates.autoInstall -eq $true) 'Core did not turn on central updates.'
+    $staging = Join-Path $coreData 'central-update'
+    Wait-SetupAcceptance { Test-Path -LiteralPath (Join-Path $staging 'auto-install') -PathType Leaf } 'Core did not mark the night-time installation.' 60
+    Copy-Item -LiteralPath $CentralUpdateExecutablePath -Destination (Join-Path $staging 'SentinelAI-Setup.exe')
+    Copy-Item -LiteralPath $CentralUpdateManifestPath -Destination (Join-Path $staging 'SentinelAI-Setup.manifest.json')
+    $updates = Invoke-SetupCoreRequest '/api/admin/updates' 'GET' $null $accessToken | ConvertFrom-Json
+    Assert-SetupAcceptance ([string]$updates.readyVersion -ceq '1.3.0' -and [int]$updates.installAttempts -eq 0) 'Core did not report the downloaded update as ready.'
+    $desktop = Start-Process -FilePath $desktopExecutable -PassThru
+    try {
+        Wait-SetupAcceptance { -not $desktop.HasExited } 'Desktop did not start before the night-time installation.' 30
+        Start-Sleep -Seconds 5
+        $since = [DateTimeOffset]::UtcNow
+        $taskStarted = [DateTime]::Now.AddSeconds(-1)
+        Start-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Update'
+        Wait-SetupAcceptance {
+            (Get-ScheduledTaskInfo -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Update').LastRunTime -ge $taskStarted -and
+                [string](Get-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Update').State -cne 'Running'
+        } 'The nightly update task did not finish.' 300
+        $result = (Get-ScheduledTaskInfo -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Update').LastTaskResult
+        Write-Host ('CentralUpdateTask: exit ' + $result)
+        Assert-SetupAcceptance ($result -eq 0) 'The nightly update task did not start the verified Setup.'
+        Assert-SetupAcceptance ($desktop.WaitForExit(30000)) 'The nightly update did not close Desktop.'
+    } finally {
+        if (-not $desktop.HasExited) { $desktop.Kill() }
+        $desktop.Dispose()
+    }
+    $apps = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI'
+    Wait-SetupAcceptance { [string](Get-ItemProperty -LiteralPath $apps -ErrorAction SilentlyContinue).DisplayVersion -ceq '1.3.0' } 'The quiet upgrade did not complete.' $script:TimeoutSeconds
+    Open-LifecycleCore; Wait-ExactEndpoint $endpointId $since
+    Assert-LifecycleVersion '1.3.0'; Assert-LifecyclePreserved
+    Assert-LifecycleAcls
+    Assert-LifecycleLocalNetwork
+    Assert-SetupSecurityLogAccess $true 'Central update'
+    $record = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'SentinelAI-Setup\central-update\state.json'
+    $attempt = [IO.File]::ReadAllText($record) | ConvertFrom-Json
+    $readers = @((Get-Acl -LiteralPath $record).Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -ceq $coreSid })
+    Assert-SetupAcceptance ([string]$attempt.version -ceq '1.3.0' -and [int]$attempt.attempts -eq 1 -and $readers.Count -eq 1 -and
+        ($readers[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -eq 0) 'The update task did not record its attempt readable only by Core.'
+    # The new Core removes the installed download; Core then reports itself current.
+    Wait-SetupAcceptance { -not (Test-Path -LiteralPath (Join-Path $staging 'SentinelAI-Setup.exe')) } 'Core kept the installed download.' 120
+    $updates = Invoke-SetupCoreRequest '/api/admin/updates' 'GET' $null $accessToken | ConvertFrom-Json
+    Assert-SetupAcceptance ([string]$updates.installedVersion -ceq '1.3.0' -and $null -eq $updates.readyVersion -and $updates.checkEnabled -eq $true) 'Core did not keep its update settings across the upgrade.'
+    Assert-SetupAcceptance ((Get-FileHash -LiteralPath $installedSetup -Algorithm SHA256).Hash -ceq (Get-FileHash -LiteralPath $CentralUpdateExecutablePath -Algorithm SHA256).Hash -and
+        (Get-SetupCentralUpdateTask).Count -eq 1) 'The Windows Apps Setup copy or the nightly task did not follow the central update.'
+    Write-Output 'Central update: the nightly task installed 1.3.0 quietly after closing Desktop.'
+
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall'
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Restored services were not removed by a subsequent owned uninstall.'
+    Assert-SetupAcceptance ((Get-SetupCentralUpdateTask).Count -eq 0) 'Uninstall kept the nightly update task.'
     Assert-SetupSecurityLogAccess $false 'Second uninstall'
     Assert-LifecyclePreserved
     Assert-LifecycleNoFirewallRule
@@ -496,7 +553,7 @@ try {
         -not [Security.Cryptography.CngKey]::Exists($lifecycleKeyName, [Security.Cryptography.CngProvider]::MicrosoftSoftwareKeyStorageProvider,
             [Security.Cryptography.CngKeyOpenOptions]::MachineKey)) 'Confirmed data removal left Core''s certificate or private key.'
     $lifecyclePassed = $true
-    [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount; NativeLifecycle = 'Fresh 1.0.0 central installation, upgrade 1.1.0, actual signed unhealthy 1.2.0 rollback, damaged-file and firewall-rule repair, default retained-data uninstall, identity- and certificate-preserving restore and explicit confirmed removal' }
+    [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount; NativeLifecycle = 'Fresh 1.0.0 central installation, upgrade 1.1.0, actual signed unhealthy 1.2.0 rollback, damaged-file and firewall-rule repair, default retained-data uninstall, identity- and certificate-preserving restore, night-time central update to 1.3.0 by the SYSTEM task and explicit confirmed removal' }
 } finally {
     if (-not $lifecyclePassed) { Stop-SetupDescendantProcesses @($lifecycleHosts | ForEach-Object { $_.Outer; $_.Host }) }
     foreach ($launch in $lifecycleHosts) {

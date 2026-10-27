@@ -262,7 +262,8 @@ function Set-SetupLifecycleCodeAcl {
         foreach ($entry in $entries) {
             if ($component -ceq 'Core') { Set-CoreServiceAcl -Path $entry.FullName -Kind Code }
             else {
-                Set-SetupCodeAcl -Path $entry.FullName -PublicRead:($component -ceq 'Desktop')
+                # MVP-7: Desktop's Install now checks the Updater before Windows elevates it, so Users may read and run it.
+                Set-SetupCodeAcl -Path $entry.FullName -PublicRead:($component -cin @('Desktop','Updater'))
                 if ($component -ceq 'Agent') {
                     $acl = Get-Acl -LiteralPath $entry.FullName
                     $args = if ($entry.PSIsContainer) { @((New-Object Security.Principal.SecurityIdentifier('S-1-5-19')), 'ReadAndExecute', 'ContainerInherit, ObjectInherit', 'None', 'Allow') }
@@ -409,6 +410,7 @@ function Uninstall-SetupLifecycleInstallation {
     param($Locations, [bool]$PreserveData)
     $owned = Assert-SetupLifecycleOwnership $Locations
     if (Test-Path -LiteralPath (Get-SetupLifecycleJournal $Locations)) { throw 'Recover the pending transaction before uninstalling.' }
+    Remove-SetupCentralUpdateTask
     $marker = @{ format = 'sentinelai-setup-retained-v1'; version = $owned.Core.version }
     Set-SetupLifecycleReceipt -Path (Join-Path $Locations.SetupData 'retained-installation.json') -Content ($marker | ConvertTo-Json -Compress)
     Stop-SetupLifecycleServices $Locations
@@ -466,6 +468,7 @@ function Invoke-SetupLifecycleWorker {
                 $owned = Assert-SetupLifecycleOwnership $locations
                 if ($owned.Retained) { throw 'Retained installations have no Windows Apps entry.' }
                 Register-SetupFullApps -Locations $locations -WorkDirectory $Request.workDirectory -Version $owned.Core.version
+                Sync-SetupCentralUpdateTask $locations
             }
             default { throw 'Invalid lifecycle action.' }
         }

@@ -91,6 +91,9 @@ function Set-CoreServiceFirewallRule {
 function Remove-CoreServiceFirewallRule { $script:events.Add('firewall-remove'); $script:fixture.FirewallRule = $null }
 # The Windows Apps entry and installed Setup copy are removed with every uninstall (SetupWorker.ps1).
 function Unregister-SetupFullApps { param($Locations); $script:events.Add('apps-remove') }
+# MVP-7: the nightly central update task (SetupWorker.ps1) leaves first with every uninstall.
+function Remove-SetupCentralUpdateTask { $script:events.Add('update-task-remove') }
+function Sync-SetupCentralUpdateTask { param($Locations); $script:events.Add('update-task') }
 function Test-CoreServiceCertificate { param($Sha256); return $script:fixture.CertificatePresent -and $Sha256 -ceq $script:fixture.Pin }
 function Remove-CoreServiceCertificate { param($Sha256); $script:events.Add('certificate-remove:' + $Sha256.Substring(0, 4)) }
 function Set-SetupLifecycleCodeAcl { param($Locations); }
@@ -312,7 +315,7 @@ try {
         Invoke-SetupLifecycleWorker $request | Out-Null
         Assert-LifecycleTest (-not (Test-Path -LiteralPath $locations.CodeRoot) -and -not (Test-Path -LiteralPath $locations.Menu)) 'uninstall removes only owned code and shortcut'
         Assert-LifecycleTest ($null -eq $fixture.CoreService -and $null -eq $fixture.AgentService) 'uninstall removes both owned services'
-        Assert-LifecycleTest (($script:events -join ',') -ceq 'stop-agent,stop-core,remove-agent,remove-core,firewall-remove,apps-remove') 'ownership precedes ordered service removal, then the Windows Apps entry'
+        Assert-LifecycleTest (($script:events -join ',') -ceq 'update-task-remove,stop-agent,stop-core,remove-agent,remove-core,firewall-remove,apps-remove') 'ownership precedes ordered service removal, then the Windows Apps entry'
         Assert-LifecycleTest ([IO.File]::ReadAllText((Join-Path $fixture.Neighbor 'state')) -ceq 'foreign-neighbor-state') 'foreign neighboring data survives explicit deletion'
         if ($preserve -ceq 'true') {
             Assert-LifecycleTestDataUnchanged $hashes
@@ -327,7 +330,7 @@ try {
             $fixture = New-LifecycleTestFixture -LocalNetwork:$central; $locations = $fixture.Locations
             $hashes = Get-LifecycleTestDataHashes $locations
             Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'uninstall'; workDirectory = $fixture.Root; preserveData = $preserve }) | Out-Null
-            $expected = 'stop-agent,stop-core,remove-agent,remove-core,firewall-remove,apps-remove'
+            $expected = 'update-task-remove,stop-agent,stop-core,remove-agent,remove-core,firewall-remove,apps-remove'
             if ($central -and $preserve -ceq 'false') { $expected += ',certificate-remove:' + $fixture.Pin.Substring(0, 4) }
             Assert-LifecycleTest (($script:events -join ',') -ceq $expected) 'uninstall removes the rule and only confirmed data removal deletes the certificate'
             Assert-LifecycleTest ($null -eq $fixture.FirewallRule) 'uninstall leaves no Core firewall rule'

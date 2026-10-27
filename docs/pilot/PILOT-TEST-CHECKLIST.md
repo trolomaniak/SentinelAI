@@ -4,9 +4,10 @@ Run this checklist for every pilot release before it is sent to a company. Use a
 
 ## 0. Build and publish
 
-- [ ] Build the release on the owner's Windows build computer with `scripts/publish-pilot-release-windows.ps1`, using the owner's update signing key and pilot public key. Keep both private keys outside every repository and off the test computers.
+- [ ] Build the release on the owner's Windows build computer with `scripts/publish-pilot-release-windows.ps1`, using the owner's update signing key and pilot public key, and `-UpdateServerUrl` with the owner's update server. Keep both private keys outside every repository and off the test computers.
 - [ ] The release folder holds exactly these files:
   - `SentinelAI-Setup.exe` and `SentinelAI-Agent-Setup.exe`;
+  - `SentinelAI-Setup.manifest.json`, the signed manifest for the update server;
   - the four documents, whose business versions show the contact details given to the script instead of placeholders;
   - `SHA256SUMS.txt`.
 - [ ] Issue test pilot keys with `tools/pilot-license issue`, using a test customer name:
@@ -106,7 +107,19 @@ These steps move A's clock forward. Core never lets its time go backwards, so A'
   2. Clear **Keep security history and protected configuration**, type **DELETE** and select **Continue**.
   3. Check that `%ProgramData%\SentinelAI` and the certificate with the friendly name "SentinelAI Core local network" in `LocalMachine\My` are gone.
 
-## 8. Record
+## 8. Central update from the update server
+
+Do it once on Windows 10 and once on Windows 11 across releases.
+
+- [ ] On A, install an older full Setup built with the same keys and the same `-UpdateServerUrl` (the previous release, or one built with a lower version), with the 30-day key.
+- [ ] Upload this release's `SentinelAI-Setup.manifest.json` to `<URL>/SentinelAI-Setup.manifest.json` and `SentinelAI-Setup.exe` to `<URL>/<version>/SentinelAI-Setup.exe`.
+- [ ] Desktop → **Settings → Updates** shows the server and "Off". `Get-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Update' | Select-Object State, @{n='User';e={$_.Principal.UserId}}` shows Ready, SYSTEM.
+- [ ] Turn on **Check the provider's update server**; **Install downloaded updates automatically at night** is checked. Select **Check now**, then **Refresh updates**: within a few minutes the status says this version is downloaded and installs tonight.
+- [ ] Keep Desktop open and run `Start-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Update'` in an elevated PowerShell (instead of waiting for the night). Desktop closes. Within about five minutes **Settings → Apps → SentinelAI** shows this version. Open Desktop: history, devices and the pilot key are kept, Updates says up to date and checking is still on.
+- [ ] Once per release cycle, with automatic installation off and a newer build on the server: **Install now** asks for administrator approval, Desktop closes and Setup opens with **Upgrade** selected.
+- [ ] Uninstall with data removed. The task `\SentinelAI\SentinelAI Update` is gone.
+
+## 9. Record
 
 - [ ] Note any SmartScreen, Smart App Control or antivirus behavior seen on each computer.
 - [ ] Note anything the customer documents describe differently from what you saw, and correct the documents before release.

@@ -238,6 +238,35 @@ using (var cancelLifecycle = new CancellationTokenSource())
     Ensure(lifecycle.Calls == 1, "Canceled completion is not rendered as a successful operation");
 }
 
+// MVP-7: the unattended upgrade changes only an owned, healthy, older installation and always keeps its data.
+lifecycle = new FakeLifecycle();
+Ensure(await SetupWorkflow.RunQuietUpgradeAsync(lifecycle, "1.1.0", CancellationToken.None) == SetupUpgradeExitCode.Upgraded &&
+       lifecycle.Calls == 1 && lifecycle.Action == SetupLifecycleAction.Upgrade && lifecycle.PreserveData, "A quiet upgrade upgrades and keeps data");
+foreach (var (installation, candidate, expected) in new[]
+{
+    (new SetupInstallation(SetupInstallationKind.Fresh), "1.1.0", SetupUpgradeExitCode.NotApplicable),
+    (new SetupInstallation(SetupInstallationKind.Retained, "1.0.0"), "1.1.0", SetupUpgradeExitCode.NotApplicable),
+    (new SetupInstallation(SetupInstallationKind.Foreign), "1.1.0", SetupUpgradeExitCode.NotApplicable),
+    (current, "1.0.0", SetupUpgradeExitCode.NotApplicable),
+    (current, "0.9.0", SetupUpgradeExitCode.NotApplicable),
+    (new SetupInstallation(SetupInstallationKind.RecoveryPending, "1.0.0"), "1.1.0", SetupUpgradeExitCode.RecoveryRequired)
+})
+{
+    lifecycle = new FakeLifecycle { Installation = installation };
+    Ensure(await SetupWorkflow.RunQuietUpgradeAsync(lifecycle, candidate, CancellationToken.None) == expected && lifecycle.Calls == 0,
+        "A quiet upgrade changes nothing that is not an owned older installation");
+}
+foreach (var (result, expected) in new[]
+{
+    (new SetupLifecycleResult(false, FailureCode: "desktop_running"), SetupUpgradeExitCode.DesktopRunning),
+    (new SetupLifecycleResult(false, RolledBack: true, FailureCode: "update_failed"), SetupUpgradeExitCode.RolledBack),
+    (new SetupLifecycleResult(false, FailureCode: "rollback_failed"), SetupUpgradeExitCode.RecoveryRequired),
+    (new SetupLifecycleResult(false, FailureCode: "recovery_pending"), SetupUpgradeExitCode.RecoveryRequired),
+    (new SetupLifecycleResult(false, FailureCode: "installation_unavailable"), SetupUpgradeExitCode.Failed)
+})
+    Ensure(await SetupWorkflow.RunQuietUpgradeAsync(new FakeLifecycle { Result = result }, "1.1.0", CancellationToken.None) == expected,
+        "A quiet upgrade reports each documented outcome");
+
 var sequence = new List<string>(); var fake = new FakeWorker(sequence); var administrator = new FakeAdministrator(sequence); var issuer = new FakeIssuer(sequence);
 await SetupWorkflow.InstallAsync(fake, administrator, issuer, null, " operator ", "synthetic-password".AsMemory(), new SilentProgress(), CancellationToken.None);
 Ensure(sequence.SequenceEqual(new[] { "prepare", "state", "initialize:operator", "start", "issue:operator", "complete" }), "Administrator bootstrap and Core start precede trusted enrollment issuance and token-only completion");
@@ -325,10 +354,12 @@ sealed class FakeLifecycle : ISetupLifecycleBackend
     public SetupLifecycleAction Action { get; private set; }
     public bool PreserveData { get; private set; }
     public Action? AfterExecute { get; init; }
-    public Task<SetupInstallation> InspectAsync(CancellationToken token) => Task.FromResult(new SetupInstallation(SetupInstallationKind.Installed, "1.0.0"));
+    public SetupInstallation Installation { get; init; } = new(SetupInstallationKind.Installed, "1.0.0");
+    public SetupLifecycleResult Result { get; init; } = new(true);
+    public Task<SetupInstallation> InspectAsync(CancellationToken token) => Task.FromResult(Installation);
     public Task<SetupLifecycleResult> ExecuteAsync(SetupLifecycleAction action, bool preserveData, CancellationToken token)
     {
-        token.ThrowIfCancellationRequested(); Calls++; Action = action; PreserveData = preserveData; AfterExecute?.Invoke(); return Task.FromResult(new SetupLifecycleResult(true));
+        token.ThrowIfCancellationRequested(); Calls++; Action = action; PreserveData = preserveData; AfterExecute?.Invoke(); return Task.FromResult(Result);
     }
 }
 sealed class FakeWorker(List<string> sequence) : ISetupWorker

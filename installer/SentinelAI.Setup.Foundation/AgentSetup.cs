@@ -27,12 +27,13 @@ public enum AgentSetupExitCode
     RollbackFailed = 12
 }
 
-public enum SetupMode { Interactive, Uninstall, QuietInstall, QuietUninstall }
+public enum SetupMode { Interactive, Uninstall, QuietInstall, QuietUninstall, QuietUpgrade }
 
 /// <summary>
 /// The Setup host's command line. The native wrapper accepts only its allow-listed options and forwards them in this
 /// canonical form: "--image &lt;handle&gt;" (its own read-only, verified image), then nothing, "--uninstall",
-/// "--uninstall --quiet" or "--quiet --codefile &lt;full path&gt;".
+/// "--uninstall --quiet", "--quiet --codefile &lt;full path&gt;", or (MVP-7, the full Setup's unattended upgrade)
+/// "--upgrade --quiet".
 /// </summary>
 public sealed record SetupArguments(SetupMode Mode, long ImageHandle, string? CodeFile = null)
 {
@@ -46,6 +47,7 @@ public sealed record SetupArguments(SetupMode Mode, long ImageHandle, string? Co
             [] => new(SetupMode.Interactive, image),
             ["--uninstall"] => new(SetupMode.Uninstall, image),
             ["--uninstall", "--quiet"] => new(SetupMode.QuietUninstall, image),
+            ["--upgrade", "--quiet"] => new(SetupMode.QuietUpgrade, image),
             ["--quiet", "--codefile", var path] when path.Length <= 32767 && Path.IsPathFullyQualified(path) && !path.Contains('\0') =>
                 new(SetupMode.QuietInstall, image, path),
             _ => null

@@ -322,15 +322,16 @@ jobs:
               -PilotLicensePublicKey ('dev-ci-pilot=' + (Join-Path $pilotKeys 'dev-ci-pilot.public.pem')) `
               -PilotContactCompany 'Example Pilot Company' -PilotContactEmail 'pilot@example.invalid' `
               -PilotContactPhone '+00 000 000 000' -PilotContactWebsite 'https://example.invalid' `
+              -UpdateServerUrl 'https://updates.example.invalid/sentinelai/pilot' `
               -OutputDirectory $release
             # Every listed file matches its checksum, and nothing else is in the release.
             $sums = @(Get-Content -LiteralPath (Join-Path $release 'SHA256SUMS.txt'))
-            if ($sums.Count -ne 6) { throw 'SHA256SUMS.txt must list the two installers and four documents.' }
+            if ($sums.Count -ne 7) { throw 'SHA256SUMS.txt must list the two installers, the update manifest and four documents.' }
             foreach ($line in $sums) {
               $hash, $name = $line -split '  ', 2
               if ((Get-FileHash -LiteralPath (Join-Path $release $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) { throw ('Checksum mismatch: ' + $name) }
             }
-            if (@(Get-ChildItem -LiteralPath $release -Force).Count -ne 7) { throw 'The release folder holds unexpected files.' }
+            if (@(Get-ChildItem -LiteralPath $release -Force).Count -ne 8) { throw 'The release folder holds unexpected files.' }
             # MVP-7: an older Agent Setup with the same development key; its Agent must update itself from the 1.0.0 Core.
             ./scripts/publish-setup-windows.ps1 -Product Agent -Version 0.9.0 -KeyId dev-ci-setup `
               -DevelopmentPrivateKey (Join-Path $keys 'dev-ci-setup.private.pem') `
@@ -401,12 +402,14 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Development lifecycle key generation failed.' }
             dotnet build ./tests/setup/unhealthy-core/SentinelAI.Core.csproj --configuration Release --output $fault
             if ($LASTEXITCODE -ne 0) { throw 'Unhealthy test-only SCM assembly build failed.' }
-            foreach ($version in @('1.0.0', '1.1.0', '1.2.0')) {
+            # MVP-7: every build carries a development update server; 1.3.0's signed manifest feeds the nightly central update.
+            foreach ($version in @('1.0.0', '1.1.0', '1.2.0', '1.3.0')) {
               $options = @{
                 Version = $version; KeyId = 'dev-ci-lifecycle'
                 DevelopmentPrivateKey = Join-Path $keys 'dev-ci-lifecycle.private.pem'
                 PublicKeyPath = Join-Path $keys 'dev-ci-lifecycle.public.pem'
                 OutputDirectory = Join-Path $outputs $version
+                UpdateServerUrl = 'https://updates.example.invalid/sentinelai/pilot'
               }
               if ($version -eq '1.2.0') { $options.DevelopmentCoreAssemblyOverride = Join-Path $fault 'SentinelAI.Core.dll' }
               ./scripts/publish-setup-windows.ps1 @options
@@ -429,6 +432,8 @@ jobs:
               -InitialExecutablePath (Join-Path $outputs '1.0.0/SentinelAI-Setup.exe') `
               -UpgradeExecutablePath (Join-Path $outputs '1.1.0/SentinelAI-Setup.exe') `
               -UnhealthyExecutablePath (Join-Path $outputs '1.2.0/SentinelAI-Setup.exe') `
+              -CentralUpdateExecutablePath (Join-Path $outputs '1.3.0/SentinelAI-Setup.exe') `
+              -CentralUpdateManifestPath (Join-Path $outputs '1.3.0/SentinelAI-Setup.manifest.json') `
               -TimeoutSeconds 900
           } catch {
             $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace

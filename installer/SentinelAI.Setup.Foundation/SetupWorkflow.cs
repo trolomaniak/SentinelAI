@@ -29,6 +29,9 @@ public sealed record SetupInstallation(SetupInstallationKind Kind, string? Versi
 public enum SetupLifecycleAction { Repair, Upgrade, Uninstall }
 public sealed record SetupLifecycleResult(bool Success, bool RolledBack = false, string? FailureCode = null);
 
+/// <summary>MVP-7: the full Setup's documented exit codes for its unattended "/upgrade /quiet".</summary>
+public enum SetupUpgradeExitCode { Upgraded = 0, Failed = 1, InvalidArguments = 2, NotApplicable = 13, DesktopRunning = 14, RolledBack = 15, RecoveryRequired = 16 }
+
 public interface ISetupLifecycleBackend
 {
     Task<SetupInstallation> InspectAsync(CancellationToken token);
@@ -74,6 +77,30 @@ public static class SetupWorkflow
         var result = await backend.ExecuteAsync(action, preserveData, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         return result;
+    }
+
+    /// <summary>
+    /// The unattended upgrade: only an owned, healthy installation older than this Setup is upgraded, with all data
+    /// kept; anything else (a fresh computer, retained data, an equal or newer version) changes nothing.
+    /// </summary>
+    public static async Task<SetupUpgradeExitCode> RunQuietUpgradeAsync(ISetupLifecycleBackend backend, string candidateVersion,
+        CancellationToken token)
+    {
+        var installation = await backend.InspectAsync(token).ConfigureAwait(false);
+        if (installation.Kind == SetupInstallationKind.RecoveryPending) return SetupUpgradeExitCode.RecoveryRequired;
+        if (installation.Kind != SetupInstallationKind.Installed ||
+            !AllowedLifecycleActions(installation, candidateVersion).Contains(SetupLifecycleAction.Upgrade))
+            return SetupUpgradeExitCode.NotApplicable;
+        var result = await ExecuteLifecycleAsync(backend, installation, candidateVersion, SetupLifecycleAction.Upgrade, true, string.Empty, token)
+            .ConfigureAwait(false);
+        return result switch
+        {
+            { Success: true } => SetupUpgradeExitCode.Upgraded,
+            { FailureCode: "desktop_running" } => SetupUpgradeExitCode.DesktopRunning,
+            { FailureCode: "rollback_failed" or "recovery_pending" } => SetupUpgradeExitCode.RecoveryRequired,
+            { RolledBack: true } => SetupUpgradeExitCode.RolledBack,
+            _ => SetupUpgradeExitCode.Failed
+        };
     }
 
     public static SetupInstallation ParseInstallationState(string marker)

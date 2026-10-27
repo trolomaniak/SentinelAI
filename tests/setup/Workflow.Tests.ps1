@@ -171,6 +171,7 @@ function Register-SetupFullApps {
     Assert-SetupTest ($Version -ceq '1.0.0' -and $WorkDirectory -ceq $fixture) 'Windows Apps entry for the installed version and its own Setup copy'
     [void]$script:events.Add('apps')
 }
+function Sync-SetupCentralUpdateTask { param($Locations); Assert-SetupTest ($Locations.UpdaterCode -ceq $script:locations.UpdaterCode) 'the nightly task runs the installed Updater'; [void]$script:events.Add('update-task') }
 
 foreach ($name in $script:locations.Keys) {
     $script:existing = $script:locations[$name]
@@ -217,14 +218,14 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ('sentinelai-setup-tests-' + [Gu
 try {
     $request = New-SetupTestRequest 'complete'; $request.workDirectory = $fixture
     $output = @(Invoke-SetupInstallation $request)
-    Assert-SetupTest (($script:events -join ',') -ceq 'core-service-Start,install-Agent,SentinelAI.Desktop.exe:True,SentinelAI.Updater.exe:False,private-receipt-directory,receipt,receipt,shortcut,apps') 'complete phase ordering and permissions'
+    Assert-SetupTest (($script:events -join ',') -ceq 'core-service-Start,update-task,install-Agent,SentinelAI.Desktop.exe:True,SentinelAI.Updater.exe:True,private-receipt-directory,receipt,receipt,shortcut,apps') 'complete phase ordering and permissions'
     Assert-SetupTest (($output -join ',') -ceq 'PROGRESS|validate,PROGRESS|services,PROGRESS|agent,PROGRESS|desktop,PROGRESS|shortcut,PROGRESS|apps,DONE') 'complete progress protocol'
     Assert-SetupTest ($null -eq $request.enrollmentToken) 'enrollment request token released'
     Assert-SetupTest (-not ($output -join ',').Contains($syntheticToken)) 'output excludes credentials'
     $script:events.Clear(); $script:failAgent = $true
     $request = New-SetupTestRequest 'complete'; $request.workDirectory = $fixture
     Reject-SetupTest { Invoke-SetupInstallation $request } 'Agent failure stops remaining mutation'
-    Assert-SetupTest (($script:events -join ',') -ceq 'core-service-Start,install-Agent') 'failed Agent cannot install shortcuts or claim success'
+    Assert-SetupTest (($script:events -join ',') -ceq 'core-service-Start,update-task,install-Agent') 'failed Agent cannot install shortcuts or claim success'
     Assert-SetupTest ($null -eq $request.enrollmentToken) 'failure releases token'
 } finally { [IO.Directory]::Delete($fixture, $true); $syntheticToken = $null }
 

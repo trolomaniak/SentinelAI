@@ -24,7 +24,7 @@
             <StackPanel>
                 <TextBlock Text="Settings" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap"
                            AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="Settings" />
-                <TextBlock Text="Review licensing, Core's local-network access for Agents and the local application's connection and session settings."
+                <TextBlock Text="Review licensing, Core's local-network access for Agents, updates and the local application's connection and session settings."
                            Margin="0,10,0,20" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" />
                 <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
                            AutomationProperties.AutomationId="LicenseStatus" AutomationProperties.LiveSetting="Polite" />
@@ -151,6 +151,51 @@
                         <TextBlock Text="Agents on other computers connect to one of these addresses on this port. They trust Core only when its certificate's SHA-256 fingerprint matches this value exactly; no certificate authority is installed on any computer. Windows Firewall allows the port only from the local subnet on Domain and Private networks."
                                    TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}"
                                    AutomationProperties.AutomationId="LocalNetworkPolicy" />
+                    </StackPanel>
+                </Border>
+                <Border x:Name="CentralUpdateSettings" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16"
+                        DataContext="{Binding CentralUpdate, RelativeSource={RelativeSource AncestorType=Window}}"
+                        AutomationProperties.AutomationId="CentralUpdateSettings">
+                    <Border.Style>
+                        <Style TargetType="Border"><Style.Triggers>
+                            <DataTrigger Binding="{Binding}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                        </Style.Triggers></Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <TextBlock Text="Updates" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   AutomationProperties.AutomationId="CentralUpdateStatus" AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   AutomationProperties.AutomationId="CentralUpdateError" AutomationProperties.LiveSetting="Assertive" />
+                        <CheckBox Content="Check the provider's update server for new versions" Margin="0,0,0,8"
+                                  IsChecked="{Binding CheckEnabled, Mode=TwoWay}" IsEnabled="{Binding CanChangeSettings}"
+                                  AutomationProperties.AutomationId="CentralUpdateCheckEnabled" />
+                        <CheckBox Content="Install downloaded updates automatically at night (02:00–04:00)" Margin="0,0,0,12"
+                                  IsChecked="{Binding AutoInstall, Mode=TwoWay}" IsEnabled="{Binding CanChangeAutoInstall}"
+                                  AutomationProperties.AutomationId="CentralUpdateAutoInstall" />
+                        <TextBlock Text="Update server" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding ServerText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                   AutomationProperties.AutomationId="CentralUpdateServer" />
+                        <TextBlock Text="Installed version" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding InstalledVersionText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                   AutomationProperties.AutomationId="CentralUpdateInstalledVersion" />
+                        <TextBlock Text="Last check" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding LastCheckText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                                   AutomationProperties.AutomationId="CentralUpdateLastCheck" />
+                        <WrapPanel>
+                            <Button Content="Refresh updates" Click="OnRefreshUpdates" IsEnabled="{Binding CanRefresh}" Margin="0,0,8,8"
+                                    AutomationProperties.AutomationId="CentralUpdateRefresh" />
+                            <Button Content="Check now" Click="OnCheckForUpdates" IsEnabled="{Binding CanCheckNow}" Margin="0,0,8,8"
+                                    AutomationProperties.AutomationId="CentralUpdateCheckNow" />
+                            <Button Content="Install now" Click="OnInstallUpdate" IsEnabled="{Binding CanInstall}" Margin="0,0,8,8"
+                                    AutomationProperties.AutomationId="CentralUpdateInstallNow" />
+                        </WrapPanel>
+                        <TextBlock Text="{Binding InstallStatusText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   AutomationProperties.AutomationId="CentralUpdateInstallStatus" AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Text="Off by default: SentinelAI then makes no internet connection for updates. An update runs only when it is signed with the provider's key that this installation trusts, and the previous version is restored if the new one does not start healthy. Agents on the other computers update from this computer."
+                                   TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}"
+                                   AutomationProperties.AutomationId="CentralUpdatePolicy" />
                     </StackPanel>
                 </Border>
                 <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"

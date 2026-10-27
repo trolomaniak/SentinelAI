@@ -927,6 +927,25 @@ function Assert-SetupSecurityLogAccess([bool]$Granted, [string]$When) {
         Assert-SetupAcceptance ($null -eq $baselineValue) ($When + ': the recorded audit setting remained.')
     }
 }
+# MVP-7: a build with the provider's update server has the nightly SYSTEM task, and Core reports checking off.
+function Get-SetupCentralUpdateTask { return @(Get-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Update' -ErrorAction SilentlyContinue) }
+function Assert-SetupCentralUpdate {
+    $configured = Test-Path -LiteralPath (Join-Path $script:coreCode 'update-server.json') -PathType Leaf
+    $tasks = Get-SetupCentralUpdateTask
+    $status = Invoke-SetupCoreRequest '/api/admin/updates' 'GET' $null $script:accessToken | ConvertFrom-Json
+    if (-not $configured) {
+        Assert-SetupAcceptance ($tasks.Count -eq 0 -and $status.configured -eq $false) 'A build without an update server has update settings or the nightly task.'
+        return
+    }
+    $user = if ($tasks.Count -eq 1) { [string]$tasks[0].Principal.UserId } else { '' }
+    $sid = if ($user -like 'S-1-*' -or $user.Length -eq 0) { $user } else { ([Security.Principal.NTAccount]$user).Translate([Security.Principal.SecurityIdentifier]).Value }
+    Assert-SetupAcceptance ($tasks.Count -eq 1 -and [string]$tasks[0].State -cne 'Disabled' -and @($tasks[0].Actions).Count -eq 1 -and
+        [string]$tasks[0].Actions[0].Execute -ceq ('"' + (Join-Path $script:updaterCode 'SentinelAI.Updater.exe') + '"') -and
+        [string]$tasks[0].Actions[0].Arguments -ceq 'apply-central-update' -and $sid -ceq 'S-1-5-18') 'Setup did not register the nightly SYSTEM update task.'
+    Assert-SetupAcceptance ($status.configured -eq $true -and $status.checkEnabled -eq $false -and $status.autoInstall -eq $true -and
+        [string]$status.lastCheck -ceq 'never' -and $null -eq $status.readyVersion) 'Core did not report central updates off by default.'
+}
+
 function Get-SetupAgentAlerts([Guid]$EndpointId, [string]$RuleId) {
     $page = Invoke-SetupCoreRequest ('/api/admin/alerts?endpointId=' + $EndpointId.ToString('D') + '&limit=100') 'GET' $null $script:accessToken | ConvertFrom-Json
     return @($page.alerts | Where-Object { [string]$_.ruleId -ceq $RuleId })
@@ -1042,7 +1061,7 @@ try {
     Assert-ServiceAcl $agentCode $localServiceSid $readExecute $mutation
     Assert-ServiceAcl (Join-Path $coreCode 'coreclr.dll') $coreSid $readExecute $mutation
     Assert-ServiceAcl (Join-Path $agentCode 'coreclr.dll') $localServiceSid $readExecute $mutation
-    Assert-ServiceAcl (Join-Path $updaterCode 'coreclr.dll') 'S-1-5-32-545' 0 $mutation
+    Assert-ServiceAcl (Join-Path $updaterCode 'coreclr.dll') 'S-1-5-32-545' $readExecute $mutation
     Assert-ServiceAcl $agentData $localServiceSid $modify 0
     Assert-ServiceAcl (Join-Path $coreData 'sentinelai.db') $coreSid $modify 0
     $parentMutation = [int]([Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::Delete -bor
@@ -1106,6 +1125,7 @@ try {
         $pilotStatus = $null
     }
     Wait-ExactEndpoint $endpointId $installationSince
+    Assert-SetupCentralUpdate
     $stateDigest = Read-SetupStateDigest $statePath
     $identityDigest = Read-SetupStateDigest (Join-Path $agentData 'installation-id')
     $agentService = Get-Service 'SentinelAIAgent'
@@ -1131,6 +1151,8 @@ try {
         $system.Count -eq 1 -and [string]$system[0].state -ceq 'collecting' -and $null -ne $system[0].checkpointRecordId -and
             $security.Count -eq 1 -and [string]$security[0].state -ceq 'collecting' -and $null -ne $security[0].checkpointRecordId
     } 'The installed LocalService Agent did not report System and Security collecting.' $script:TimeoutSeconds
+    # Setup registers its own update task before the Agent first starts, so the task is never reported as a finding.
+    Assert-SetupAcceptance (@(Get-SetupAgentAlerts $endpointId 'SA-EVT-PERSIST-003').Count -eq 0) 'Setup''s own update task was reported as a finding.'
     # A scheduled task outside \Microsoft\ is audited as Security 4698 and raises SA-EVT-PERSIST-003.
     $taskProbe = '\SentinelAIAcceptance' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
     try {

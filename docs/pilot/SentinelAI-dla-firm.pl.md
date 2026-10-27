@@ -30,7 +30,7 @@ Alerty powstają dla ryzykownych ustawień i wykryć. Pozostałe wartości, taki
 
 - **Jeden komputer centralny** w firmie uruchamia SentinelAI: usługę centralną (Core), aplikację Desktop, w której widać wszystko, oraz własnego Agenta.
 - **Każdy pozostały komputer** ma tylko małego Agenta SentinelAI, który przekazuje dane do komputera centralnego przez sieć lokalną.
-- **Dane zostają w Twojej firmie.** Wszystko jest przechowywane na komputerze centralnym. SentinelAI nie wysyła danych do nas ani do żadnej usługi w chmurze, a wersja pilotażowa nie łączy się z internetem.
+- **Dane zostają w Twojej firmie.** Wszystko jest przechowywane na komputerze centralnym. SentinelAI nie wysyła danych do nas ani do żadnej usługi w chmurze. Łączy się z internetem tylko wtedy, gdy włączycie aktualizacje z naszego serwera, i wyłącznie po to, by pobrać nowe wersje.
 
 ## Co jest zbierane, a co nie
 
@@ -64,7 +64,7 @@ Alerty powstają dla ryzykownych ustawień i wykryć. Pozostałe wartości, taki
 - **Instalatory nie są podpisane cyfrowo.** Windows SmartScreen ostrzeże, że wydawca jest nieznany. Przed uruchomieniem zawsze sprawdzaj pobrane pliki z opublikowanymi sumami kontrolnymi SHA-256. Inteligentna kontrola aplikacji (Smart App Control) lub niektóre programy antywirusowe i EDR mogą blokować niepodpisane programy.
 - **Tylko Windows.** Nie ma jeszcze wersji dla Linuksa ani macOS.
 - **Desktop tylko na komputerze centralnym.** Alerty i raporty ogląda się tam; nie ma dostępu przez przeglądarkę ani telefon.
-- **Komputer centralny aktualizujecie sami.** Nowe wersje dostarczamy my: uruchamiacie je na komputerze centralnym, a Agenci na pozostałych komputerach aktualizują się z niego automatycznie, zwykle w ciągu dwóch godzin.
+- **O aktualizacjach decydujecie Wy.** Aktualizacje z naszego serwera są wyłączone, dopóki nie włączycie ich w Desktopie; wtedy komputer centralny instaluje nowe wersje w nocy albo po wybraniu Install now. W przeciwnym razie uruchamiacie nową wersję, którą dostarczamy. Agenci na pozostałych komputerach aktualizują się z komputera centralnego automatycznie, zwykle w ciągu dwóch godzin.
 - **Interfejs po angielsku.** Sam program jest w języku angielskim.
 
 ## Kontakt

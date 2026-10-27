@@ -18,7 +18,10 @@ param(
     [string]$PilotContactCompany = '',
     [string]$PilotContactEmail = '',
     [string]$PilotContactPhone = '',
-    [string]$PilotContactWebsite = ''
+    [string]$PilotContactWebsite = '',
+    # MVP-7, the full Setup only: the owner's HTTPS update server. Core checks it when an administrator enables updates,
+    # and SentinelAI-Setup.manifest.json (signed with the update key) is written next to the Setup for that server.
+    [string]$UpdateServerUrl = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -361,6 +364,10 @@ try {
     $pilotContactSupplied = @($PilotContactCompany, $PilotContactEmail, $PilotContactPhone, $PilotContactWebsite | Where-Object { $_.Length -gt 0 }).Count -gt 0
     if ($agentOnly -and ($PilotLicensePublicKey.Count -gt 0 -or $pilotContactSupplied)) { throw 'Agent Setup needs no pilot license key.' }
     if ($pilotContactSupplied -and $PilotLicensePublicKey.Count -eq 0) { throw 'Pilot contact details need pilot public keys.' }
+    if ($agentOnly -and $UpdateServerUrl.Length -gt 0) { throw 'Agent Setup updates from Core, not from an update server.' }
+    if ($UpdateServerUrl.Length -gt 0 -and ($UpdateServerUrl.Length -gt 256 -or $UpdateServerUrl -cnotmatch '\Ahttps://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[1-9][0-9]{0,4})?(/[A-Za-z0-9._~-]+)*\z')) {
+        throw 'The update server must be a lowercase https:// URL without credentials, query, fragment or trailing slash.'
+    }
     if (-not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) {
         if ($DevelopmentCoreAssemblyOverride -notmatch '\A(?:[A-Za-z]:[\\/]|\\\\)') { throw 'An absolute development Core assembly path is required.' }
         $DevelopmentCoreAssemblyOverride = Assert-SetupPath -Path $DevelopmentCoreAssemblyOverride
@@ -399,6 +406,7 @@ try {
         New-SetupPilotLicense -Destination $pilotLicense
         $pilotArguments.PilotLicenseDirectory = $pilotLicense
     }
+    if ($UpdateServerUrl.Length -gt 0) { $pilotArguments.UpdateServerUrl = $UpdateServerUrl }
     $script:SetupPublishingPhase = 'signed-bundle'
     & (Join-Path $PSScriptRoot 'publish-pilot-windows.ps1') -Version $Version -DevelopmentPrivateKey $DevelopmentPrivateKey -KeyId $KeyId -Channel $Channel -OutputDirectory $bundle @pilotArguments
     # Agent Setup carries only the signed Agent package, the Updater and the installer modules.
@@ -529,6 +537,20 @@ try {
     $outputItems = @(Get-ChildItem -LiteralPath $OutputDirectory -Force)
     if ($outputItems.Count -ne 1 -or $outputItems[0].PSIsContainer -or $outputItems[0].Name -cne $setupName -or $outputItems[0].Length -le 0) {
         throw 'The setup publish must produce exactly one Setup executable.'
+    }
+    if ($UpdateServerUrl.Length -gt 0) {
+        # MVP-7: the manifest the update server offers. The central computer's update task verifies it with the key pinned at
+        # installation before it runs this exact Setup.
+        $script:SetupPublishingPhase = 'update-manifest'
+        $setupManifest = Join-Path $OutputDirectory 'SentinelAI-Setup.manifest.json'
+        Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'tools/update-dev/SentinelAI.UpdateDev.csproj'), '--configuration', 'Release', '--', 'sign',
+            '--private-key', $DevelopmentPrivateKey, '--key-id', $KeyId, '--package', (Join-Path $OutputDirectory $setupName), '--version', $Version,
+            '--artifact-id', 'sentinelai-setup-win-x64', '--artifact-url', ($UpdateServerUrl + '/' + $Version + '/' + $setupName),
+            '--channel', $Channel, '--output', $setupManifest)
+        Invoke-SetupDotnet -Arguments @('run', '--project', (Join-Path $repo 'updater/SentinelAI.Updater.csproj'), '--configuration', 'Release', '--', 'verify',
+            '--manifest', $setupManifest, '--package', (Join-Path $OutputDirectory $setupName),
+            '--public-key', $trust, '--key-id', $KeyId, '--environment', 'development', '--channel', $Channel,
+            '--artifact-id', 'sentinelai-setup-win-x64', '--installed-version', '0.0.0')
     }
     $complete = $true
     Write-Output ('Development single-EXE setup created: ' + (Join-Path $OutputDirectory $setupName))
