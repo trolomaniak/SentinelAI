@@ -488,7 +488,7 @@ try {
 
     # MVP-7: the nightly SYSTEM task installs a newer Setup that Core downloaded from the provider's server (staged here
     # exactly as Core stores it): it closes Desktop, runs the verified copy quietly and keeps data, identity and enrollment.
-    Assert-SetupAcceptance ((Get-SetupCentralUpdateTask).Count -eq 1) 'The restored installation has no nightly update task.'
+    Assert-SetupAcceptance (@(Get-SetupCentralUpdateTask).Count -eq 1) 'The restored installation has no nightly update task.'
     $updates = Invoke-SetupCoreRequest '/api/admin/updates/settings' 'POST' '{"checkEnabled":true,"autoInstall":true}' $accessToken | ConvertFrom-Json
     Assert-SetupAcceptance ($updates.checkEnabled -eq $true -and $updates.autoInstall -eq $true) 'Core did not turn on central updates.'
     $staging = Join-Path $coreData 'central-update'
@@ -533,12 +533,12 @@ try {
     $updates = Invoke-SetupCoreRequest '/api/admin/updates' 'GET' $null $accessToken | ConvertFrom-Json
     Assert-SetupAcceptance ([string]$updates.installedVersion -ceq '1.3.0' -and $null -eq $updates.readyVersion -and $updates.checkEnabled -eq $true) 'Core did not keep its update settings across the upgrade.'
     Assert-SetupAcceptance ((Get-FileHash -LiteralPath $installedSetup -Algorithm SHA256).Hash -ceq (Get-FileHash -LiteralPath $CentralUpdateExecutablePath -Algorithm SHA256).Hash -and
-        (Get-SetupCentralUpdateTask).Count -eq 1) 'The Windows Apps Setup copy or the nightly task did not follow the central update.'
+        @(Get-SetupCentralUpdateTask).Count -eq 1) 'The Windows Apps Setup copy or the nightly task did not follow the central update.'
     Write-Output 'Central update: the nightly task installed 1.3.0 quietly after closing Desktop.'
 
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall'
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Restored services were not removed by a subsequent owned uninstall.'
-    Assert-SetupAcceptance ((Get-SetupCentralUpdateTask).Count -eq 0) 'Uninstall kept the nightly update task.'
+    Assert-SetupAcceptance (@(Get-SetupCentralUpdateTask).Count -eq 0) 'Uninstall kept the nightly update task.'
     Assert-SetupSecurityLogAccess $false 'Second uninstall'
     Assert-LifecyclePreserved
     Assert-LifecycleNoFirewallRule

@@ -459,7 +459,7 @@ function Get-SetupFailureSummary {
         $agentPresent = $null -ne (Get-SetupService 'SentinelAIAgent')
     } catch { $serviceProbeSucceeded = $false }
     $updateTaskPresent = $false
-    try { $updateTaskPresent = (Get-SetupCentralUpdateTask).Count -ne 0 } catch { }
+    try { $updateTaskPresent = @(Get-SetupCentralUpdateTask).Count -ne 0 } catch { }
     return ('The actual Setup executable reported a safe installation failure. Stage="{0}"; ServiceProbeSucceeded={1}; CoreServicePresent={2}; CoreServiceRunning={11}; AgentServicePresent={3}; CoreCodePresent={4}; CoreDataPresent={5}; AgentCodePresent={6}; AgentDataPresent={7}; DesktopCodePresent={8}; UpdaterCodePresent={9}; UpdateTaskPresent={12}; Ancestors: {10}.' -f
         $stage, $serviceProbeSucceeded, $corePresent, $agentPresent,
         (Test-Path -LiteralPath $script:coreCode -PathType Container), (Test-Path -LiteralPath $script:coreData -PathType Container),
@@ -935,7 +935,7 @@ function Assert-SetupSecurityLogAccess([bool]$Granted, [string]$When) {
 function Get-SetupCentralUpdateTask { return @(Get-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Update' -ErrorAction SilentlyContinue) }
 function Assert-SetupCentralUpdate {
     $configured = Test-Path -LiteralPath (Join-Path $script:coreCode 'update-server.json') -PathType Leaf
-    $tasks = Get-SetupCentralUpdateTask
+    $tasks = @(Get-SetupCentralUpdateTask)
     $status = Invoke-SetupCoreRequest '/api/admin/updates' 'GET' $null $script:accessToken | ConvertFrom-Json
     if (-not $configured) {
         Assert-SetupAcceptance ($tasks.Count -eq 0 -and $status.configured -eq $false) 'A build without an update server has update settings or the nightly task.'
