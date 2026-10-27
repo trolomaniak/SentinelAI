@@ -61,9 +61,10 @@ public sealed class AgentUpdateStager(HttpClient httpClient, AgentOptions option
         var directory = StagingDirectory;
         var manifestPath = Path.Combine(directory, ManifestFileName);
         var packagePath = Path.Combine(directory, PackageFileName);
+        // A staged copy that no longer matches the manifest is downloaded again rather than offered to the updater forever.
         if (File.Exists(manifestPath) && File.Exists(packagePath) &&
             (await File.ReadAllBytesAsync(manifestPath, cancellationToken)).AsSpan().SequenceEqual(manifestBytes) &&
-            new FileInfo(packagePath).Length == manifest.SizeBytes)
+            new FileInfo(packagePath).Length == manifest.SizeBytes && await MatchesAsync(packagePath, manifest.Sha256, cancellationToken))
             return AgentUpdateCheck.AlreadyStaged;
 
         Directory.CreateDirectory(directory);
@@ -132,6 +133,12 @@ public sealed class AgentUpdateStager(HttpClient httpClient, AgentOptions option
         {
             return null;
         }
+    }
+
+    private static async Task<bool> MatchesAsync(string path, string sha256, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous);
+        return string.Equals(Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, cancellationToken)), sha256, StringComparison.Ordinal);
     }
 
     /// <summary>Streams at most the manifest's size into a new file and checks its exact size and SHA-256.</summary>

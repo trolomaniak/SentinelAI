@@ -47,13 +47,19 @@ internal static class AgentUpdateTests
             "A newer Agent package was not staged exactly.");
         Check(await stager.CheckAsync(enrollment, installed, CancellationToken.None) == AgentUpdateCheck.AlreadyStaged &&
               core.PackageRequests == 1, "A staged Agent package was downloaded again.");
+        var damaged = File.ReadAllBytes(packagePath);
+        damaged[damaged.Length / 2] ^= 0x01;
+        File.WriteAllBytes(packagePath, damaged);
+        Check(await stager.CheckAsync(enrollment, installed, CancellationToken.None) == AgentUpdateCheck.Staged &&
+              File.ReadAllBytes(packagePath).AsSpan().SequenceEqual(package) && core.PackageRequests == 2,
+            "A staged package damaged without a size change was not downloaded again.");
 
         // Once this Agent runs that release (or a newer one), the staged copy is removed.
         Check(await stager.CheckAsync(enrollment, new Version(1, 1, 0), CancellationToken.None) == AgentUpdateCheck.Current &&
               !Staged(), "The staged package survived the update it carried.");
         core.Offer(Manifest("0.9.9", package), package);
         Check(await stager.CheckAsync(enrollment, installed, CancellationToken.None) == AgentUpdateCheck.Current &&
-              !Staged() && core.PackageRequests == 1, "An older Agent package was fetched.");
+              !Staged() && core.PackageRequests == 2, "An older Agent package was fetched.");
 
         // A transfer that does not match the manifest is never kept.
         foreach (var (served, label) in new (byte[], string)[]
@@ -108,7 +114,7 @@ internal static class AgentUpdateTests
             await worker.StopAsync(CancellationToken.None);
         }
 
-        Console.WriteLine("Agent update staging tests passed (version decision, exact transfer, no re-download, cleanup, " +
+        Console.WriteLine("Agent update staging tests passed (version decision, exact transfer, no re-download, damaged copy downloaded again, cleanup, " +
                           "malformed manifests, unreachable Core, linked schedule).");
     }
 
