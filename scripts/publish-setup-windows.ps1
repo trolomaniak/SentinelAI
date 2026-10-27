@@ -365,7 +365,7 @@ try {
     if ($agentOnly -and ($PilotLicensePublicKey.Count -gt 0 -or $pilotContactSupplied)) { throw 'Agent Setup needs no pilot license key.' }
     if ($pilotContactSupplied -and $PilotLicensePublicKey.Count -eq 0) { throw 'Pilot contact details need pilot public keys.' }
     if ($agentOnly -and $UpdateServerUrl.Length -gt 0) { throw 'Agent Setup updates from Core, not from an update server.' }
-    if ($UpdateServerUrl.Length -gt 0 -and ($UpdateServerUrl.Length -gt 256 -or $UpdateServerUrl -cnotmatch '\Ahttps://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[1-9][0-9]{0,4})?(/[A-Za-z0-9._~-]+)*\z')) {
+    if ($UpdateServerUrl.Length -gt 0 -and ($UpdateServerUrl.Length -gt 256 -or $UpdateServerUrl -cnotmatch '\Ahttps://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(/[A-Za-z0-9._~-]+)*\z')) {
         throw 'The update server must be a lowercase https:// URL without credentials, query, fragment or trailing slash.'
     }
     if (-not [string]::IsNullOrWhiteSpace($DevelopmentCoreAssemblyOverride)) {

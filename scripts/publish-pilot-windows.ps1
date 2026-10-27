@@ -29,7 +29,7 @@ try {
     foreach ($part in $Version.Split('.')) { if ([int]$part -gt 65535) { throw 'Invalid version.' } }
     if (-not [IO.Path]::IsPathRooted($DevelopmentPrivateKey) -or -not (Test-Path -LiteralPath $DevelopmentPrivateKey -PathType Leaf)) { throw 'A development key outside source is required.' }
     if (Test-Path -LiteralPath $OutputDirectory) { throw 'The output directory must be new.' }
-    if ($UpdateServerUrl.Length -gt 0 -and ($UpdateServerUrl.Length -gt 256 -or $UpdateServerUrl -cnotmatch '\Ahttps://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[1-9][0-9]{0,4})?(/[A-Za-z0-9._~-]+)*\z')) {
+    if ($UpdateServerUrl.Length -gt 0 -and ($UpdateServerUrl.Length -gt 256 -or $UpdateServerUrl -cnotmatch '\Ahttps://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(/[A-Za-z0-9._~-]+)*\z')) {
         throw 'The update server must be a lowercase https:// URL without credentials, query, fragment or trailing slash.'
     }
     # Validate key placement before creating artifacts. The separate signer repeats this check.

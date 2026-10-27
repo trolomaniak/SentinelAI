@@ -65,6 +65,8 @@ internal static class CentralUpdateTests
                      "{\"url\":\"https://updates.example.invalid/x?y=1\",\"channel\":\"pilot\"}",
                      "{\"url\":\"https://user@updates.example.invalid\",\"channel\":\"pilot\"}",
                      "{\"url\":\"https://updates.example.invalid/%2e%2e\",\"channel\":\"pilot\"}",
+                     "{\"url\":\"https://updates.example.invalid:65536/sentinelai\",\"channel\":\"pilot\"}",
+                     "{\"url\":\"https://updates.example.invalid:99999/sentinelai\",\"channel\":\"pilot\"}",
                      "{\"url\":\"" + ServerUrl + "\",\"channel\":\"nightly\"}",
                      "{\"url\":\"" + ServerUrl + "\"}",
                      "{\"url\":\"" + ServerUrl + "\",\"channel\":\"pilot\",\"key\":\"x\"}",
@@ -181,6 +183,27 @@ internal static class CentralUpdateTests
             server.Offer(Manifest(installed.ToString(3), setup), setup);
             Check(await service.CheckAsync(options.Server!, CancellationToken.None) == "current" && !Staged(),
                 "A download survived the update it carried.");
+
+            // Check now through the running worker: its result is never overwritten by "checking".
+            await service.StartAsync(CancellationToken.None);
+            Check((await service.CheckNowAsync(CancellationToken.None))?.LastCheck is "checking" or "current", "Check now did not report the check.");
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while ((await service.GetStatusAsync(CancellationToken.None)).LastCheck != "current" && DateTime.UtcNow < deadline) await Task.Delay(50);
+            Check((await service.GetStatusAsync(CancellationToken.None)).LastCheck == "current", "The worker's check result was not kept.");
+
+            // Turning checking off ends a download in progress: no update connection stays open and nothing is staged.
+            server.Offer(Manifest(newer, setup), setup);
+            server.HoldPackage = true;
+            requests = server.PackageRequests;
+            Check((await service.CheckNowAsync(CancellationToken.None))?.LastCheck == "checking", "Check now did not report a check in progress.");
+            await server.PackageHeld.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            status = (await service.SetSettingsAsync(false, true, CancellationToken.None))!;
+            Check(!status.CheckEnabled && status.LastCheck == "never", "Turning checking off still reported a check.");
+            await server.PackageReleased.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await service.StopAsync(CancellationToken.None);
+            Check(server.PackageRequests == requests + 1 && !Staged() && !File.Exists(packagePath + ".partial") && !File.Exists(marker),
+                "A download continued after checking was turned off.");
+            server.HoldPackage = false;
             Check(server.Requests.All(uri => uri.AbsoluteUri.StartsWith(ServerUrl + "/", StringComparison.Ordinal)),
                 "Core requested an address outside the configured update server.");
         }
@@ -279,6 +302,10 @@ internal static class CentralUpdateTests
         public bool Redirect { get; set; }
         public int PackageRequests { get; private set; }
         public List<Uri> Requests { get; } = [];
+        /// <summary>Package requests wait until the client cancels them.</summary>
+        public bool HoldPackage { get; set; }
+        public TaskCompletionSource PackageHeld { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource PackageReleased { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public void Offer(byte[] manifest, byte[] package)
         {
@@ -304,10 +331,19 @@ internal static class CentralUpdateTests
             if (uri.AbsolutePath.EndsWith("/SentinelAI-Setup.exe", StringComparison.Ordinal) && _package is not null)
             {
                 PackageRequests++;
+                if (HoldPackage) return HoldAsync(cancellationToken);
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(_package) });
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+
+        private async Task<HttpResponseMessage> HoldAsync(CancellationToken cancellationToken)
+        {
+            PackageHeld.TrySetResult();
+            try { await Task.Delay(Timeout.Infinite, cancellationToken); }
+            finally { PackageReleased.TrySetResult(); }
+            throw new InvalidOperationException("A held package request completed.");
         }
     }
 

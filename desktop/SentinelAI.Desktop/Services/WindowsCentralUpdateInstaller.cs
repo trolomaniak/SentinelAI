@@ -32,10 +32,9 @@ internal sealed class WindowsCentralUpdateInstaller : ICentralUpdateInstaller
             if (process is null) return CentralUpdateInstallOutcome.Unavailable;
             using (process)
             {
-                // Verifying and copying the downloaded Setup takes seconds; the Setup itself is not waited for.
-                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                deadline.CancelAfter(TimeSpan.FromMinutes(5));
-                await process.WaitForExitAsync(deadline.Token);
+                // Waits for the Updater, which ends within its own 30-minute deadline: until then it may still start the
+                // Setup, so Desktop neither reports a result nor allows a second Install. The Setup itself is not waited for.
+                await process.WaitForExitAsync(cancellationToken);
                 return process.ExitCode switch
                 {
                     0 => CentralUpdateInstallOutcome.Started,

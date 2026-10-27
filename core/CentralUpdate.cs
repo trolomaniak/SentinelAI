@@ -23,9 +23,10 @@ public sealed partial record CentralUpdateServer(string Url, string Channel)
     public string Host => new Uri(Url).Authority;
 
     /// <summary>A lowercase https:// URL without credentials, query, fragment, encoded characters or trailing slash.</summary>
-    public static bool IsServerUrl(string? url) => url is { Length: > 0 and <= MaximumUrlLength } && ServerUrl().IsMatch(url);
+    public static bool IsServerUrl(string? url) => url is { Length: > 0 and <= MaximumUrlLength } && ServerUrl().IsMatch(url) &&
+                                                   Uri.TryCreate(url, UriKind.Absolute, out _);
 
-    [GeneratedRegex(@"\Ahttps://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[1-9][0-9]{0,4})?(/[A-Za-z0-9._~-]+)*\z",
+    [GeneratedRegex(@"\Ahttps://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(/[A-Za-z0-9._~-]+)*\z",
         RegexOptions.CultureInvariant)]
     private static partial Regex ServerUrl();
 }
@@ -168,6 +169,7 @@ public sealed class CentralUpdateService(
     private string _lastCheck = "never";
     private DateTimeOffset? _lastCheckUtc;
     private bool _checkRequested;
+    private CancellationTokenSource? _checking;
 
     /// <summary>This Core's release, as <c>major.minor.patch</c>.</summary>
     public static Version InstalledVersion { get; } = Release(typeof(CentralUpdateService).Assembly.GetName().Version);
@@ -190,6 +192,18 @@ public sealed class CentralUpdateService(
         if (options.Server is null) return null;
         await store.SaveAsync(checkEnabled, autoInstall, cancellationToken);
         if (checkEnabled) RequestCheck();
+        else
+        {
+            // Off means no update connection: a check in progress stops now.
+            CancellationTokenSource? checking;
+            lock (_gate)
+            {
+                checking = _checking;
+                if (_lastCheck == "checking") _lastCheck = "never";
+            }
+            try { checking?.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
         ApplySettings(checkEnabled, autoInstall);
         return await GetStatusAsync(cancellationToken);
     }
@@ -198,8 +212,9 @@ public sealed class CentralUpdateService(
     public async Task<CentralUpdateStatus?> CheckNowAsync(CancellationToken cancellationToken)
     {
         if (options.Server is null || !(await store.LoadAsync(cancellationToken)).CheckEnabled) return null;
+        // Recorded before the worker wakes, so its result is never overwritten.
+        lock (_gate) _lastCheck = "checking";
         RequestCheck();
-        lock (_gate) if (_lastCheck != "checking") _lastCheck = "checking";
         return await GetStatusAsync(cancellationToken);
     }
 
@@ -216,8 +231,27 @@ public sealed class CentralUpdateService(
                 lock (_gate) { requested = _checkRequested; _checkRequested = false; }
                 if (options.Server is not null && checkEnabled && (requested || time.GetUtcNow() >= due))
                 {
-                    var result = await CheckAsync(options.Server, stoppingToken);
-                    lock (_gate) { _lastCheck = result; _lastCheckUtc = time.GetUtcNow(); }
+                    string result;
+                    using (var checking = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+                    {
+                        lock (_gate) _checking = checking;
+                        try
+                        {
+                            // Turned off after the settings above were read: the cancellation may have missed this check.
+                            if (!(await store.LoadAsync(checking.Token)).CheckEnabled) await checking.CancelAsync();
+                            result = await CheckAsync(options.Server, checking.Token);
+                        }
+                        catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                        {
+                            // Checking was turned off during the check.
+                            result = "never";
+                        }
+                        finally
+                        {
+                            lock (_gate) _checking = null;
+                        }
+                    }
+                    lock (_gate) { _lastCheck = result; _lastCheckUtc = result == "never" ? _lastCheckUtc : time.GetUtcNow(); }
                     // The download may have finished after the administrator turned checking off.
                     var current = await store.LoadAsync(stoppingToken);
                     ApplySettings(current.CheckEnabled, current.AutoInstall);
@@ -246,6 +280,7 @@ public sealed class CentralUpdateService(
     /// <summary>One check: "current", "ready" or "failed".</summary>
     internal async Task<string> CheckAsync(CentralUpdateServer server, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         byte[] manifestBytes;
         using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
