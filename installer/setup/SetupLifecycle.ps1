@@ -414,6 +414,8 @@ function Uninstall-SetupLifecycleInstallation {
     $marker = @{ format = 'sentinelai-setup-retained-v1'; version = $owned.Core.version }
     Set-SetupLifecycleReceipt -Path (Join-Path $Locations.SetupData 'retained-installation.json') -Content ($marker | ConvertTo-Json -Compress)
     Stop-SetupLifecycleServices $Locations
+    # Downloaded updates are not kept data; a later installation over retained data starts without them.
+    Remove-SetupCentralUpdateDownloads $Locations
     if ($null -ne (Get-PilotService)) { Remove-PilotService } else { Revoke-PilotSecurityLogAccess }
     if ($null -ne (Get-CoreService)) { Remove-CoreService }
     Remove-CoreServiceFirewallRule

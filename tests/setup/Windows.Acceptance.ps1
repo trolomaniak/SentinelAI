@@ -948,6 +948,16 @@ function Assert-SetupCentralUpdate {
         [string]$tasks[0].Actions[0].Arguments -ceq 'apply-central-update' -and $sid -ceq 'S-1-5-18') 'Setup did not register the nightly SYSTEM update task.'
     Assert-SetupAcceptance ($status.configured -eq $true -and $status.checkEnabled -eq $false -and $status.autoInstall -eq $true -and
         [string]$status.lastCheck -ceq 'never' -and $null -eq $status.readyVersion) 'Core did not report central updates off by default.'
+    # Core creates no folders in its data directory: Setup provides the download folder, which Core may fill but not remove.
+    $downloads = Join-Path $script:coreData 'central-update'
+    $acl = if (Test-Path -LiteralPath $downloads -PathType Container) { Get-Acl -LiteralPath $downloads } else { $null }
+    $coreFolderRights = @(if ($null -ne $acl) { $acl.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -ceq $coreSid -and
+        ($_.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 } | ForEach-Object { $_.FileSystemRights } })
+    Assert-SetupAcceptance ($null -ne $acl -and $acl.AreAccessRulesProtected -and $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ceq 'S-1-5-32-544' -and
+        @(Get-ChildItem -LiteralPath $downloads -Force).Count -eq 0 -and $coreFolderRights.Count -eq 1 -and
+        ($coreFolderRights[0] -band [Security.AccessControl.FileSystemRights]::CreateFiles) -ne 0 -and
+        ($coreFolderRights[0] -band ([Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::CreateDirectories -bor
+            [Security.AccessControl.FileSystemRights]::ChangePermissions)) -eq 0) 'Setup did not provide the protected, empty download folder Core fills.'
 }
 
 function Get-SetupAgentAlerts([Guid]$EndpointId, [string]$RuleId) {

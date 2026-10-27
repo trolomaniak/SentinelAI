@@ -378,13 +378,33 @@ function Remove-SetupCentralUpdateTask {
     Unregister-SetupScheduledTask $script:CentralUpdateTaskName
 }
 
+# MVP-7: Core downloads a newer Setup into this folder. Core may create files but no folders in its data directory, so
+# Setup provides it with the data directory's rights: Core creates and changes its own files in it, and only administrators
+# and SYSTEM change the folder. The update task treats everything in it as untrusted.
+function Get-SetupCentralUpdateDownloads { param($Locations) return (Join-Path $Locations.CoreData 'central-update') }
+
+function Remove-SetupCentralUpdateDownloads {
+    param($Locations)
+    $downloads = Get-SetupCentralUpdateDownloads $Locations
+    if (-not (Test-Path -LiteralPath $downloads)) { return }
+    # Link-free and owned by administrators, SYSTEM or Core before anything below it is removed.
+    Assert-PilotTrustedPath -Path $downloads -Tree -AllowServiceWrite -ServiceWriteSid (Get-SetupLifecycleCoreSid) -ServiceWriteRoot $Locations.CoreData
+    Remove-Item -LiteralPath $downloads -Recurse -Force
+}
+
 # MVP-7: a build with the owner's update server gets the nightly task that installs a downloaded newer SentinelAI
 # (between 02:00 and 04:00, only while an administrator keeps automatic installation on); a build without one has none.
 function Sync-SetupCentralUpdateTask {
     param($Locations)
     if (-not (Test-Path -LiteralPath (Join-Path $Locations.CoreCode 'update-server.json') -PathType Leaf)) {
         Unregister-SetupScheduledTask $script:CentralUpdateTaskName
+        Remove-SetupCentralUpdateDownloads $Locations
         return
+    }
+    $downloads = Get-SetupCentralUpdateDownloads $Locations
+    if (-not (Test-Path -LiteralPath $downloads)) {
+        [void](New-Item -ItemType Directory -Path $downloads)
+        Set-CoreServiceAcl -Path $downloads -Kind DataDirectory
     }
     # An unchanged task is left as it is: each re-registration is an audited change on this monitored computer.
     $updater = Join-Path $Locations.UpdaterCode 'SentinelAI.Updater.exe'

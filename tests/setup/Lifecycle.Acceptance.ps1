@@ -538,7 +538,7 @@ try {
 
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall'
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Restored services were not removed by a subsequent owned uninstall.'
-    Assert-SetupAcceptance (@(Get-SetupCentralUpdateTask).Count -eq 0) 'Uninstall kept the nightly update task.'
+    Assert-SetupAcceptance (@(Get-SetupCentralUpdateTask).Count -eq 0 -and -not (Test-Path -LiteralPath (Join-Path $coreData 'central-update'))) 'Uninstall kept the nightly update task or the downloaded update.'
     Assert-SetupSecurityLogAccess $false 'Second uninstall'
     Assert-LifecyclePreserved
     Assert-LifecycleNoFirewallRule
