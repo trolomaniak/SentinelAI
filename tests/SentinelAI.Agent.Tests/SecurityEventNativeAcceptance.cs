@@ -738,16 +738,28 @@ internal static class SecurityEventNativeAcceptance
 
         if (wrong.Count > 0)
         {
+            // Message tables and string tables of every en-US resource file; the files holding most of the
+            // expected texts are printed with each matching resource ID.
             var expected = ServiceControlManagerText.Messages.Select(message => ServiceControlManagerText.Key(message.English))
                 .ToHashSet(StringComparer.Ordinal);
             var directory = Path.Combine(Environment.SystemDirectory, "en-US");
+            var scanned = 0;
+            var matches = new List<(string File, int Distinct, string Found)>();
             foreach (var file in Directory.EnumerateFiles(directory, "*.mui").OrderBy(file => file, StringComparer.Ordinal))
             {
-                var found = MessageTable(file).Where(entry => expected.Contains(ServiceControlManagerText.Key(entry.Text))).ToList();
-                if (found.Select(entry => ServiceControlManagerText.Key(entry.Text)).Distinct().Count() < 5) continue;
-                Console.WriteLine($"Native event SCM text candidates in {Path.GetFileName(file)}: " +
-                                  string.Join("; ", found.Select(entry => $"0x{entry.Id:X8}={entry.Text.Trim()}")));
+                scanned++;
+                var found = Resources(file).Where(entry => expected.Contains(ServiceControlManagerText.Key(entry.Text))).ToList();
+                var distinct = found.Select(entry => ServiceControlManagerText.Key(entry.Text)).Distinct().Count();
+                if (distinct >= 3)
+                    matches.Add((Path.GetFileName(file), distinct,
+                        string.Join("; ", found.Select(entry => $"{entry.Kind} 0x{entry.Id:X8}={entry.Text.Trim()}"))));
             }
+
+            Console.WriteLine($"Native event SCM text search: {scanned} en-US resource files, services.exe.mui " +
+                              (File.Exists(Path.Combine(directory, "services.exe.mui")) ? "present" : "absent") + ", " +
+                              $"{Resources(Path.Combine(directory, "services.exe.mui")).Count} resources in it.");
+            foreach (var match in matches.OrderByDescending(match => match.Distinct).Take(6))
+                Console.WriteLine($"Native event SCM text candidates in {match.File} ({match.Distinct} texts): {match.Found}");
         }
 
         Ensure(wrong.Count == 0, "SCM message IDs do not give their English text: " + string.Join(", ", wrong) + ".");
@@ -760,37 +772,27 @@ internal static class SecurityEventNativeAcceptance
                           $"{loaded.Count} texts recognized in {CultureInfo.InstalledUICulture.Name}.");
     }
 
-    /// <summary>Every entry of a module's message tables (RT_MESSAGETABLE), read as a resource file.</summary>
-    private static List<(uint Id, string Text)> MessageTable(string path)
+    /// <summary>Every message table (RT_MESSAGETABLE) and string table (RT_STRING) entry of a resource file.</summary>
+    private static List<(string Kind, uint Id, string Text)> Resources(string path)
     {
-        var entries = new List<(uint Id, string Text)>();
+        var entries = new List<(string Kind, uint Id, string Text)>();
         var module = LoadLibraryExW(path, IntPtr.Zero, 0x22);
         if (module == IntPtr.Zero) return entries;
         try
         {
-            var resource = FindResourceW(module, 1, 11);
-            if (resource == IntPtr.Zero) return entries;
-            var size = SizeofResource(module, resource);
-            var data = LockResource(LoadResource(module, resource));
-            if (data == IntPtr.Zero || size < 4) return entries;
-            var bytes = new byte[size];
-            System.Runtime.InteropServices.Marshal.Copy(data, bytes, 0, (int)size);
-            var blocks = BitConverter.ToInt32(bytes, 0);
-            for (var block = 0; block < blocks && 4 + block * 12 + 12 <= bytes.Length; block++)
+            foreach (var (type, kind) in new[] { (11, "message"), (6, "string") })
             {
-                var low = BitConverter.ToUInt32(bytes, 4 + block * 12);
-                var high = BitConverter.ToUInt32(bytes, 8 + block * 12);
-                var offset = BitConverter.ToInt32(bytes, 12 + block * 12);
-                for (var id = low; id <= high && offset + 4 <= bytes.Length; id++)
+                var names = new List<IntPtr>();
+                EnumResourceNamesProc callback = (_, _, name, _) => { names.Add(name); return names.Count < 4096; };
+                EnumResourceNamesW(module, type, callback, IntPtr.Zero);
+                GC.KeepAlive(callback);
+                foreach (var name in names)
                 {
-                    var length = BitConverter.ToUInt16(bytes, offset);
-                    var unicode = (BitConverter.ToUInt16(bytes, offset + 2) & 1) != 0;
-                    if (length < 4 || offset + length > bytes.Length) break;
-                    var text = unicode
-                        ? Encoding.Unicode.GetString(bytes, offset + 4, length - 4)
-                        : Encoding.ASCII.GetString(bytes, offset + 4, length - 4);
-                    entries.Add((id, text.TrimEnd('\0')));
-                    offset += length;
+                    if (name.ToInt64() >> 16 != 0) continue;
+                    var bytes = ResourceBytes(module, name, type);
+                    if (bytes is null) continue;
+                    if (type == 11) MessageEntries(bytes, entries);
+                    else StringEntries(bytes, (uint)(name.ToInt64() - 1) * 16, entries);
                 }
             }
         }
@@ -802,6 +804,61 @@ internal static class SecurityEventNativeAcceptance
         return entries;
     }
 
+    private static byte[]? ResourceBytes(IntPtr module, IntPtr name, int type)
+    {
+        var resource = FindResourceW(module, name, (IntPtr)type);
+        if (resource == IntPtr.Zero) return null;
+        var size = SizeofResource(module, resource);
+        var data = LockResource(LoadResource(module, resource));
+        if (data == IntPtr.Zero || size < 4) return null;
+        var bytes = new byte[size];
+        System.Runtime.InteropServices.Marshal.Copy(data, bytes, 0, (int)size);
+        return bytes;
+    }
+
+    private static void MessageEntries(byte[] bytes, List<(string Kind, uint Id, string Text)> entries)
+    {
+        var blocks = BitConverter.ToInt32(bytes, 0);
+        for (var block = 0; block < blocks && 4 + block * 12 + 12 <= bytes.Length; block++)
+        {
+            var low = BitConverter.ToUInt32(bytes, 4 + block * 12);
+            var high = BitConverter.ToUInt32(bytes, 8 + block * 12);
+            var offset = BitConverter.ToInt32(bytes, 12 + block * 12);
+            for (var id = low; id <= high && id >= low && offset + 4 <= bytes.Length; id++)
+            {
+                var length = BitConverter.ToUInt16(bytes, offset);
+                var unicode = (BitConverter.ToUInt16(bytes, offset + 2) & 1) != 0;
+                if (length < 4 || offset + length > bytes.Length) break;
+                var text = unicode
+                    ? Encoding.Unicode.GetString(bytes, offset + 4, length - 4)
+                    : Encoding.ASCII.GetString(bytes, offset + 4, length - 4);
+                entries.Add(("message", id, text.TrimEnd('\0')));
+                offset += length;
+            }
+        }
+    }
+
+    private static void StringEntries(byte[] bytes, uint firstId, List<(string Kind, uint Id, string Text)> entries)
+    {
+        var offset = 0;
+        for (var index = 0u; index < 16 && offset + 2 <= bytes.Length; index++)
+        {
+            var length = BitConverter.ToUInt16(bytes, offset);
+            offset += 2;
+            if (offset + length * 2 > bytes.Length) break;
+            if (length > 0) entries.Add(("string", firstId + index, Encoding.Unicode.GetString(bytes, offset, length * 2)));
+            offset += length * 2;
+        }
+    }
+
+    private delegate bool EnumResourceNamesProc(IntPtr module, IntPtr type, IntPtr name, IntPtr parameter);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool EnumResourceNamesW(IntPtr module, IntPtr type, EnumResourceNamesProc callback, IntPtr parameter);
+
+    private static bool EnumResourceNamesW(IntPtr module, int type, EnumResourceNamesProc callback, IntPtr parameter) =>
+        EnumResourceNamesW(module, (IntPtr)type, callback, parameter);
+
     [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
 
@@ -810,8 +867,6 @@ internal static class SecurityEventNativeAcceptance
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
-
-    private static IntPtr FindResourceW(IntPtr module, int name, int type) => FindResourceW(module, (IntPtr)name, (IntPtr)type);
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
