@@ -69,6 +69,9 @@ public static class AgentHost
             provider.GetRequiredService<EndpointTelemetryCollector>(), provider.GetRequiredService<IEndpointTelemetryUploader>(),
             provider.GetRequiredService<TimeProvider>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<EndpointTelemetryWorker>>()));
+        // MVP-7: newer signed Agent packages offered by Core are fetched for the computer's SYSTEM updater.
+        builder.Services.AddSingleton<AgentUpdateStager>();
+        builder.Services.AddHostedService<AgentUpdateWorker>();
         builder.Services.AddHostedService<HeartbeatWorker>();
 
         return builder;

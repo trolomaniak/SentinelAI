@@ -9,7 +9,7 @@
 | **Core** | Central computer, Windows service `SentinelAICore` ("SentinelAI Local Core"), account `NT SERVICE\SentinelAICore`, delayed automatic start | Receives Agent data, evaluates the rules, keeps alerts, risk and the pilot license, serves Desktop. |
 | **Desktop** | Central computer only, runs as the signed-in Windows user | The administration application: Devices, Alerts, Risk, Reports, Settings. You sign in with the SentinelAI administrator account created during setup. |
 | **Agent** | Every computer, including the central one; Windows service `SentinelAIAgent` ("SentinelAI Endpoint Agent"), account `NT AUTHORITY\LocalService`, automatic start | Reads the computer's inventory, security settings, security status and selected Windows events and sends them to Core. It writes only its own state files and never changes Windows settings or your files. |
-| **Updater** | Installed with Core and with each Agent | Public-only package verification client. During installation, upgrade and repair, Setup verifies the signed packages with its own embedded copy. It does not download anything. |
+| **Updater** | Installed with Core and with each Agent | Public-only package verification client. During installation, upgrade and repair, Setup verifies the signed packages with its own embedded copy. On the other computers the scheduled task `\SentinelAI\SentinelAI Agent Update` runs it as SYSTEM to install a newer Agent (section 8). It does not download anything. |
 
 **Data locations**
 
@@ -23,7 +23,7 @@
 | `%ProgramFiles%\SentinelAI Agent\…`, `%ProgramData%\SentinelAI Agent\…` | On the other computers: the Agent, the Updater, the installed copy of Agent Setup, the Agent's configuration and DPAPI-protected credential. |
 | `LocalMachine\My`, certificate with the friendly name "SentinelAI Core local network" (subject: the computer name) | Core's own TLS certificate for the local network. Its private key is non-exportable and usable only by Core's service account, SYSTEM and Administrators. |
 
-All data stays on the central computer. Core makes no outbound connections in the pilot: there is no cloud service, license server, telemetry to the vendor or automatic update.
+All data stays on the central computer. Core makes no outbound connections in the pilot: there is no cloud service, license server, telemetry to the vendor or update from the internet. Agents update only from the central computer (section 8).
 
 **Windows settings Setup changes for the Agent**
 
@@ -168,15 +168,17 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
 
 ## 8. Updates and repair
 
-- There are no automatic updates. The vendor provides a newer `SentinelAI-Setup.exe` from the same release line, signed with the same key.
+- The central computer is not updated automatically. The vendor provides a newer `SentinelAI-Setup.exe` from the same release line, signed with the same key.
 - To **upgrade**, close Desktop, run the newer Setup on the central computer and choose **Upgrade**. Setup verifies the signed package, replaces Core, the central computer's Agent, Desktop and the Updater together, and restores the previous version automatically if the new one does not start healthy. Data, the administrator account, enrollments, the pilot key and Core's certificate are kept.
 - To **repair**, run the same version of Setup and choose **Repair**. This also recreates the firewall rule if it was removed or changed.
 - An older Setup can only uninstall; it cannot downgrade.
 - An installation made by an earlier Setup also gave the Windows account that installed it full control of Core's folders. The first upgrade, repair or uninstall, run by any administrator, removes that access.
-- **Agents on other computers** cannot be updated in place in the pilot: Agent Setup refuses a computer that already has an Agent (exit code 7). To install a newer Agent:
-  1. Uninstall the old Agent.
-  2. Install the new Agent Setup with a new code. The computer then appears as a new device.
-  3. Remove the old entry in Desktop.
+- **Agents on other computers update automatically** from the central computer after its upgrade:
+  - Each Agent checks Core one minute after it starts and then hourly, and downloads the newer signed Agent into `%ProgramData%\SentinelAI Agent\Agent\update`.
+  - The scheduled task `\SentinelAI\SentinelAI Agent Update` (SYSTEM, hourly and 5 minutes after startup) verifies it with the key pinned at installation, replaces the Agent and restores the previous one if the new one does not keep running. A release restored three times is not tried again.
+  - The computer stays the same device with its history; Desktop shows the new Agent version in the device details, usually within two hours.
+  - To install at once, run `Start-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Agent Update'` in an elevated PowerShell after the download. The task's last result 0 means no update or installed; 3 rejected; 4 restored the previous Agent; 5 the restore failed and is retried at the next run.
+  - The Updater and the installed Agent Setup copy on those computers keep their installed version. Agent Setup still refuses a computer that already has an Agent (exit code 7).
 
 ## 9. Troubleshooting
 
@@ -224,7 +226,7 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
   - The Agent runs as LocalService and only reads; it writes only its own state and never changes Windows settings or your files. Its own service SID may read the Security log, and no other log or object (section 1).
   - Core runs under its own virtual service account.
   - Program and data folders are writable only by Administrators and SYSTEM, and by each service only where it writes its own state. No folder gives the Windows account that installed SentinelAI its own access, so that account's programs running without elevation cannot change what Core or the Agent runs, and any administrator can maintain the installation.
-- **Signed packages.** Setup verifies the signature and hash of every package against the public key built into it, and replaces program code transactionally with automatic rollback.
+- **Signed packages.** Setup verifies the signature and hash of every package against the public key built into it, and replaces program code transactionally with automatic rollback. Automatic Agent updates are verified on each computer with the key pinned at installation, by SYSTEM; the Agent only downloads them and cannot install anything.
 - **Administrator access.** Desktop requires the SentinelAI administrator account created during setup.
 - **Minimal data.**
   - Only fixed, listed values and event fields are collected.

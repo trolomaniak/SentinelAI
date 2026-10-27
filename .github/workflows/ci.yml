@@ -331,6 +331,11 @@ jobs:
               if ((Get-FileHash -LiteralPath (Join-Path $release $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash) { throw ('Checksum mismatch: ' + $name) }
             }
             if (@(Get-ChildItem -LiteralPath $release -Force).Count -ne 7) { throw 'The release folder holds unexpected files.' }
+            # MVP-7: an older Agent Setup with the same development key; its Agent must update itself from the 1.0.0 Core.
+            ./scripts/publish-setup-windows.ps1 -Product Agent -Version 0.9.0 -KeyId dev-ci-setup `
+              -DevelopmentPrivateKey (Join-Path $keys 'dev-ci-setup.private.pem') `
+              -PublicKeyPath (Join-Path $keys 'dev-ci-setup.public.pem') `
+              -OutputDirectory (Join-Path $env:RUNNER_TEMP 'sentinelai-agent-setup-0.9.0')
           } catch {
             $message = $_.Exception.Message + "`n" + $_.ScriptStackTrace
             if ($message.Length -gt 3800) { $message = $message.Substring($message.Length - 3800) }
@@ -348,6 +353,7 @@ jobs:
             ./tests/setup/AgentSetup.Acceptance.ps1 `
               -ExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-pilot-release/SentinelAI-Setup.exe') `
               -AgentExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-pilot-release/SentinelAI-Agent-Setup.exe') `
+              -OlderAgentExecutablePath (Join-Path $env:RUNNER_TEMP 'sentinelai-agent-setup-0.9.0/SentinelAI-Agent-Setup.exe') `
               -PilotLicenseKeyPath (Join-Path $env:RUNNER_TEMP 'sentinelai-ci-pilot.key') `
               -TimeoutSeconds 300
           } catch {

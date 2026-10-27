@@ -22,6 +22,9 @@ public sealed record AgentOptions(
     public TimeSpan PostureDeliveryInterval { get; init; } = TimeSpan.FromSeconds(30);
     // Security event polling; every other event timing derives from it (SecurityEventTimings).
     public TimeSpan EventPollInterval { get; init; } = TimeSpan.FromSeconds(5);
+    // MVP-7 automatic updates: the first check after the Agent links to Core, then the regular interval.
+    public TimeSpan UpdateCheckDelay { get; init; } = TimeSpan.FromMinutes(1);
+    public TimeSpan UpdateCheckInterval { get; init; } = TimeSpan.FromHours(1);
 
     public bool HasEnrollmentToken => EnrollmentToken is not null || EnrollmentTokenFile is not null;
     public Uri HeartbeatUrl => new(CoreUrl, "/api/agent/heartbeat");
@@ -29,6 +32,8 @@ public sealed record AgentOptions(
     public Uri InventoryUrl => new(CoreUrl, "/api/agent/inventory");
     public Uri SecurityEventsUrl => new(CoreUrl, "/api/agent/security-events");
     public Uri SecurityTelemetryUrl => new(CoreUrl, "/api/agent/security-telemetry");
+    public Uri UpdateManifestUrl => new(CoreUrl, "/api/agent/update/manifest");
+    public Uri UpdatePackageUrl => new(CoreUrl, "/api/agent/update/package");
     public override string ToString() => nameof(AgentOptions);
 
     public static AgentOptions FromConfiguration(IConfiguration configuration)
@@ -97,6 +102,10 @@ public sealed record AgentOptions(
             TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(1), TimeSpan.FromHours(1));
         var eventPollInterval = ReadBoundedInterval(configuration, "Agent:EventPollInterval",
             TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(100), TimeSpan.FromMinutes(5));
+        var updateCheckDelay = ReadBoundedInterval(configuration, "Agent:UpdateCheckDelay",
+            TimeSpan.FromMinutes(1), TimeSpan.FromMilliseconds(100), TimeSpan.FromHours(1));
+        var updateCheckInterval = ReadBoundedInterval(configuration, "Agent:UpdateCheckInterval",
+            TimeSpan.FromHours(1), TimeSpan.FromSeconds(1), TimeSpan.FromDays(1));
 
         var enrollmentToken = string.IsNullOrWhiteSpace(configuration["Agent:EnrollmentToken"])
             ? null : configuration["Agent:EnrollmentToken"]!.Trim();
@@ -127,7 +136,9 @@ public sealed record AgentOptions(
             PostureCheckInterval = postureCheckInterval,
             PostureSettleDelay = postureSettleDelay,
             PostureDeliveryInterval = postureDeliveryInterval,
-            EventPollInterval = eventPollInterval
+            EventPollInterval = eventPollInterval,
+            UpdateCheckDelay = updateCheckDelay,
+            UpdateCheckInterval = updateCheckInterval
         };
     }
 

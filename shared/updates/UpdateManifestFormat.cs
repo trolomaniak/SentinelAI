@@ -26,6 +26,17 @@ public static class UpdateManifestFormat
         return Write(manifest, keyId, Encode(signature));
     }
 
+    /// <summary>
+    /// The manifest of a well-formed envelope without checking its signature or any policy: only to decide what to
+    /// fetch and to check a transfer (MVP-7 Agent staging). It is never authority to install; installation verifies
+    /// with <see cref="UpdateManifestVerifier"/>.
+    /// </summary>
+    public static UpdateManifest? ReadUnauthenticated(ReadOnlySpan<byte> document) =>
+        TryRead(document, out var manifest, out _, out _) ? manifest : null;
+
+    /// <summary>The canonical <c>major.minor.patch</c> form the manifests use.</summary>
+    public static bool TryParseVersion(string? text, out Version version) => TryVersion(text, out version);
+
     internal static bool TryRead(ReadOnlySpan<byte> document, out UpdateManifest? manifest, out string? keyId, out byte[] signature)
     {
         manifest = null;

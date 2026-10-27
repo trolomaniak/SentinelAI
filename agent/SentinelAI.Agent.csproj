@@ -3,6 +3,7 @@
   <ItemGroup>
     <Compile Include="..\shared\hosting\PilotHostConfiguration.cs" Link="PilotHostConfiguration.cs" />
     <ProjectReference Include="..\shared\contracts\SentinelAI.Contracts.csproj" />
+    <ProjectReference Include="..\shared\updates\SentinelAI.Updates.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
     <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.12" />

@@ -138,9 +138,14 @@ internal static partial class LocalNetworkTests
         foreach (var path in new[] { "/api/agent/enroll", "/api/agent/enrollment-check", "/api/agent/heartbeat", "/api/agent/inventory", "/api/agent/security-events",
                      "/api/agent/security-telemetry", "/API/Agent/Heartbeat" })
             Check(LocalNetworkRoutes.IsAllowed("POST", path), "The local-network listener refused an Agent route.");
+        // MVP-7: enrolled Agents read the signed Agent package; nothing else is readable there.
+        foreach (var path in new[] { "/api/agent/update/manifest", "/api/agent/update/package" })
+            Check(LocalNetworkRoutes.IsAllowed("GET", path) && !LocalNetworkRoutes.IsAllowed("POST", path),
+                "The local-network listener did not allow exactly the Agent update reads.");
         foreach (var (method, path) in new (string, string?)[]
                  {
                      ("GET", "/api/agent/heartbeat"), ("PUT", "/api/agent/inventory"), ("POST", "/api/agent/heartbeat/"),
+                     ("GET", "/api/agent/update"), ("GET", "/api/agent/update/manifest/x"), ("DELETE", "/api/agent/update/package"),
                      ("POST", "/api/auth/login"), ("GET", "/api/admin/me"), ("POST", "/api/admin/enrollment-tokens"),
                      ("GET", "/api/admin/local-network"), ("GET", "/api/health"), ("GET", "/"), ("GET", "/index.html"),
                      ("GET", "/assets/app.js"), ("POST", "/api/agent"), ("POST", "/api/agent/enroll/extra"), ("POST", null), ("POST", "")

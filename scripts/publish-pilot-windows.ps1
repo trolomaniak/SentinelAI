@@ -42,7 +42,8 @@ try {
     }
     New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    foreach ($component in @('core', 'agent', 'updater')) {
+    # The Agent is signed first: Core's code carries this release's signed Agent package for automatic Agent updates (MVP-7).
+    foreach ($component in @('agent', 'core', 'updater')) {
         $project = switch ($component) { 'core' { 'core/SentinelAI.Core.csproj' }; 'agent' { 'agent/SentinelAI.Agent.csproj' }; 'updater' { 'updater/SentinelAI.Updater.csproj' } }
         $publish = Join-Path $OutputDirectory ($component + '-publish')
         # Ordinary self-contained directories: Setup keeps all runtime code inside the signed, protected installation.
@@ -53,6 +54,12 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $publish $executable) -PathType Leaf)) { throw 'The Windows executable was not published.' }
         if ($component -eq 'core' -and -not [string]::IsNullOrWhiteSpace($PilotLicenseDirectory)) {
             Copy-Item -LiteralPath $PilotLicenseDirectory -Destination (Join-Path $publish 'pilot-license') -Recurse
+        }
+        if ($component -eq 'core') {
+            $agentUpdate = Join-Path $publish 'agent-update'
+            New-Item -ItemType Directory -Path $agentUpdate | Out-Null
+            Copy-Item -LiteralPath (Join-Path $OutputDirectory 'agent.zip') -Destination (Join-Path $agentUpdate 'agent.zip')
+            Copy-Item -LiteralPath (Join-Path $OutputDirectory 'agent.manifest.json') -Destination (Join-Path $agentUpdate 'agent.manifest.json')
         }
         if ($component -eq 'updater') { Move-Item -LiteralPath $publish -Destination (Join-Path $OutputDirectory 'updater'); continue }
         $zip = Join-Path $OutputDirectory ($component + '.zip')

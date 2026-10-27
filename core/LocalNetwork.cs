@@ -161,9 +161,13 @@ internal static class LocalNetworkRoutes
         "/api/agent/security-events", "/api/agent/security-telemetry"
     ];
 
+    // MVP-7: the signed Agent package, read by enrolled Agents.
+    private static readonly string[] AgentReadPaths = ["/api/agent/update/manifest", "/api/agent/update/package"];
+
     public static bool IsAllowed(string method, string? path) =>
-        HttpMethods.IsPost(method) && path is not null &&
-        AgentPaths.Any(allowed => string.Equals(path, allowed, StringComparison.OrdinalIgnoreCase));
+        path is not null &&
+        (HttpMethods.IsPost(method) && AgentPaths.Any(allowed => string.Equals(path, allowed, StringComparison.OrdinalIgnoreCase)) ||
+         HttpMethods.IsGet(method) && AgentReadPaths.Any(allowed => string.Equals(path, allowed, StringComparison.OrdinalIgnoreCase)));
 
     public static bool IsLocalNetworkRequest(HttpContext context) =>
         context.Features.Get<LocalNetworkConnection>() is not null;

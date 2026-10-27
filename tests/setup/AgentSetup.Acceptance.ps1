@@ -6,6 +6,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$ExecutablePath,
     [Parameter(Mandatory = $true)][string]$AgentExecutablePath,
+    # MVP-7: an Agent Setup of an older version with the same key; its Agent must update itself from this Core.
+    [Parameter(Mandatory = $true)][string]$OlderAgentExecutablePath,
     [ValidateRange(60, 900)][int]$TimeoutSeconds = 300,
     [string]$PilotLicenseKeyPath
 )
@@ -14,6 +16,11 @@ $ErrorActionPreference = 'Stop'
 $AgentExecutablePath = (Resolve-Path -LiteralPath $AgentExecutablePath).ProviderPath
 if (-not (Test-Path -LiteralPath $AgentExecutablePath -PathType Leaf) -or [IO.Path]::GetFileName($AgentExecutablePath) -cne 'SentinelAI-Agent-Setup.exe') {
     throw 'Agent Setup acceptance requires the actual published SentinelAI-Agent-Setup.exe.'
+}
+$OlderAgentExecutablePath = (Resolve-Path -LiteralPath $OlderAgentExecutablePath).ProviderPath
+if (-not (Test-Path -LiteralPath $OlderAgentExecutablePath -PathType Leaf) -or [IO.Path]::GetFileName($OlderAgentExecutablePath) -cne 'SentinelAI-Agent-Setup.exe' -or
+    $OlderAgentExecutablePath -ieq $AgentExecutablePath) {
+    throw 'Agent update acceptance requires a separately published older SentinelAI-Agent-Setup.exe.'
 }
 $context = $null
 . (Join-Path $PSScriptRoot 'Windows.Acceptance.ps1') -ExecutablePath $ExecutablePath -TimeoutSeconds $TimeoutSeconds `
@@ -29,6 +36,8 @@ $agentProductExecutable = Join-Path $agentProductCode 'Agent\SentinelAI.Agent.ex
 $agentProductConfiguration = Join-Path $agentProductData 'Agent\pilot-config.json'
 $installedAgentSetup = Join-Path $agentProductCode 'Setup\SentinelAI-Agent-Setup.exe'
 $appsKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAIAgent'
+$agentReceipt = Join-Path $agentProductData 'Setup\agent-setup-installation.json'
+$updateTaskPath = '\SentinelAI\'; $updateTaskName = 'SentinelAI Agent Update'
 $fullAppsKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI'
 
 if ($null -eq ('SentinelAI.Setup.Acceptance.AgentCodes' -as [type])) {
@@ -156,8 +165,35 @@ function Invoke-AgentSetup([string[]]$Arguments, [string]$Executable = $script:A
     } finally { $process.Dispose() }
 }
 
+# MVP-7: the installed Updater, as SYSTEM, from a task that only administrators and SYSTEM can change.
+function Assert-AgentUpdateTask {
+    $tasks = @(Get-ScheduledTask -TaskPath $script:updateTaskPath -ErrorAction SilentlyContinue)
+    $user = if ($tasks.Count -eq 1) { [string]$tasks[0].Principal.UserId } else { '' }
+    $sid = if ($user -like 'S-1-*' -or $user.Length -eq 0) { $user } else { ([Security.Principal.NTAccount]$user).Translate([Security.Principal.SecurityIdentifier]).Value }
+    $updater = '"' + (Join-Path $script:agentProductCode 'Updater\SentinelAI.Updater.exe') + '"'
+    Assert-SetupAcceptance ($tasks.Count -eq 1 -and $tasks[0].TaskName -ceq $script:updateTaskName -and [string]$tasks[0].State -cne 'Disabled' -and
+        @($tasks[0].Actions).Count -eq 1 -and [string]$tasks[0].Actions[0].Execute -ceq $updater -and [string]$tasks[0].Actions[0].Arguments -ceq 'apply-agent-update' -and
+        $sid -ceq 'S-1-5-18') 'Agent Setup did not register the SYSTEM Agent update task.'
+}
+
+# Runs the update task now and waits for its run to finish; the Updater's exit code is the task's result.
+function Invoke-AgentUpdateTask {
+    $started = [DateTime]::Now.AddSeconds(-1)
+    Start-ScheduledTask -TaskPath $script:updateTaskPath -TaskName $script:updateTaskName
+    Wait-SetupAcceptance {
+        (Get-ScheduledTaskInfo -TaskPath $script:updateTaskPath -TaskName $script:updateTaskName).LastRunTime -ge $started -and
+            [string](Get-ScheduledTask -TaskPath $script:updateTaskPath -TaskName $script:updateTaskName).State -cne 'Running'
+    } 'The SYSTEM Agent update task did not finish.' $script:TimeoutSeconds
+    $result = (Get-ScheduledTaskInfo -TaskPath $script:updateTaskPath -TaskName $script:updateTaskName).LastTaskResult
+    Write-Host ('AgentUpdateTask: exit ' + $result)
+    Assert-SetupAcceptance ($result -eq 0) 'The SYSTEM Agent update task failed.'
+}
+
+function Get-AgentReceiptVersion { return [string]([IO.File]::ReadAllText($script:agentReceipt) | ConvertFrom-Json).version }
+
 function Assert-AgentSetupAbsent([string]$Label, [int]$Devices = -1) {
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAIAgent')) ($Label + ': an Agent service exists.')
+    Assert-SetupAcceptance (@(Get-ScheduledTask -TaskPath $script:updateTaskPath -ErrorAction SilentlyContinue).Count -eq 0) ($Label + ': the Agent update task remained.')
     Assert-SetupSecurityLogAccess $false $Label
     foreach ($path in @($script:agentProductCode, $script:agentProductData, $script:appsKey)) {
         Assert-SetupAcceptance (-not (Test-Path -LiteralPath $path)) ($Label + ': Agent Setup left ' + $path)
@@ -178,6 +214,7 @@ function Assert-AgentSetupInstalled([string]$Address, [string]$Pin, [DateTimeOff
     Assert-SetupAcceptance ([string]$apps.DisplayName -ceq 'SentinelAI Agent' -and [string]$apps.UninstallString -ceq ('"' + $script:installedAgentSetup + '" /uninstall') -and
         [string]$apps.QuietUninstallString -ceq ('"' + $script:installedAgentSetup + '" /uninstall /quiet') -and
         (Test-Path -LiteralPath $script:installedAgentSetup -PathType Leaf)) 'Agent Setup did not register a working Windows Apps entry.'
+    Assert-AgentUpdateTask
     Assert-ProtectedTree $script:agentProductCode $script:writers
     Assert-ProtectedTree $script:agentProductData ($script:writers + @($script:localServiceSid))
     # No entry names the installing account, so any administrator or SYSTEM can later verify and uninstall the Agent.
@@ -206,10 +243,10 @@ try {
     Assert-SetupAcceptance ($options.available -eq $true -and $options.listening -eq $true -and [int]$options.port -eq $localNetworkPort -and
         $ipv4.Count -gt 0 -and $ipv4[0] -cne '127.0.0.1' -and $local -ccontains $ipv4[0]) 'Core did not offer this runner''s non-loopback address for enrollment codes.'
     $address = $ipv4[0]
-    $request = @{ count = 5; validityHours = 1; address = $address } | ConvertTo-Json -Compress
+    $request = @{ count = 6; validityHours = 1; address = $address } | ConvertTo-Json -Compress
     $issued = @((Invoke-SetupCoreRequest '/api/admin/enrollment-codes' 'POST' $request $accessToken | ConvertFrom-Json).codes)
-    Assert-SetupAcceptance ($issued.Count -eq 5) 'Core did not issue the requested batch of enrollment codes.'
-    $first = $issued[0]; $revoked = $issued[1]; $expired = $issued[2]; $second = $issued[3]; $third = $issued[4]
+    Assert-SetupAcceptance ($issued.Count -eq 6) 'Core did not issue the requested batch of enrollment codes.'
+    $first = $issued[0]; $revoked = $issued[1]; $expired = $issued[2]; $second = $issued[3]; $third = $issued[4]; $fourth = $issued[5]
 
     # One Agent service per computer: this test-only step removes the central installation's own Agent service,
     # so Agent Setup can install the Agent product beside Core on this single runner.
@@ -285,6 +322,35 @@ try {
     Assert-SetupAcceptance ((Invoke-AgentSetup @('/uninstall', '/quiet')) -eq 0) 'The final silent Agent uninstall failed.'
     Assert-AgentSetupAbsent 'Final uninstall'
 
+    # MVP-7: an Agent installed by an older Agent Setup fetches the newer signed Agent this Core carries, and the SYSTEM
+    # update task installs it in place: the same service, endpoint and credential, and Core receives the new version.
+    $offered = [string]([IO.File]::ReadAllText((Join-Path $coreCode 'agent-update\agent.manifest.json')) | ConvertFrom-Json).manifest.version
+    $devices = Get-SetupDeviceCount
+    $since = [DateTimeOffset]::UtcNow
+    $fourthPath = Write-AgentSetupCode 'fourth' ([string]$fourth.code)
+    Assert-SetupAcceptance ((Invoke-AgentSetup @('/quiet', '/codefile', $fourthPath) $OlderAgentExecutablePath) -eq 0) 'The older Agent Setup did not install and enroll the Agent.'
+    $endpointId = Assert-AgentSetupInstalled $address $pin $since
+    $older = Get-AgentReceiptVersion
+    Assert-SetupAcceptance ([Version]$older -lt [Version]$offered -and [string](Get-ItemProperty -LiteralPath $appsKey).DisplayVersion -ceq $older) 'The older Agent Setup did not install an older Agent.'
+    $staged = @(@('agent-update.manifest.json', 'agent-update.zip') | ForEach-Object { Join-Path $agentProductData ('Agent\update\' + $_) })
+    Wait-SetupAcceptance { @($staged | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }).Count -eq 2 } 'The older Agent did not download the newer Agent that Core offers.' $script:TimeoutSeconds
+    $held = (Get-SetupService 'SentinelAIAgent').ProcessId
+    $since = [DateTimeOffset]::UtcNow
+    Invoke-AgentUpdateTask
+    Assert-SetupAcceptance ((Get-AgentReceiptVersion) -ceq $offered -and [string](Get-ItemProperty -LiteralPath $appsKey).DisplayVersion -ceq $offered -and
+        [Version](Get-Item -LiteralPath $agentProductExecutable).VersionInfo.FileVersion -eq [Version]($offered + '.0') -and
+        (Get-SetupService 'SentinelAIAgent').ProcessId -ne $held) 'The SYSTEM update task did not install and start the newer Agent.'
+    Assert-SetupAcceptance ((Assert-AgentSetupInstalled $address $pin $since) -eq $endpointId -and (Get-SetupDeviceCount) -eq $devices + 1) 'The updated Agent is not the same enrolled endpoint.'
+    Wait-SetupAcceptance { [string](Invoke-SetupCoreRequest ('/api/admin/devices/' + $endpointId.ToString('D')) 'GET' $null $accessToken | ConvertFrom-Json).device.agentVersion -ceq ($offered + '.0') } 'Core did not receive the updated Agent version.' $script:TimeoutSeconds
+    # The updated Agent finds itself current and removes the downloaded copy; a further run changes nothing.
+    Wait-SetupAcceptance { @($staged | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0 } 'The updated Agent did not remove the installed package.' $script:TimeoutSeconds
+    $held = (Get-SetupService 'SentinelAIAgent').ProcessId
+    Invoke-AgentUpdateTask
+    Assert-SetupAcceptance ((Get-SetupService 'SentinelAIAgent').ProcessId -eq $held -and (Get-AgentReceiptVersion) -ceq $offered) 'The update task changed a current Agent.'
+    Write-Output ('Agent ' + $older + ' updated itself to ' + $offered + ' from Core as endpoint ' + $endpointId.ToString('D'))
+    Assert-SetupAcceptance ((Invoke-AgentSetup @('/uninstall', '/quiet')) -eq 0) 'Uninstalling the updated Agent failed.'
+    Assert-AgentSetupAbsent 'Updated Agent uninstall'
+
     # The full Setup registered its own Windows Apps entry that opens the existing uninstall flow.
     $full = Get-ItemProperty -LiteralPath $fullAppsKey
     $fullSetup = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'SentinelAI Setup\SentinelAI-Setup.exe'
@@ -292,7 +358,7 @@ try {
         (Test-Path -LiteralPath $fullSetup -PathType Leaf) -and $null -eq $full.PSObject.Properties['QuietUninstallString']) 'The full Setup did not register its Windows Apps entry.'
     $agentSetupPassed = $true
     [pscustomobject]@{ Result = 'Passed'; Assertions = $assertionCount
-        AgentSetup = 'Silent install over the non-loopback address with telemetry; invalid options, invalid code, wrong pin, unreachable Core, revoked, expired and used codes refused without changes; second install refused; uninstall from the download and from Windows Apps' }
+        AgentSetup = 'Silent install over the non-loopback address with telemetry; invalid options, invalid code, wrong pin, unreachable Core, revoked, expired and used codes refused without changes; second install refused; uninstall from the download and from Windows Apps; an older Agent updated itself from Core through the SYSTEM task' }
 } finally {
     if (Test-Path -LiteralPath $codeDirectory) { Remove-Item -LiteralPath $codeDirectory -Recurse -Force }
     try {

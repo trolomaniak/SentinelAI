@@ -3,13 +3,17 @@ using SentinelAI.Updates;
 
 namespace SentinelAI.Updater;
 
-/// <summary>Operator-controlled local verification, staging and fresh code preparation; never starts services or downloads code.</summary>
+/// <summary>
+/// Operator-controlled local verification, staging and fresh code preparation, and (MVP-7) the scheduled SYSTEM
+/// installation of an Agent update that the Agent fetched from Core. It never downloads code.
+/// </summary>
 public static class UpdaterCommand
 {
     // A local package prepares in seconds, and in well under a minute on a slow disk; a stalled
     // installer step fails closed long before Setup's ten-minute worker limit.
     internal static readonly TimeSpan PrepareDeadline = TimeSpan.FromMinutes(5);
     internal const int DeadlineExitCode = 2;
+    internal static readonly TimeSpan AgentUpdateDeadline = TimeSpan.FromMinutes(15);
 
     public static Task<int> RunAsync(string[] args, TextWriter output, TextWriter error) =>
         RunAsync(args, output, error, PrepareDeadline);
@@ -22,9 +26,10 @@ public static class UpdaterCommand
         {
             if (args.Length == 1 && args[0] == "--help")
             {
-                await output.WriteLineAsync("verify|stage|prepare --manifest FILE --package ZIP --public-key PEM --key-id ID --environment development|production --channel stable|pilot|beta --artifact-id ID --installed-version X.Y.Z [stage: --output ABSOLUTE_NEW_FILE; prepare: --output ABSOLUTE_NEW_DIRECTORY]");
+                await output.WriteLineAsync("verify|stage|prepare --manifest FILE --package ZIP --public-key PEM --key-id ID --environment development|production --channel stable|pilot|beta --artifact-id ID --installed-version X.Y.Z [stage: --output ABSOLUTE_NEW_FILE; prepare: --output ABSOLUTE_NEW_DIRECTORY] | apply-agent-update");
                 return 0;
             }
+            if (args is ["apply-agent-update"]) return await ApplyAgentUpdateAsync(output, error);
             var allowed = new[] { "manifest", "package", "public-key", "key-id", "environment", "channel", "artifact-id", "installed-version" };
             var command = args.FirstOrDefault();
             if (command is not ("verify" or "stage" or "prepare")) throw new ArgumentException();
@@ -103,6 +108,43 @@ public static class UpdaterCommand
         {
             if (temporary is not null && Directory.Exists(temporary)) Directory.Delete(temporary, recursive: true);
         }
+    }
+
+    /// <summary>Agent Setup's hourly SYSTEM task: installs a newer Agent the Agent staged, or does nothing.</summary>
+    private static async Task<int> ApplyAgentUpdateAsync(TextWriter output, TextWriter error)
+    {
+        if (!OperatingSystem.IsWindows()) throw new ArgumentException();
+        using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+        {
+            if (!identity.IsSystem && !new System.Security.Principal.WindowsPrincipal(identity)
+                    .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+                throw new UnauthorizedAccessException();
+        }
+
+        var layout = AgentUpdateLayout.Default;
+        var service = new WindowsAgentService(layout);
+        service.AssertOwned();
+        using var deadline = new CancellationTokenSource(AgentUpdateDeadline);
+        var applier = new AgentUpdateApplier(layout, service,
+            new TransactionalUpdater(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(3)),
+            WindowsAgentService.RecordAppsVersion);
+        var outcome = await applier.ApplyAsync(deadline.Token);
+        await output.WriteLineAsync(outcome switch
+        {
+            AgentUpdateOutcome.NoUpdate => "No Agent update to install.",
+            AgentUpdateOutcome.Installed => "The Agent update was installed.",
+            AgentUpdateOutcome.Rejected => "The staged Agent update was rejected; the Agent was not changed.",
+            AgentUpdateOutcome.RolledBack => "The Agent update failed and the previous Agent was restored.",
+            AgentUpdateOutcome.NotRetried => "This Agent update failed before and is not retried; the previous Agent keeps running.",
+            _ => "The Agent update and its rollback failed; recovery is retried at the next run."
+        });
+        return outcome switch
+        {
+            AgentUpdateOutcome.NoUpdate or AgentUpdateOutcome.Installed => 0,
+            AgentUpdateOutcome.Rejected => 3,
+            AgentUpdateOutcome.RolledBack or AgentUpdateOutcome.NotRetried => 4,
+            _ => 5
+        };
     }
 
     private static Dictionary<string, string> Parse(string[] args, string[] required)

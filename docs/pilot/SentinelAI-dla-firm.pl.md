@@ -64,7 +64,7 @@ Alerty powstają dla ryzykownych ustawień i wykryć. Pozostałe wartości, taki
 - **Instalatory nie są podpisane cyfrowo.** Windows SmartScreen ostrzeże, że wydawca jest nieznany. Przed uruchomieniem zawsze sprawdzaj pobrane pliki z opublikowanymi sumami kontrolnymi SHA-256. Inteligentna kontrola aplikacji (Smart App Control) lub niektóre programy antywirusowe i EDR mogą blokować niepodpisane programy.
 - **Tylko Windows.** Nie ma jeszcze wersji dla Linuksa ani macOS.
 - **Desktop tylko na komputerze centralnym.** Alerty i raporty ogląda się tam; nie ma dostępu przez przeglądarkę ani telefon.
-- **Brak automatycznych aktualizacji.** Nowe wersje dostarczamy my: uruchamiacie je na komputerze centralnym, a Agentów na pozostałych komputerach instaluje się ponownie z nowymi kodami.
+- **Komputer centralny aktualizujecie sami.** Nowe wersje dostarczamy my: uruchamiacie je na komputerze centralnym, a Agenci na pozostałych komputerach aktualizują się z niego automatycznie, zwykle w ciągu dwóch godzin.
 - **Interfejs po angielsku.** Sam program jest w języku angielskim.
 
 ## Kontakt

@@ -13,6 +13,7 @@ Run this checklist for every pilot release before it is sent to a company. Use a
   - 30 days, starting today;
   - one that ends in 5 days: `--start` 25 days ago with `--days 30`;
   - one that has already ended, for the Setup refusal test only: `--start` 31 days ago with `--days 30`. Core and Desktop refuse an expired key too.
+- [ ] Keep an Agent Setup with a lower version, signed with the same key, outside the release folder: the previous release's `SentinelAI-Agent-Setup.exe`, or one built with `scripts/publish-setup-windows.ps1 -Product Agent -Version <lower version>` and the same keys.
 - [ ] Upload the folder to the download server. On A and on B, download the files over HTTPS and check them with `Get-FileHash` against `SHA256SUMS.txt`.
 
 ## 1. Central installation on A
@@ -58,7 +59,21 @@ Run this checklist for every pilot release before it is sent to a company. Use a
   Within a few minutes **Alerts** shows "Scheduled task created outside the Microsoft task folder" and "Driver installed outside the Windows system folders" for B, also on the Polish computer.
 - [ ] In **Reports**, generate and save a report for the current month and open it.
 
-## 4. Pilot key near and after the end
+## 4. Automatic Agent update
+
+Run this on B; do it once on Windows 10 and once on Windows 11 across releases (B's Windows changes when the roles swap).
+
+- [ ] Uninstall the Agent on B from **Settings → Apps → SentinelAI Agent** and remove B in Desktop. Install the lower-version Agent Setup on B with a new code. **Settings → Apps → SentinelAI Agent** shows the lower version.
+- [ ] In an elevated PowerShell on B, `Get-ScheduledTask -TaskPath '\SentinelAI\' | Select-Object TaskName, State, @{n='User';e={$_.Principal.UserId}}` shows `SentinelAI Agent Update`, Ready, SYSTEM.
+- [ ] Within about two minutes, `%ProgramData%\SentinelAI Agent\Agent\update` holds `agent-update.zip` and `agent-update.manifest.json`.
+- [ ] Run `Start-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Agent Update'`. After about a minute, `(Get-ScheduledTaskInfo -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Agent Update').LastTaskResult` is 0. Check that:
+  - **Settings → Apps → SentinelAI Agent** shows this release's version;
+  - in Desktop, B is still one device with its history, and its details show the new Agent version with a fresh heartbeat;
+  - within a few minutes, the `update` folder is empty;
+  - no alert for B names the SentinelAI task.
+- [ ] Once per release cycle, do not start the task: install the lower version again (as in the first step) and check that B updates by itself within two hours.
+
+## 5. Pilot key near and after the end
 
 These steps move A's clock forward. Core never lets its time go backwards, so A's pilot dates stay shifted by that amount: do this only on test computers.
 
@@ -67,31 +82,31 @@ These steps move A's clock forward. Core never lets its time go backwards, so A'
 - [ ] Set A's clock 6 days ahead and sign in again. Check that:
   - the ended notice is shown with the contact details and **Uninstall SentinelAI**;
   - Devices, Alerts and Risk still update (B keeps reporting).
-- [ ] Set A's clock back to the real time, restart A and sign in: the pilot is still ended. Leave it ended for step 6.
+- [ ] Set A's clock back to the real time, restart A and sign in: the pilot is still ended. Leave it ended for step 7.
 
-## 5. Removing B
+## 6. Removing B
 
 - [ ] In Desktop, open B in **Devices** and select **Remove computer**. B disappears from Devices and Risk, and its alerts' history is kept.
 - [ ] Uninstall the Agent on B silently from an elevated PowerShell: `(Start-Process "$env:ProgramFiles\SentinelAI Agent\Setup\SentinelAI-Agent-Setup.exe" -ArgumentList '/uninstall', '/quiet' -Wait -PassThru).ExitCode` must be 0. Check:
-  - the service is gone;
+  - the service is gone, and `Get-ScheduledTask -TaskPath '\SentinelAI\'` finds no task;
   - `%ProgramFiles%\SentinelAI Agent` and `%ProgramData%\SentinelAI Agent` are gone, and the running Setup copy waits in `%ProgramData%\SentinelAI-Setup` for deletion at the next restart;
   - the **SentinelAI Agent** entry in **Settings → Apps** is gone;
   - `auditpol /get /subcategory:{0CCE9227-69AE-11D9-BED3-505054503030}` shows what you noted before installing, and `wevtutil gl Security` no longer lists `S-1-5-80-3260565588-2217304288-1438658577-528527895-932542736` under `channelAccess`.
 
-## 6. Uninstalling the central installation
+## 7. Uninstalling the central installation
 
 - [ ] Uninstall with data kept:
-  1. With the pilot ended (step 4), select **Uninstall SentinelAI** in Desktop. Desktop closes, and UAC appears.
+  1. With the pilot ended (step 5), select **Uninstall SentinelAI** in Desktop. Desktop closes, and UAC appears.
   2. Setup opens with **Uninstall** selected and **Keep security history and protected configuration** checked. Select **Continue**.
   3. Check that the services, the firewall rule and `%ProgramFiles%\SentinelAI` are gone, and that `%ProgramData%\SentinelAI\Core\sentinelai.db` remains.
-- [ ] Sign in to Windows on A with a different administrator account than the one that installed SentinelAI, and run the same `SentinelAI-Setup.exe` again: it offers **Repair**. Repair, sign in, and check that the history and the ended pilot are still there. Enter the 30-day key: the pilot is active again (with fewer days left, because of step 4).
+- [ ] Sign in to Windows on A with a different administrator account than the one that installed SentinelAI, and run the same `SentinelAI-Setup.exe` again: it offers **Repair**. Repair, sign in, and check that the history and the ended pilot are still there. Enter the 30-day key: the pilot is active again (with fewer days left, because of step 5).
 - [ ] Check that no folder names a Windows account: `icacls "%ProgramFiles%\SentinelAI" /T` and `icacls "%ProgramData%\SentinelAI" /T` list only `BUILTIN\Administrators`, `NT AUTHORITY\SYSTEM`, the service accounts and, for Desktop, `BUILTIN\Users`.
 - [ ] Uninstall with data removed:
   1. Uninstall again from **Settings → Apps → SentinelAI**.
   2. Clear **Keep security history and protected configuration**, type **DELETE** and select **Continue**.
   3. Check that `%ProgramData%\SentinelAI` and the certificate with the friendly name "SentinelAI Core local network" in `LocalMachine\My` are gone.
 
-## 7. Record
+## 8. Record
 
 - [ ] Note any SmartScreen, Smart App Control or antivirus behavior seen on each computer.
 - [ ] Note anything the customer documents describe differently from what you saw, and correct the documents before release.

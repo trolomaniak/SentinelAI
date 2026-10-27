@@ -64,7 +64,7 @@ Alerts are raised for risky settings and detections. The other values, such as p
 - **The installers are not code-signed.** Windows SmartScreen will warn that the publisher is unknown. Always check the downloads against the published SHA-256 checksums before running them. Smart App Control or some antivirus or EDR products may block unsigned programs.
 - **Windows only.** There is no Linux or macOS version yet.
 - **Desktop only on the central computer.** Alerts and reports are viewed there; there is no web or mobile access.
-- **No automatic updates.** We provide new versions; you run them on the central computer, and the Agents on the other computers are reinstalled with new codes.
+- **You update the central computer.** We provide new versions; you run them on the central computer, and the Agents on the other computers update from it automatically, usually within two hours.
 - **English interface.** The program itself is in English.
 
 ## Contact

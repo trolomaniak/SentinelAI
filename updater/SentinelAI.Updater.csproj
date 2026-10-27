@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../shared/updates/SentinelAI.Updates.csproj" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.12" />
     <InternalsVisibleTo Include="SentinelAI.Updates.Tests" />
   </ItemGroup>
   <PropertyGroup>
