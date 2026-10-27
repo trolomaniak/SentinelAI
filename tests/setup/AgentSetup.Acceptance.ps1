@@ -299,7 +299,7 @@ try {
             Invoke-PilotInstall -Component UninstallAgent -CodeDirectory $agentCode -DataDirectory $agentData -TimeoutSeconds 60 | Out-Null
         }
         if ($null -ne (Get-SetupService 'SentinelAICore')) {
-            & (Join-Path $repositoryRoot 'installer/pilot/Manage-SentinelAICoreService.ps1') -Action Uninstall -CodeDirectory $coreCode -DataDirectory $coreData -TimeoutSeconds 60 | Out-Null
+            & (Join-Path $repositoryRoot 'tests/core-service/Manage-SentinelAICoreService.ps1') -Action Uninstall -CodeDirectory $coreCode -DataDirectory $coreData -TimeoutSeconds 60 | Out-Null
         }
     } catch {
         if ($agentSetupPassed) { throw }

@@ -121,7 +121,7 @@ internal static class AgentSetupTests
             Ensure(!AgentSetupWorkflow.Describe(exit, false).Contains(Token, StringComparison.Ordinal) && AgentSetupWorkflow.Describe(exit, true).Length > 0, "message " + exit);
 
         // The Agent payload: the Agent worker, signed Agent package and Updater; never Core or Desktop.
-        string[] agentPayload = ["setup/SetupWorker.ps1", "setup/SetupLifecycle.ps1", "setup/AgentSetupWorker.ps1", "bundle/installer/Install-SentinelAIPilot.ps1",
+        string[] agentPayload = ["setup/SetupWorker.ps1", "setup/SetupLifecycle.ps1", "setup/AgentSetupWorker.ps1", "bundle/installer/PilotInstaller.psm1",
             "bundle/agent.zip", "bundle/agent.manifest.json", "bundle/updater/SentinelAI.Updater.exe"];
         async Task<bool> Verifies(string product, params string[] entries)
         {

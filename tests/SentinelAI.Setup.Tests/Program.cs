@@ -20,7 +20,7 @@ byte[] Archive(params (string Path, string Content, int Attributes)[] extra)
     using var output = new MemoryStream();
     using (var zip = new ZipArchive(output, ZipArchiveMode.Create, true))
     {
-        foreach (var item in new[] { ("setup/SetupWorker.ps1", "synthetic worker", 0), ("desktop/SentinelAI.Desktop.exe", "synthetic desktop", 0), ("bundle/installer/Install-SentinelAIPilot.ps1", "synthetic installer", 0) }.Concat(extra))
+        foreach (var item in new[] { ("setup/SetupWorker.ps1", "synthetic worker", 0), ("desktop/SentinelAI.Desktop.exe", "synthetic desktop", 0), ("bundle/installer/PilotInstaller.psm1", "synthetic installer", 0) }.Concat(extra))
         {
             var entry = zip.CreateEntry(item.Item1); entry.ExternalAttributes = item.Item3;
             using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)); writer.Write(item.Item2);

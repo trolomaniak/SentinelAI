@@ -8,10 +8,10 @@ From the repository root with the .NET 10 SDK and Bash (for example Git Bash on 
 
 ```sh
 ./scripts/build.sh
-./scripts/publish-desktop-windows.sh
+dotnet publish desktop/SentinelAI.Desktop/SentinelAI.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishTrimmed=false -p:DebugType=none -p:DebugSymbols=false --output artifacts/desktop/win-x64
 ```
 
-The publish command produces a self-contained, untrimmed application directory at `artifacts/desktop/win-x64`. On Windows, run `SentinelAI.Desktop.exe` from that directory. Normal operation is browserless; same-user/session duplicate launches restore the existing window. Closing fully exits Desktop and leaves Core/Agent running. See [browserless operation](../docs/DESKTOP-OPERATION.md) for optional tray, notification and per-user Windows sign-in settings. Keep the accompanying files together; a separate .NET installation is unnecessary. This is a development artifact, not an installer or an Authenticode-signed release.
+This test publish produces a self-contained, untrimmed application directory at `artifacts/desktop/win-x64`; customers receive Desktop only through `SentinelAI-Setup.exe`. On Windows, run `SentinelAI.Desktop.exe` from that directory. Normal operation is browserless; same-user/session duplicate launches restore the existing window. Closing fully exits Desktop and leaves Core/Agent running. See [browserless operation](../docs/DESKTOP-OPERATION.md) for optional tray, notification and per-user Windows sign-in settings. Keep the accompanying files together; a separate .NET installation is unnecessary. This is a development artifact, not an installer or an Authenticode-signed release.
 
 Linux can restore and cross-compile the Windows projects through `EnableWindowsTargeting`. It can run the portable desktop tests, but cannot execute WPF or establish native Windows acceptance.
 
@@ -32,11 +32,11 @@ The repository's `./scripts/test.sh` includes executable portable assertions for
 
 ```powershell
 dotnet run --project tests/SentinelAI.Desktop.Windows.Tests/SentinelAI.Desktop.Windows.Tests.csproj --configuration Release --runtime win-x64
-bash ./scripts/publish-desktop-windows.sh
+dotnet publish desktop/SentinelAI.Desktop/SentinelAI.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishTrimmed=false -p:DebugType=none -p:DebugSymbols=false --output artifacts/desktop/win-x64
 pwsh -NoLogo -NoProfile -NonInteractive -File tests/desktop/Windows.Acceptance.ps1 -ExecutablePath artifacts/desktop/win-x64/SentinelAI.Desktop.exe
 ```
 
-The Windows test runner checks actual WPF authentication, password clearing, gated navigation, native Devices/Alerts/Risk list/detail controls, report actions, keyboard focus, layout, DPI and disposal. The standalone acceptance script launches the published executable, verifies its native signed-out window and requests a graceful close. The dedicated Windows CI job runs both before uploading the application directory. The Core-service Windows CI job additionally runs `tests/desktop/Authentication.Acceptance.ps1` against the signed installed Core and published desktop, covering real bootstrap, sign-in/out, listener rejection, restart/reconnect and synthetic Devices/Alerts/Risk/Reports workflows, including Safe Mode generation and the actual native report destination picker. Its `-VerifyBrowserless` fixture also checks real duplicate-process activation/restoration and signed-out reopen with unchanged Core PID/health and Agent state/PID if installed. See [device operation and limits](../docs/DESKTOP-DEVICES.md) and [Risk/Reports verification](../docs/DESKTOP-RISK-REPORTS.md).
+The Windows test runner checks actual WPF authentication, password clearing, gated navigation, native Devices/Alerts/Risk list/detail controls, report actions, keyboard focus, layout, DPI and disposal. The standalone acceptance script launches the published executable, verifies its native signed-out window and requests a graceful close. The dedicated Windows CI job runs both. The Core-service Windows CI job additionally runs `tests/desktop/Authentication.Acceptance.ps1` against the signed installed Core and published desktop, covering real bootstrap, sign-in/out, listener rejection, restart/reconnect and synthetic Devices/Alerts/Risk/Reports workflows, including Safe Mode generation and the actual native report destination picker. Its `-VerifyBrowserless` fixture also checks real duplicate-process activation/restoration and signed-out reopen with unchanged Core PID/health and Agent state/PID if installed. See [device operation and limits](../docs/DESKTOP-DEVICES.md) and [Risk/Reports verification](../docs/DESKTOP-RISK-REPORTS.md).
 
 Physical scaling remains a practical manual check on a Windows desktop:
 
@@ -49,4 +49,4 @@ Logical window-size tests and DPI-context checks do not simulate every physical 
 
 See [native AI, licensing and local settings](../docs/DESKTOP-AI-LICENSING.md) for explicit renewal, assistive explanations and session consent.
 
-The existing browser dashboard is retained only for development/diagnostic compatibility; it is unnecessary for supported Desktop operation. Optional offline viewing/printing of an explicitly saved report remains an operator export workflow.
+Optional offline viewing/printing of an explicitly saved report remains an operator export workflow.

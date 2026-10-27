@@ -810,7 +810,7 @@ function Test-SetupLocalNetwork {
     $tls12 = Invoke-SetupLocalNetworkRequest $address $pin 3072 'GET' '/api/health' $null $null
     Assert-SetupAcceptance ($tls12[0] -ceq 'Tls12' -and $tls12[1] -match '\AAes(128|256)\z' -and $tls12[3].StartsWith('HTTP/1.1 404', [StringComparison]::Ordinal)) 'Core did not admit TLS 1.2 with ECDHE and AES-GCM from Windows.'
     Write-Output ('Local network TLS 1.2 client: protocol=' + $tls12[0] + '; cipher=' + $tls12[1] + '; keyExchange=' + $tls12[2])
-    # Administrator, authentication, health, dashboard and Desktop routes are refused on the local-network listener.
+    # Administrator, authentication, health and Desktop routes are refused on the local-network listener.
     $loginBody = @{ username = $script:username; password = $script:password } | ConvertTo-Json -Compress
     foreach ($route in @(@('GET','/api/health',$false,$null), @('GET','/',$false,$null), @('GET','/assets/app.js',$false,$null),
         @('POST','/api/auth/login',$false,$loginBody), @('GET','/api/admin/me',$true,$null), @('GET','/api/admin/devices',$true,$null),
@@ -1214,7 +1214,7 @@ try {
                     }
                 } finally {
                     if ($null -ne (Get-SetupService 'SentinelAICore')) {
-                        & (Join-Path $installer 'Manage-SentinelAICoreService.ps1') -Action Uninstall -CodeDirectory $coreCode -DataDirectory $coreData -TimeoutSeconds 60 | Out-Null
+                        & (Join-Path $repositoryRoot 'tests/core-service/Manage-SentinelAICoreService.ps1') -Action Uninstall -CodeDirectory $coreCode -DataDirectory $coreData -TimeoutSeconds 60 | Out-Null
                     }
                 }
                 Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAIAgent') -and $null -eq (Get-SetupService 'SentinelAICore')) 'An owned acceptance service remained registered after cleanup.'

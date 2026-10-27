@@ -62,7 +62,7 @@ if ($PSVersionTable.PSEdition -ne 'Desktop') {
 
 $repositoryRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $installerDirectory = Join-Path $repositoryRoot 'installer/pilot'
-$managementScript = Join-Path $installerDirectory 'Manage-SentinelAICoreService.ps1'
+$managementScript = Join-Path $repositoryRoot 'tests/core-service/Manage-SentinelAICoreService.ps1'
 Import-Module (Join-Path $installerDirectory 'PilotInstaller.psm1') -Force -DisableNameChecking
 Assert-PilotSupportedHost
 $BundleDirectory = (Resolve-Path -LiteralPath $BundleDirectory).ProviderPath

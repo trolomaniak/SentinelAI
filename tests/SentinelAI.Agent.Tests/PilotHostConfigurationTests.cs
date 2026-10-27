@@ -1,5 +1,4 @@
 using System.Net;
-using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.Versioning;
@@ -212,7 +211,6 @@ internal static class PilotHostConfigurationTests
                 EnrollmentState state;
                 using (var agent = BuildPilotAgent(agentConfig, logs))
                 {
-                    var verificationStartedUtc = DateTimeOffset.UtcNow;
                     await agent.StartAsync();
                     try
                     {
@@ -236,11 +234,9 @@ internal static class PilotHostConfigurationTests
                         using var devices = await admin.GetAsync("/api/admin/devices");
                         using var deviceJson = JsonDocument.Parse(await devices.Content.ReadAsStringAsync());
                         Check(devices.StatusCode == HttpStatusCode.OK && deviceJson.RootElement.EnumerateArray().Any(device => device.GetProperty("endpointId").GetGuid() == state.EndpointId),
-                            "Pilot endpoint is missing from the dashboard Devices API.");
+                            "Pilot endpoint is missing from the Devices API.");
                         Check(!logs.Text.Contains(token.Token, StringComparison.Ordinal) && !logs.Text.Contains(password, StringComparison.Ordinal) && !logs.Text.Contains(state.AgentCredential, StringComparison.Ordinal),
                             "Pilot Agent logs exposed a secret.");
-                        await VerifyPowerShellWorkflowAsync(origin, agentDirectory, verificationStartedUtc,
-                            state.EndpointId, username, password, token.Token, state.AgentCredential);
                     }
                     finally { await agent.StopAsync(); }
                 }
@@ -278,63 +274,6 @@ internal static class PilotHostConfigurationTests
             finally { await core.StopAsync(); }
         }
         finally { foreach (var name in names) Environment.SetEnvironmentVariable(name, previous[name]); }
-    }
-
-    private static async Task VerifyPowerShellWorkflowAsync(string coreUrl, string agentDirectory,
-        DateTimeOffset sinceUtc, Guid endpointId, string username, params string[] secrets)
-    {
-        var executable = File.Exists("/workspace/.powershell/bin/pwsh") ? "/workspace/.powershell/bin/pwsh" :
-            (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator)
-                .Select(directory => Path.Combine(directory, OperatingSystem.IsWindows() ? "pwsh.exe" : "pwsh"))
-                .FirstOrDefault(File.Exists);
-        if (executable is null)
-        {
-            Console.WriteLine("PowerShell pilot verification integration skipped: pwsh is unavailable.");
-            return;
-        }
-
-        var repository = new DirectoryInfo(AppContext.BaseDirectory);
-        while (repository is not null && !File.Exists(Path.Combine(repository.FullName, "SentinelAI.sln")))
-            repository = repository.Parent;
-        if (repository is null) throw new Exception("Pilot integration could not find the repository.");
-        var start = new ProcessStartInfo(executable)
-        {
-            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
-            WorkingDirectory = repository.FullName
-        };
-        foreach (var argument in new[]
-        {
-            "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
-            Path.Combine(repository.FullName, "tests", "pilot", "Verify.Integration.ps1"),
-            "-CoreUrl", coreUrl, "-AgentDataDirectory", agentDirectory,
-            "-SinceUtc", sinceUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
-        }) start.ArgumentList.Add(argument);
-        start.Environment["SENTINELAI_PILOT_TEST_USERNAME"] = username;
-        start.Environment["SENTINELAI_PILOT_TEST_PASSWORD"] = secrets[0];
-        using var process = Process.Start(start) ?? throw new Exception("Pilot integration could not start PowerShell.");
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(35));
-        try { await process.WaitForExitAsync(deadline.Token); }
-        catch (OperationCanceledException)
-        {
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync();
-            throw new Exception("PowerShell pilot verification exceeded its test deadline.");
-        }
-        var output = await outputTask;
-        var error = await errorTask;
-        Check(!secrets.Any(secret => output.Contains(secret, StringComparison.Ordinal) || error.Contains(secret, StringComparison.Ordinal)),
-            "PowerShell pilot verification exposed a synthetic secret.");
-        Check(process.ExitCode == 0, "The actual PowerShell pilot verifier rejected the live Core and Agent.");
-        using var result = JsonDocument.Parse(output);
-        Check(result.RootElement.GetProperty("EndpointId").GetGuid() == endpointId,
-            "PowerShell pilot verification identified the wrong endpoint.");
-        Check(result.RootElement.GetProperty("LastSeenUtc").GetDateTimeOffset() >= sinceUtc &&
-              result.RootElement.GetProperty("InventoryCollectedUtc").GetDateTimeOffset() >= sinceUtc,
-            "PowerShell pilot verification accepted stale heartbeat or inventory.");
-        Check(result.RootElement.GetProperty("DashboardUrl").GetString() == new Uri(coreUrl).AbsoluteUri,
-            "PowerShell pilot verification returned an unexpected dashboard origin.");
     }
 
     private static void WritePrivateToken(string path, string value)

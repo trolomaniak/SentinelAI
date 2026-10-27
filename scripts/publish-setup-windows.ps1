@@ -400,7 +400,7 @@ try {
         $pilotArguments.PilotLicenseDirectory = $pilotLicense
     }
     $script:SetupPublishingPhase = 'signed-bundle'
-    & (Join-Path $PSScriptRoot 'publish-pilot-windows.ps1') -Version $Version -DevelopmentPrivateKey $DevelopmentPrivateKey -KeyId $KeyId -Channel $Channel -OutputDirectory $bundle -DirectoryHosts @pilotArguments
+    & (Join-Path $PSScriptRoot 'publish-pilot-windows.ps1') -Version $Version -DevelopmentPrivateKey $DevelopmentPrivateKey -KeyId $KeyId -Channel $Channel -OutputDirectory $bundle @pilotArguments
     # Agent Setup carries only the signed Agent package, the Updater and the installer modules.
     if ($agentOnly) { foreach ($name in @('core.zip', 'core.manifest.json')) { Remove-Item -LiteralPath (Join-Path $bundle $name) -Force } }
 

@@ -1,18 +1,16 @@
 # Desktop administrator setup and sign-in
 
-The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. Desktop is the supported production interface; the browser dashboard remains only for development/diagnostic compatibility, while Devices, Alerts/incidents, Risk and Reports provide native workspaces. Settings provides licensing and session AI consent; Overview remains a placeholder. See [native Risk and Reports](DESKTOP-RISK-REPORTS.md).
+The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. Desktop is the only interface: Devices, Alerts/incidents, Risk and Reports provide native workspaces. Settings provides licensing and session AI consent; Overview remains a placeholder. See [native Risk and Reports](DESKTOP-RISK-REPORTS.md).
 
 ## Fresh installation
 
-[SentinelAI Setup](SETUP.md) installs all components, creates the administrator and starts/enrolls the services from one executable. The steps below remain the manual signed-bundle alternative.
-
-Install the signed Core files and protected configuration using the [pilot workflow](PILOT.md), then open the published `SentinelAI.Desktop.exe`. The desktop uses the existing default installation: `%ProgramFiles%\SentinelAI\Core`, `%ProgramData%\SentinelAI\Core` and `http://127.0.0.1:5000`.
+[SentinelAI Setup](SETUP.md) installs all components, creates the administrator and starts/enrolls the services from one executable. Desktop uses the default installation: `%ProgramFiles%\SentinelAI\Core`, `%ProgramData%\SentinelAI\Core` and `http://127.0.0.1:5000`.
 
 Initial setup needs the installing operator's existing filesystem authority. When required, **Open initial setup as administrator** opens a separate UAC-approved native setup window. On the central installation from Setup (recognized by `%ProgramData%\SentinelAI\Setup\setup-installation.json`), Desktop trusts no Windows account as a writer of Core's files: only Administrators, SYSTEM, TrustedInstaller and Core's own service where it writes state, so initial setup there always needs administrator permission and works for any administrator. Only the separate console pilot, whose Core runs as its installing operator's console process, also trusts the current account. Enter a username and a password of at least 12 characters there. No password crosses the UAC process boundary or appears in process arguments.
 
 The trusted installed Core executable receives bounded setup input through a private redirected standard-input pipe. It uses the existing password hasher and immediate SQLite transaction, creates one administrator only, then exits. A second creation attempt cannot replace or reset the existing administrator. Its read-only state command distinguishes missing administrator state from inaccessible or corrupt storage; an unavailable HTTP listener never establishes that first-run setup is required.
 
-After setup, register/start Core through the existing [Core service installer](CORE-SERVICE.md), then sign in from the normal desktop window. Desktop setup does not install, start or stop the service. The original console launcher remains available for development and the pilot workflow. Service mode continues to refuse administrator bootstrap and requires an initialized administrator.
+After setup, sign in from the normal desktop window. Desktop setup does not install, start or stop the service. Service mode continues to refuse administrator bootstrap and requires an initialized administrator.
 
 ## Existing installation and sessions
 

@@ -31,6 +31,3 @@ if command -v pwsh >/dev/null 2>&1; then
 else
   printf 'PowerShell pilot workflow tests require pwsh; Windows acceptance remains a separate explicit check.\n' >&2
 fi
-
-cd "$repo_root/dashboard"
-npm test

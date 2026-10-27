@@ -153,7 +153,7 @@ internal sealed class LocalNetworkConnection
 
 internal static class LocalNetworkRoutes
 {
-    // The Agent routes only. Administrator, authentication, health, dashboard and Desktop
+    // The Agent routes only. Administrator, authentication, health and Desktop
     // routes stay on the loopback listener.
     private static readonly string[] AgentPaths =
     [

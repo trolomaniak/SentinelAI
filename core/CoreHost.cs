@@ -10,7 +10,6 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
@@ -208,8 +207,8 @@ public static class CoreHost
         var fallbackHash = app.Services.GetRequiredService<IPasswordHasher<AdminRecord>>()
             .HashPassword(fallbackAdmin, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
 
-        // The local-network listener serves the Agent routes only. This runs first, so the dashboard,
-        // health, authentication and administrator routes never answer there.
+        // The local-network listener serves the Agent routes only. This runs first, so health,
+        // authentication and administrator routes never answer there.
         app.Use(async (context, next) =>
         {
             if (LocalNetworkRoutes.IsLocalNetworkRequest(context) &&
@@ -222,25 +221,6 @@ public static class CoreHost
 
             await next(context);
         });
-
-        var dashboardDirectory = Path.Combine(AppContext.BaseDirectory, "dashboard");
-        if (Directory.Exists(dashboardDirectory))
-        {
-            var dashboardFiles = new PhysicalFileProvider(dashboardDirectory);
-            app.Lifetime.ApplicationStopped.Register(dashboardFiles.Dispose);
-            app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = dashboardFiles });
-            app.UseStaticFiles(new StaticFileOptions
-            {
-                FileProvider = dashboardFiles,
-                OnPrepareResponse = context =>
-                {
-                    context.Context.Response.Headers["Content-Security-Policy"] =
-                        "default-src 'self'; script-src 'self'; style-src 'self'; " +
-                        "img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
-                    context.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-                }
-            });
-        }
 
         app.UseRouting();
         configureBeforeAuthentication?.Invoke(app);

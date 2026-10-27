@@ -44,19 +44,11 @@ try
         Ensure(app.Services.GetService<IServer>() is not null, "The Core host did not register a web server.");
         using var client = await StartCoreAsync(app);
 
-        using (var dashboard = await client.GetAsync("/"))
+        // Native Desktop is the only interface: Core serves no browser application.
+        foreach (var path in new[] { "/", "/index.html", "/assets/app.js" })
         {
-            Ensure(dashboard.StatusCode == HttpStatusCode.OK &&
-                   dashboard.Content.Headers.ContentType?.MediaType == "text/html" &&
-                   (await dashboard.Content.ReadAsStringAsync()).Contains("./assets/app.js", StringComparison.Ordinal) &&
-                   dashboard.Headers.Contains("Content-Security-Policy"),
-                "Core did not serve the dashboard from its own origin.");
-        }
-        using (var script = await client.GetAsync("/assets/app.js"))
-        {
-            Ensure(script.StatusCode == HttpStatusCode.OK &&
-                   (await script.Content.ReadAsStringAsync()).Contains("/api/admin/devices", StringComparison.Ordinal),
-                "Core did not serve the dashboard application script.");
+            using var page = await client.GetAsync(path);
+            Ensure(page.StatusCode == HttpStatusCode.NotFound, "Core served a browser page at " + path + ".");
         }
 
         using (var health = await client.GetAsync("/api/health"))
@@ -144,7 +136,7 @@ try
         using (var unverifiedList = await GetAsBearerAsync(client, "/api/admin/devices", firstAccessToken))
         {
             Ensure((await unverifiedList.Content.ReadFromJsonAsync<DeviceListItem[]>()) is { Length: 0 },
-                "An unverified loopback heartbeat appeared as an enrolled dashboard endpoint.");
+                "An unverified loopback heartbeat appeared as an enrolled Devices endpoint.");
         }
         var firstDevice = await devices.FindByInstallationIdAsync(installationId)
             ?? throw new Exception("Core did not persist the first heartbeat.");
@@ -237,7 +229,7 @@ try
         Ensure(persistedList.StatusCode == HttpStatusCode.OK &&
                persistedDevices.Any(device => device.EndpointId == endpointId &&
                    device.Name == latestInventory.Hostname && device.HealthState == "healthy"),
-            "The dashboard device list did not survive Core restart.");
+            "The Devices list did not survive Core restart.");
         using var persistedDetail = await GetAsBearerAsync(
             client, $"/api/admin/devices/{endpointId:D}", accessToken);
         var restoredDetail = await persistedDetail.Content.ReadFromJsonAsync<DeviceDetail>();
@@ -245,7 +237,7 @@ try
                restoredDetail?.InventoryCollectedUtc == latestInventory.CollectedUtc &&
                restoredDetail.OsName == latestInventory.OsName &&
                restoredDetail.Disks.Count == latestInventory.Disks.Count,
-            "The dashboard device detail did not survive Core restart.");
+            "The device detail did not survive Core restart.");
         await RuleApiTests.VerifyAfterRestartAsync(client, endpointId, accessToken, latestInventory.CollectedUtc);
         await AlertApiTests.VerifyAfterRestartAsync(client, accessToken, alertTestState);
     }

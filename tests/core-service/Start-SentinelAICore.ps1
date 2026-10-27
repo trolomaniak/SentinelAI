@@ -10,7 +10,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-Import-Module (Join-Path $PSScriptRoot 'PilotInstaller.psm1') -Force -DisableNameChecking
+# Windows CI fixture for the Core service and Desktop acceptance; customers install through SentinelAI-Setup.exe.
+Import-Module (Join-Path $PSScriptRoot '../../installer/pilot/PilotInstaller.psm1') -Force -DisableNameChecking
 $child = $null
 $client = $null
 $ready = $false
