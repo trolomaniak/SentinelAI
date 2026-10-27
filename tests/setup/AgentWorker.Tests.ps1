@@ -98,6 +98,7 @@ function Install-SetupAuxiliaryCode {
     Assert-AgentTest ($Destination -ceq $locations.UpdaterCode -and -not $PublicRead) 'Updater in the Agent product root, administrator-only'
     $script:events.Add('updater')
 }
+function Register-AgentSetupUpdateTask { param($Locations); Assert-AgentTest ($Locations.UpdaterCode -ceq $locations.UpdaterCode) 'update task runs the installed Updater'; $script:events.Add('update-task') }
 function Install-SetupCachedInstaller {
     param($Source,$Directory,$Name)
     Assert-AgentTest ($Source -ceq (Join-Path (New-AgentTestRequest).workDirectory 'installer\setup.exe') -and $Directory -ceq $locations.InstallerCode -and $Name -ceq 'SentinelAI-Agent-Setup.exe') 'installed Setup copy'
@@ -140,7 +141,7 @@ Assert-AgentTest ($script:trustedPaths -ccontains $locations.CodeRoot -and $scri
     -not ($script:trustedPaths -ccontains [IO.Path]::GetDirectoryName($locations.CodeRoot)) -and
     -not ($script:trustedPaths -ccontains [IO.Path]::GetDirectoryName($locations.DataRoot))) 'the product roots are checked as targets, not their shared parents'
 # The ownership receipt comes right after the roots, so an interrupted install can always be uninstalled.
-Assert-AgentTest (($script:events -join ',') -ceq 'root,root,root,receipt,receipt,updater,installer,apps,install-Agent') 'install order'
+Assert-AgentTest (($script:events -join ',') -ceq 'root,root,root,receipt,receipt,updater,update-task,installer,apps,install-Agent') 'install order'
 Assert-AgentTest (($script:output -join ',') -ceq 'PROGRESS|validate,PROGRESS|updater,PROGRESS|apps,PROGRESS|agent,DONE') 'install progress protocol'
 $script:fail = 'updater'
 Assert-AgentTest ((Invoke-AgentInstallTest) -and ($script:events -join ',') -ceq 'root,root,root,receipt,receipt,rollback' -and $script:SetupPhase -ceq 'updater') 'an Updater failure removes everything'
@@ -166,16 +167,19 @@ function Invoke-PilotInstall {
     $script:events.Add('remove-service'); if ($script:fail -ceq 'foreign') { throw 'Synthetic foreign service.' }
 }
 function Unregister-SetupApps { param($Key); Assert-AgentTest ($Key -ceq 'SentinelAIAgent') 'own Apps entry'; $script:events.Add('apps-remove') }
+function Suspend-AgentSetupUpdateTask { $script:events.Add('update-task-hold'); return $true }
+function Resume-AgentSetupUpdateTask { $script:events.Add('update-task-resume') }
+function Unregister-AgentSetupUpdateTask { $script:events.Add('update-task-remove') }
 function Remove-SetupOwnedTree { param($Path); Assert-AgentTest ($Path -ceq $locations.CodeRoot) 'own code root'; $script:events.Add('code-remove') }
 function Remove-Item { param($LiteralPath,[switch]$Recurse,[switch]$Force); Assert-AgentTest ($LiteralPath -ceq $locations.DataRoot) 'own data root'; $script:events.Add('data-remove') }
 $script:present = @($locations.DataRoot)
 $script:events.Clear(); $script:services.Enqueue([pscustomobject]@{ Name = 'SentinelAIAgent' })
 Remove-AgentSetupInstallation $locations
-Assert-AgentTest (($script:events -join ',') -ceq 'remove-service,apps-remove,code-remove,data-remove') 'uninstall removes service, Apps entry, code and data with the credential'
+Assert-AgentTest (($script:events -join ',') -ceq 'update-task-hold,remove-service,update-task-remove,apps-remove,code-remove,data-remove') 'uninstall removes service, update task, Apps entry, code and data with the credential'
 $script:events.Clear(); $script:fail = 'foreign'
 foreach ($index in 1..2) { $script:services.Enqueue([pscustomobject]@{ Name = 'SentinelAIAgent' }) }
 Reject-AgentTest { Remove-AgentSetupInstallation $locations } 'a service the pilot cannot prove owned'
-Assert-AgentTest (($script:events -join ',') -ceq 'remove-service') 'nothing is deleted while an unproven Agent service remains'
+Assert-AgentTest (($script:events -join ',') -ceq 'update-task-hold,remove-service,update-task-resume') 'nothing is deleted while an unproven Agent service remains'
 
 [IO.Directory]::Delete($script:work, $true)
 Write-Output ('Agent Setup worker assertions passed: ' + $script:checks)

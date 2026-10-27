@@ -23,6 +23,76 @@ function Read-AgentSetupReceipt {
     return $receipt
 }
 
+# MVP-7: an hourly task, and 5 minutes after startup, runs the installed Updater as SYSTEM. It installs a newer signed Agent
+# that the Agent fetched from Core, after verifying it with this installation's pinned key and policy.
+$script:AgentUpdateTaskFolder = 'SentinelAI'
+$script:AgentUpdateTaskName = 'SentinelAI Agent Update'
+
+function Get-AgentSetupTaskRoot {
+    $scheduler = New-Object -ComObject 'Schedule.Service'
+    $scheduler.Connect()
+    return $scheduler.GetFolder('\')
+}
+
+function Register-AgentSetupUpdateTask {
+    param($Locations)
+    # Quoted: the path has spaces, and an unquoted one could start another program as SYSTEM.
+    $updater = [Security.SecurityElement]::Escape('"' + (Join-Path $Locations.UpdaterCode 'SentinelAI.Updater.exe') + '"')
+    # SYSTEM by SID, on battery too, a missed run caught up, never two at once, at most one hour per run.
+    $definition = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Installs SentinelAI Agent updates offered by the central SentinelAI computer.</Description></RegistrationInfo>
+  <Triggers>
+    <TimeTrigger><StartBoundary>2026-01-01T00:00:00</StartBoundary><Repetition><Interval>PT1H</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><RandomDelay>PT10M</RandomDelay><Enabled>true</Enabled></TimeTrigger>
+    <BootTrigger><Delay>PT5M</Delay><Enabled>true</Enabled></BootTrigger>
+  </Triggers>
+  <Principals><Principal id="System"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="System"><Exec><Command>$updater</Command><Arguments>apply-agent-update</Arguments></Exec></Actions>
+</Task>
+"@
+    $root = Get-AgentSetupTaskRoot
+    try { $folder = $root.GetFolder($script:AgentUpdateTaskFolder) } catch { $folder = $root.CreateFolder($script:AgentUpdateTaskFolder, $null) }
+    # TASK_CREATE_OR_UPDATE (6) with TASK_LOGON_SERVICE_ACCOUNT (5).
+    [void]$folder.RegisterTask($script:AgentUpdateTaskName, $definition, 6, $null, $null, 5)
+}
+
+function Get-AgentSetupUpdateTask {
+    $root = Get-AgentSetupTaskRoot
+    try { return $root.GetFolder($script:AgentUpdateTaskFolder).GetTask($script:AgentUpdateTaskName) } catch { return $null }
+}
+
+# No new run starts; a running update gets two minutes to finish or roll back before it is stopped (state 4 = running).
+function Suspend-AgentSetupUpdateTask {
+    $task = Get-AgentSetupUpdateTask
+    if ($null -eq $task) { return $false }
+    $task.Enabled = $false
+    $deadline = [DateTime]::UtcNow.AddMinutes(2)
+    while ((Get-AgentSetupUpdateTask).State -eq 4 -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    if ((Get-AgentSetupUpdateTask).State -eq 4) { $task.Stop(0) }
+    return $true
+}
+
+function Resume-AgentSetupUpdateTask {
+    $task = Get-AgentSetupUpdateTask
+    if ($null -ne $task) { $task.Enabled = $true }
+}
+
+function Unregister-AgentSetupUpdateTask {
+    $root = Get-AgentSetupTaskRoot
+    try { $folder = $root.GetFolder($script:AgentUpdateTaskFolder) } catch { return }
+    if ($null -ne (Get-AgentSetupUpdateTask)) { $folder.DeleteTask($script:AgentUpdateTaskName, 0) }
+    if ($folder.GetTasks(1).Count -eq 0 -and $folder.GetFolders(0).Count -eq 0) { $root.DeleteFolder($script:AgentUpdateTaskFolder, 0) }
+}
+
 # Fresh: nothing of SentinelAI Agent and no Agent service. Installed: this product's receipt. Anything else is never touched.
 function Get-AgentSetupState {
     param($Locations)
@@ -39,12 +109,18 @@ function Get-AgentSetupState {
 function Remove-AgentSetupInstallation {
     param($Locations)
     $failed = $false
+    # The SYSTEM update task is held first, so it never replaces the Agent while its service and code are removed.
+    $suspended = Suspend-AgentSetupUpdateTask
     if ($null -ne (Get-PilotService)) {
         # The pilot uninstall proves the registered service is the one its receipt in this data directory owns.
         try { [void](Invoke-PilotInstall -Component UninstallAgent -CodeDirectory $Locations.AgentCode -DataDirectory $Locations.AgentData -TimeoutSeconds 60) }
         catch { $failed = $true }
     }
-    if ($null -ne (Get-PilotService)) { throw 'The Agent service could not be removed.' }
+    if ($null -ne (Get-PilotService)) {
+        if ($suspended) { Resume-AgentSetupUpdateTask }
+        throw 'The Agent service could not be removed.'
+    }
+    Unregister-AgentSetupUpdateTask
     Unregister-SetupApps -Key SentinelAIAgent
     Assert-PilotTrustedPath -Path $Locations.CodeRoot -Tree
     Assert-PilotTrustedPath -Path $Locations.DataRoot -Tree -AllowServiceWrite
@@ -76,6 +152,8 @@ function Install-AgentSetupInstallation {
         Write-PilotProtectedFile -Path (Join-Path $locations.SetupData 'public-key.pem') -Content ([IO.File]::ReadAllText($root)) -Kind Receipt
         Write-SetupProgress 'updater'
         Install-SetupAuxiliaryCode -Source (Join-Path $bundle 'updater') -Destination $locations.UpdaterCode -Executable 'SentinelAI.Updater.exe'
+        # Registered before the Agent first starts, so the task's own creation is not reported as a finding.
+        Register-AgentSetupUpdateTask $locations
         Write-SetupProgress 'apps'
         $installer = Install-SetupCachedInstaller -Source (Join-Path $Request.workDirectory 'installer\setup.exe') -Directory $locations.InstallerCode -Name 'SentinelAI-Agent-Setup.exe'
         Register-SetupApps -Key SentinelAIAgent -DisplayName 'SentinelAI Agent' -Version $Request.version -Installer $installer `

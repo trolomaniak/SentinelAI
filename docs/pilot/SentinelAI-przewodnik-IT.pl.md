@@ -9,7 +9,7 @@
 | **Core** | Komputer centralny, usługa Windows `SentinelAICore` („SentinelAI Local Core”), konto `NT SERVICE\SentinelAICore`, start automatyczny opóźniony | Odbiera dane od Agentów, ocenia reguły, przechowuje alerty, ryzyko i licencję pilotażową, obsługuje Desktop. |
 | **Desktop** | Tylko komputer centralny, działa jako zalogowany użytkownik Windows | Aplikacja administracyjna: Devices, Alerts, Risk, Reports, Settings. Logujesz się kontem administratora SentinelAI utworzonym podczas instalacji. |
 | **Agent** | Każdy komputer, także centralny; usługa Windows `SentinelAIAgent` („SentinelAI Endpoint Agent”), konto `NT AUTHORITY\LocalService`, start automatyczny | Odczytuje inwentarz komputera, ustawienia i stan zabezpieczeń oraz wybrane zdarzenia Windows i wysyła je do Core. Zapisuje tylko własne pliki stanu i nigdy nie zmienia ustawień Windows ani Waszych plików. |
-| **Updater** | Instalowany razem z Core i z każdym Agentem | Klient weryfikacji paczek używający tylko kluczy publicznych. Podczas instalacji, aktualizacji i naprawy instalator weryfikuje podpisane paczki własną wbudowaną kopią. Niczego nie pobiera. |
+| **Updater** | Instalowany razem z Core i z każdym Agentem | Klient weryfikacji paczek używający tylko kluczy publicznych. Podczas instalacji, aktualizacji i naprawy instalator weryfikuje podpisane paczki własną wbudowaną kopią. Na pozostałych komputerach zadanie harmonogramu `\SentinelAI\SentinelAI Agent Update` uruchamia go jako SYSTEM, aby zainstalować nowszego Agenta (punkt 8). Niczego nie pobiera. |
 
 **Lokalizacje danych**
 
@@ -23,7 +23,7 @@
 | `%ProgramFiles%\SentinelAI Agent\…`, `%ProgramData%\SentinelAI Agent\…` | Na pozostałych komputerach: Agent, Updater, zainstalowana kopia instalatora Agenta, konfiguracja Agenta i jego dane uwierzytelniające chronione przez DPAPI. |
 | `LocalMachine\My`, certyfikat o przyjaznej nazwie „SentinelAI Core local network” (podmiot: nazwa komputera) | Własny certyfikat TLS Core dla sieci lokalnej. Klucz prywatny jest nieeksportowalny i dostępny tylko dla konta usługi Core, SYSTEM i Administratorów. |
 
-Wszystkie dane zostają na komputerze centralnym. Core w wersji pilotażowej nie nawiązuje połączeń wychodzących: nie ma usługi w chmurze, serwera licencji, telemetrii do dostawcy ani automatycznych aktualizacji.
+Wszystkie dane zostają na komputerze centralnym. Core w wersji pilotażowej nie nawiązuje połączeń wychodzących: nie ma usługi w chmurze, serwera licencji, telemetrii do dostawcy ani aktualizacji z internetu. Agenci aktualizują się wyłącznie z komputera centralnego (punkt 8).
 
 **Ustawienia Windows, które instalator zmienia dla Agenta**
 
@@ -173,15 +173,17 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
 
 ## 8. Aktualizacje i naprawa
 
-- Nie ma automatycznych aktualizacji. Dostawca dostarcza nowszy `SentinelAI-Setup.exe` z tej samej linii wydań, podpisany tym samym kluczem.
+- Komputer centralny nie aktualizuje się automatycznie. Dostawca dostarcza nowszy `SentinelAI-Setup.exe` z tej samej linii wydań, podpisany tym samym kluczem.
 - Aby **zaktualizować**, zamknij Desktop, uruchom nowszy instalator na komputerze centralnym i wybierz **Upgrade**. Instalator weryfikuje podpisaną paczkę, wymienia razem Core, Agenta komputera centralnego, Desktop i Updater, a jeśli nowa wersja nie uruchomi się poprawnie, automatycznie przywraca poprzednią. Dane, konto administratora, rejestracje, klucz pilotażowy i certyfikat Core zostają zachowane.
 - Aby **naprawić**, uruchom instalator tej samej wersji i wybierz **Repair**. Odtwarza to także regułę zapory, jeśli została usunięta lub zmieniona.
 - Starszy instalator pozwala tylko odinstalować; nie obniża wersji.
 - Instalacja wykonana wcześniejszym instalatorem dawała też kontu Windows, które ją zainstalowało, pełną kontrolę nad folderami Core. Pierwsza aktualizacja, naprawa lub dezinstalacja, uruchomiona przez dowolnego administratora, usuwa ten dostęp.
-- **Agentów na pozostałych komputerach** nie można w pilotażu zaktualizować w miejscu: instalator Agenta odrzuca komputer, na którym Agent już jest (kod wyjścia 7). Aby zainstalować nowszego Agenta:
-  1. Odinstaluj starego Agenta.
-  2. Zainstaluj nowy instalator Agenta z nowym kodem. Komputer pojawi się wtedy jako nowe urządzenie.
-  3. Usuń stary wpis w Desktopie.
+- **Agenci na pozostałych komputerach aktualizują się automatycznie** z komputera centralnego po jego aktualizacji:
+  - Każdy Agent sprawdza Core minutę po uruchomieniu, a potem co godzinę, i pobiera nowszego, podpisanego Agenta do `%ProgramData%\SentinelAI Agent\Agent\update`.
+  - Zadanie harmonogramu `\SentinelAI\SentinelAI Agent Update` (SYSTEM, co godzinę i 5 minut po starcie komputera) weryfikuje go kluczem przypiętym podczas instalacji, wymienia Agenta i przywraca poprzedniego, jeśli nowy nie działa stabilnie. Wydanie wycofane trzy razy nie jest instalowane ponownie.
+  - Komputer pozostaje tym samym urządzeniem z historią; Desktop pokazuje nową wersję Agenta w szczegółach urządzenia, zwykle w ciągu dwóch godzin.
+  - Aby zainstalować od razu, po pobraniu uruchom w PowerShell z uprawnieniami administratora `Start-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Agent Update'`. Ostatni wynik zadania 0 oznacza brak aktualizacji lub instalację; 3 odrzucenie; 4 przywrócenie poprzedniego Agenta; 5 nieudane przywrócenie, ponawiane przy następnym uruchomieniu.
+  - Updater i zainstalowana kopia instalatora Agenta na tych komputerach zostają w zainstalowanej wersji. Instalator Agenta nadal odrzuca komputer, na którym Agent już jest (kod wyjścia 7).
 
 ## 9. Rozwiązywanie problemów
 
@@ -229,7 +231,7 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
   - Agent działa jako LocalService i tylko odczytuje dane; zapisuje wyłącznie własny stan i nigdy nie zmienia ustawień Windows ani Waszych plików. Jego własny SID usługi może czytać dziennik Zabezpieczenia, a żadnego innego dziennika ani obiektu (sekcja 1).
   - Core działa na własnym wirtualnym koncie usługi.
   - Foldery programu i danych są zapisywalne tylko dla Administratorów i SYSTEM, a dla każdej usługi tylko tam, gdzie zapisuje własny stan. Żaden folder nie daje osobnego dostępu kontu Windows, które zainstalowało SentinelAI, więc programy tego konta uruchomione bez podniesienia uprawnień nie mogą zmienić tego, co uruchamia Core lub Agent, a instalację może konserwować dowolny administrator.
-- **Podpisane paczki.** Instalator weryfikuje podpis i skrót każdej paczki kluczem publicznym wbudowanym w instalator i wymienia kod programu transakcyjnie, z automatycznym wycofaniem zmian.
+- **Podpisane paczki.** Instalator weryfikuje podpis i skrót każdej paczki kluczem publicznym wbudowanym w instalator i wymienia kod programu transakcyjnie, z automatycznym wycofaniem zmian. Automatyczne aktualizacje Agenta weryfikuje na każdym komputerze SYSTEM kluczem przypiętym podczas instalacji; Agent tylko je pobiera i nie może niczego zainstalować.
 - **Dostęp administracyjny.** Desktop wymaga konta administratora SentinelAI utworzonego podczas instalacji.
 - **Minimum danych.**
   - Zbierane są tylko stałe, wymienione wartości i pola zdarzeń.

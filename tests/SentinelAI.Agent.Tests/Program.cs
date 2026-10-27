@@ -89,6 +89,7 @@ try
     await LocalNetworkTrustTests.RunAsync(Path.Combine(testDirectory, "local-network"));
     await PostureMonitorTests.RunAsync(Path.Combine(testDirectory, "posture"));
     await SecurityEventPipelineTests.RunAsync(Path.Combine(testDirectory, "security-events"));
+    await AgentUpdateTests.RunAsync(Path.Combine(testDirectory, "agent-update"));
     var telemetryChecks = await EndpointTelemetryTests.RunAsync(Path.Combine(testDirectory, "telemetry"));
     Console.WriteLine($"Endpoint telemetry tests passed ({telemetryChecks} checks: contract, normalization, bounded " +
                       "collection, delivery schedule and real Core delivery).");

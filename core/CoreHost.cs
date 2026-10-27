@@ -108,6 +108,7 @@ public static class CoreHost
         builder.Services.AddSingleton<LicenseVerificationService>();
         builder.Services.AddSingleton<LicenseStateStore>();
         builder.Services.AddSingleton(PilotLicenseOptions.Load(builder.Configuration));
+        builder.Services.AddSingleton(AgentUpdatePackage.Load(builder.Configuration));
         builder.Services.AddSingleton<LicenseClock>();
         builder.Services.AddSingleton<ILicenseLeaseClient, LicenseLeaseClient>();
         builder.Services.AddSingleton<LicenseStateService>();
@@ -185,6 +186,16 @@ public static class CoreHost
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                }));
+            // Agents check for an update hourly and fetch the package at most once per release.
+            options.AddPolicy("agent-update", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0,
                     AutoReplenishment = true
@@ -507,6 +518,41 @@ public static class CoreHost
             .AllowAnonymous()
             .RequireRateLimiting("security-telemetry")
             .WithMetadata(new RequestSizeLimitAttribute(EndpointTelemetryContract.MaxRequestBytes));
+
+        // MVP-7: this release's signed Agent package for enrolled Agents. Core serves it unchanged; the Agent
+        // computer's SYSTEM updater verifies its signature and version before installing it.
+        app.MapGet("/api/agent/update/manifest", async (
+                HttpContext context,
+                EnrollmentStore enrollments,
+                AgentUpdatePackage update,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (!TryReadAgentCredential(context.Request.Headers.Authorization.ToString(), out var endpointId, out var credential) ||
+                    !await enrollments.AuthenticateEndpointAsync(endpointId, credential, cancellationToken))
+                    return Results.Unauthorized();
+                var manifest = await update.ReadManifestAsync(cancellationToken);
+                return manifest is null ? Results.NotFound() : Results.Bytes(manifest, "application/json");
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting("agent-update");
+
+        app.MapGet("/api/agent/update/package", async (
+                HttpContext context,
+                EnrollmentStore enrollments,
+                AgentUpdatePackage update,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (!TryReadAgentCredential(context.Request.Headers.Authorization.ToString(), out var endpointId, out var credential) ||
+                    !await enrollments.AuthenticateEndpointAsync(endpointId, credential, cancellationToken))
+                    return Results.Unauthorized();
+                return update.PackagePath is { } path ? Results.File(path, "application/zip") : Results.NotFound();
+            })
+            .AllowAnonymous()
+            .RequireRateLimiting("agent-update");
 
         app.MapPost("/api/auth/login", async (
                 LoginRequest? request,
