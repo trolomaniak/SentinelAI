@@ -517,7 +517,20 @@ try {
         $desktop.Dispose()
     }
     $apps = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI'
-    Wait-SetupAcceptance { [string](Get-ItemProperty -LiteralPath $apps -ErrorAction SilentlyContinue).DisplayVersion -ceq '1.3.0' } 'The quiet upgrade did not complete.' $script:TimeoutSeconds
+    try {
+        Wait-SetupAcceptance { [string](Get-ItemProperty -LiteralPath $apps -ErrorAction SilentlyContinue).DisplayVersion -ceq '1.3.0' } 'The quiet upgrade did not complete.' $script:TimeoutSeconds
+    } catch {
+        # Fixed flags and versions only, as in every Setup diagnostic.
+        $programData = [Environment]::GetFolderPath('CommonApplicationData')
+        $setupProcesses = @(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 15 | Where-Object {
+            [string]$_.ExecutablePath -like ($programData + '\SentinelAI-Setup*') }).Count
+        $runs = @(Get-ChildItem -LiteralPath (Join-Path $programData 'SentinelAI-Setup\central-update') -Directory -Force -ErrorAction SilentlyContinue).Count
+        $receipt = try { [string](Get-Content -Raw -LiteralPath (Join-Path $coreData 'pilot-installation.json') | ConvertFrom-Json).version } catch { 'unreadable' }
+        throw ('The quiet upgrade did not complete. SetupProcessesRunning={0}; RunDirectories={1}; CoreServiceRunning={2}; AgentServiceRunning={3}; CoreReceiptVersion={4}; AppsVersion={5}.' -f
+            $setupProcesses, $runs, ([string](Get-SetupService 'SentinelAICore').State -ceq 'Running'), ([string](Get-SetupService 'SentinelAIAgent').State -ceq 'Running'),
+            $(if ($receipt -cmatch '\A[0-9]{1,5}(\.[0-9]{1,5}){2}\z') { $receipt } else { 'other' }),
+            $(if ([string](Get-ItemProperty -LiteralPath $apps -ErrorAction SilentlyContinue).DisplayVersion -cmatch '\A[0-9]{1,5}(\.[0-9]{1,5}){2}\z') { (Get-ItemProperty -LiteralPath $apps).DisplayVersion } else { 'other' }))
+    }
     Open-LifecycleCore; Wait-ExactEndpoint $endpointId $since
     Assert-LifecycleVersion '1.3.0'; Assert-LifecyclePreserved
     Assert-LifecycleAcls
