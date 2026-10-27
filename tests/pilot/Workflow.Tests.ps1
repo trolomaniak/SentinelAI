@@ -80,6 +80,9 @@ function New-Fixture {
                 StartName = 'NT AUTHORITY\LocalService'; State = 'Stopped'
             }
         }
+        # The Security log entry and audit policy are native Windows boundaries (Setup acceptance covers them).
+        function script:Grant-PilotSecurityLogAccess { $script:TestState.Events.Add('grant-security-log') }
+        function script:Revoke-PilotSecurityLogAccess { $script:TestState.Events.Add('revoke-security-log') }
         function script:Start-PilotService {
             $script:TestState.Events.Add('start')
             if ($script:TestState.FailStart) { throw 'Synthetic start failure.' }
@@ -191,6 +194,18 @@ try {
     Assert-Test ($scArguments -contains 'SentinelAIAgent') 'Registration used an unexpected service name.'
     Assert-Test ($scArguments -contains 'NT AUTHORITY\LocalService') 'Registration did not fix the LocalService account.'
     Assert-Test ($scArguments -contains $imagePath) 'Registration changed the correctly quoted ImagePath.'
+    # Removal undoes the Security log access before deleting the service, so a failed removal is retried whole.
+    $removalModule = Import-Module $modulePath -Force -DisableNameChecking -PassThru
+    $removal = New-Object 'System.Collections.Generic.List[string]'
+    & $removalModule {
+        param($events)
+        $script:RemovalEvents = $events
+        function script:Revoke-PilotSecurityLogAccess { $script:RemovalEvents.Add('revoke') }
+        function script:Invoke-PilotSc { param([string[]]$Arguments) $script:RemovalEvents.Add($Arguments -join ' ') }
+        function script:Get-PilotService { return $null }
+    } $removal
+    Remove-PilotService
+    Assert-Test (($removal -join '|') -ceq 'revoke|delete SentinelAIAgent') 'Removal did not revoke the Security log access before deleting the service.'
 
     $fixture = New-Fixture
     Assert-Rejected { Assert-PilotPathLayout -CodeDirectory $fixture.State.CodeDirectory -DataDirectory $fixture.State.CodeDirectory } 'Equal code and state paths were accepted.'

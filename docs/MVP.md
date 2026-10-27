@@ -20,6 +20,8 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 | License | Free signed pilot key, verified offline, valid for a chosen 1–365 days (typically 30–90), with no endpoint limit and no license server | MVP-3 |
 | Pilot end | Monitoring continues; Desktop asks the company to get in touch and offers uninstallation | MVP-3 |
 | Documentation | For the business and for IT, in Polish and English, plus a release script with checksums and a two-computer test checklist | MVP-4 |
+| Single delivery | The two installers are the only packages; no browser dashboard or manual installation | MVP-5 |
+| Detection | Works on Windows in any display language; Setup lets the Agent read the Security log and enables the auditing of new scheduled tasks | MVP-6 |
 
 ## Central Core (MVP-1)
 
@@ -61,6 +63,12 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
   - Windows CI runs it with development keys, and the native Setup and Agent Setup acceptance test its installers.
 - [Pilot test checklist](pilot/PILOT-TEST-CHECKLIST.md) (internal): central installation, adding a second computer, an alert, a pilot key near and after its end, removing a computer, and both uninstalls, on one Windows 10 and one Windows 11 computer in one network.
 
+## Detection on every Windows (MVP-6)
+
+- The Agent recognizes the Service Control Manager's service-type and start-type texts (7045, 7040) in every installed display language through services.exe's own messages, so the driver-installation and protection-service rules work on Polish and every other Windows.
+- Setup and Agent Setup give the Agent service its own SID (`NT SERVICE\SentinelAIAgent`) with read-only access to the Security log, and turn on success auditing of Other Object Access Events (4698). Repair and upgrade keep both; uninstall removes the access and restores the audit setting it found.
+- Details: [Security event collection](SECURITY-EVENTS.md#channel-access-and-localservice).
+
 ## Decisions and known limitations
 
 - The installers are not code-signed for the pilot because of the cost. Windows SmartScreen warns on first run. Smart App Control or a company antivirus/EDR may block unsigned programs. Do not attach the installer to e-mails: link to a download page over HTTPS that publishes SHA-256 checksums, or install together with the company.
@@ -70,7 +78,7 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 - The pilot is not independently security-audited (TASK-043) and makes no compliance claims (TASK-044).
 - Pilot releases are signed with the owner's own update key in the existing `development` trust environment (key IDs `dev-…`); Setup, the worker and the Updater accept nothing else (owner decision of 2026-10-26). A production signing environment is later work.
 - Agents must be in the central computer's subnet: the firewall rule allows only the local subnet on the Domain and Private profiles.
-- The Agent runs as LocalService, which cannot read the Windows Security log, so the detections based on it (failed and RDP sign-ins, scheduled task creation, Security log clearing) do not work in the standard installation. Two System detections need English Windows texts (driver installation, protection service start type) and do not fire on Polish Windows.
+- A domain Group Policy for audit policy or the Security log's access takes precedence over what Setup sets (MVP-6).
 - Agents on other computers cannot be upgraded in place: Agent Setup refuses a computer with an Agent. A newer Agent means uninstall, a new code and removing the old device entry.
 - Maintenance of the central installation (repair, upgrade, uninstall) can be run by any Windows administrator. Core's program and data folders, like every other folder Setup installs, are writable only by Administrators and SYSTEM (and Core's service where it writes its own state), never by the installing account's non-elevated programs. An installation made by an earlier Setup granted the installing account full control; the first maintenance by any administrator removes it (see `.agent/DECISIONS.md`).
 - There are no automatic updates, and the user interface is in English only.

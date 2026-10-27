@@ -332,7 +332,7 @@ function Start-SetupLifecycleServices {
     if (Test-SetupLifecycleRetainedBaseline $Locations $owned) {
         # Rollback of a retained-data reinstall restores the uninstalled state,
         # including removal of registrations created only for the failed candidate.
-        if ($null -ne (Get-PilotService)) { Remove-PilotService }
+        if ($null -ne (Get-PilotService)) { Remove-PilotService } else { Revoke-PilotSecurityLogAccess }
         if ($null -ne (Get-CoreService)) { Remove-CoreService }
         Remove-CoreServiceFirewallRule
         Sync-SetupLifecycleReceipts $Locations
@@ -355,7 +355,9 @@ function Start-SetupLifecycleServices {
         Register-PilotService -ExecutablePath (Join-Path $Locations.AgentCode 'SentinelAI.Agent.exe') -ConfigurationPath (Join-Path $Locations.AgentData 'pilot-config.json')
     }
     Set-SetupLifecycleFirewallRule $Locations $owned
-    # Data/configuration/DPAPI files are never replaced or re-enrolled.
+    # Data/configuration/DPAPI files are never replaced or re-enrolled. Repair and upgrade keep (or add) the
+    # Agent's Security log access and audit setting.
+    Grant-PilotSecurityLogAccess
     Start-CoreService -TimeoutSeconds 30
     Start-PilotService -TimeoutSeconds 30
 }
@@ -410,7 +412,7 @@ function Uninstall-SetupLifecycleInstallation {
     $marker = @{ format = 'sentinelai-setup-retained-v1'; version = $owned.Core.version }
     Set-SetupLifecycleReceipt -Path (Join-Path $Locations.SetupData 'retained-installation.json') -Content ($marker | ConvertTo-Json -Compress)
     Stop-SetupLifecycleServices $Locations
-    if ($null -ne (Get-PilotService)) { Remove-PilotService }
+    if ($null -ne (Get-PilotService)) { Remove-PilotService } else { Revoke-PilotSecurityLogAccess }
     if ($null -ne (Get-CoreService)) { Remove-CoreService }
     Remove-CoreServiceFirewallRule
     # All roots were fixed, bounded, link-free and proven owned before stopping.

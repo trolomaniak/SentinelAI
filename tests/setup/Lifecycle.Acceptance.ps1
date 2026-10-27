@@ -454,6 +454,7 @@ try {
     foreach ($path in $damaged.Keys) { Assert-SetupAcceptance ((Read-SetupStateDigest $path) -ceq $damaged[$path]) 'Repair did not restore an actual damaged program assembly.' }
     Assert-LifecycleAcls
     Assert-LifecycleLocalNetwork
+    Assert-SetupSecurityLogAccess $true 'Upgrade, rollback and repair'
     # MVP-2: Windows Apps shows the upgraded version and opens this uninstall flow with the installed Setup copy.
     $apps = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI'
     $installedSetup = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'SentinelAI Setup\SentinelAI-Setup.exe'
@@ -465,6 +466,7 @@ try {
         -not (Test-Path -LiteralPath (Split-Path -Parent $installedSetup))) 'Uninstall retained the Windows Apps entry or the installed Setup.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $shortcutRoot)) 'Uninstall retained owned code or Start Menu shortcuts.'
     Assert-SetupAcceptance (Test-Path -LiteralPath $databasePath -PathType Leaf) 'Default uninstall deleted security history.'
+    Assert-SetupSecurityLogAccess $false 'Uninstall with data retained'
     Assert-LifecyclePreserved
     # Uninstall removes the firewall rule; retained data keeps the certificate every Agent pins.
     Assert-LifecycleNoFirewallRule
@@ -477,14 +479,17 @@ try {
     Assert-LifecycleVersion '1.1.0'; Assert-LifecyclePreserved
     Assert-LifecycleAcls
     Assert-LifecycleLocalNetwork
+    Assert-SetupSecurityLogAccess $true 'Restore'
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall'
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Restored services were not removed by a subsequent owned uninstall.'
+    Assert-SetupSecurityLogAccess $false 'Second uninstall'
     Assert-LifecyclePreserved
     Assert-LifecycleNoFirewallRule
     Invoke-LifecycleSetup $UpgradeExecutablePath 'Uninstall' $false $true
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $dataRoot)) 'Explicit confirmed data removal retained owned application data.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $shortcutRoot) -and
         $null -eq (Get-SetupService 'SentinelAICore') -and $null -eq (Get-SetupService 'SentinelAIAgent')) 'Explicit removal recreated code, shortcuts or services.'
+    Assert-SetupSecurityLogAccess $false 'Confirmed data removal'
     # Confirmed data removal deletes Core's certificate and its machine key; no rule remains.
     Assert-LifecycleNoFirewallRule
     Assert-SetupAcceptance (@(Get-SetupLocalNetworkCertificate $lifecyclePin).Count -eq 0 -and -not [string]::IsNullOrEmpty($lifecycleKeyName) -and

@@ -42,6 +42,7 @@ internal static class SecurityEventNativeAcceptance
         }
 
         PrintChannelAccess();
+        VerifyServiceControlManagerText();
         var cleanupFailures = new List<string>();
         await DeleteStaleTestLogsAsync(cleanupFailures);
         Ensure(cleanupFailures.Count == 0, "A test-only event log from an earlier run could not be deleted.");
@@ -133,15 +134,14 @@ internal static class SecurityEventNativeAcceptance
                         "The marker service installation was not reflected in Core.", Latency);
                     var latency = stopwatch.ElapsedMilliseconds;
                     var rows = await ServiceRowsAsync(events, endpointId, serviceB);
-                    // SCM inserts the type and start type as display text in the system language.
-                    var english = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName == "en";
+                    // SCM inserts the type and start type as display text in the system language; the Agent
+                    // recognizes it through services.exe's messages in every installed language.
                     Ensure(rows.Count == 1 && rows[0].ServiceInstall is
                            {
                                ImageFileName: "cmd.exe", ImageLocation: ServiceImageLocations.Windows,
-                               AccountKind: ServiceAccountKinds.LocalSystem
-                           } install &&
-                           (install.ServiceType == ServiceTypes.UserModeService || !english && install.ServiceType is null) &&
-                           install.StartType is ServiceStartTypes.Demand or null,
+                               AccountKind: ServiceAccountKinds.LocalSystem, ServiceType: ServiceTypes.UserModeService,
+                               StartType: ServiceStartTypes.Demand
+                           },
                         "The marker service installation was not normalized as expected.");
                     recordB = rows[0].RecordId;
                     Ensure((await ServiceRowsAsync(events, endpointId, serviceA)).Count == 0,
@@ -710,6 +710,117 @@ internal static class SecurityEventNativeAcceptance
 
     private static Task WaitForAsync(Func<bool> condition, string message, TimeSpan timeout) =>
         WaitForAsync(() => Task.FromResult(condition()), message, timeout);
+
+    /// <summary>
+    /// Each SCM message ID must give its English text in en-US, the runner's language. On a mismatch the
+    /// message tables of the en-US resources are searched, and every ID whose text is one of the expected
+    /// texts is printed, so the table can be corrected from this output.
+    /// </summary>
+    private static void VerifyServiceControlManagerText()
+    {
+        var module = LoadLibraryExW(Path.Combine(Environment.SystemDirectory, "services.exe"),
+            IntPtr.Zero, 0x22);
+        Ensure(module != IntPtr.Zero, "services.exe could not be loaded as a resource file.");
+        var wrong = new List<string>();
+        try
+        {
+            foreach (var message in ServiceControlManagerText.Messages)
+            {
+                var text = ServiceControlManagerText.Format(module, message.Id, 0x0409);
+                if (text is null || ServiceControlManagerText.Key(text) != ServiceControlManagerText.Key(message.English))
+                    wrong.Add($"{message.English} (0x{message.Id:X8})");
+            }
+        }
+        finally
+        {
+            FreeLibrary(module);
+        }
+
+        if (wrong.Count > 0)
+        {
+            var expected = ServiceControlManagerText.Messages.Select(message => ServiceControlManagerText.Key(message.English))
+                .ToHashSet(StringComparer.Ordinal);
+            var directory = Path.Combine(Environment.SystemDirectory, "en-US");
+            foreach (var file in Directory.EnumerateFiles(directory, "*.mui").OrderBy(file => file, StringComparer.Ordinal))
+            {
+                var found = MessageTable(file).Where(entry => expected.Contains(ServiceControlManagerText.Key(entry.Text))).ToList();
+                if (found.Select(entry => ServiceControlManagerText.Key(entry.Text)).Distinct().Count() < 5) continue;
+                Console.WriteLine($"Native event SCM text candidates in {Path.GetFileName(file)}: " +
+                                  string.Join("; ", found.Select(entry => $"0x{entry.Id:X8}={entry.Text.Trim()}")));
+            }
+        }
+
+        Ensure(wrong.Count == 0, "SCM message IDs do not give their English text: " + string.Join(", ", wrong) + ".");
+        var loaded = ServiceControlManagerText.Load();
+        Ensure(ServiceControlManagerText.Messages.All(message => message.StartType
+                ? loaded.StartType(message.English) == message.Value
+                : loaded.ServiceType(message.English) == message.Value),
+            "The loaded SCM texts do not recognize English.");
+        Console.WriteLine($"Native event SCM texts: {ServiceControlManagerText.Messages.Count} message IDs verified, " +
+                          $"{loaded.Count} texts recognized in {CultureInfo.InstalledUICulture.Name}.");
+    }
+
+    /// <summary>Every entry of a module's message tables (RT_MESSAGETABLE), read as a resource file.</summary>
+    private static List<(uint Id, string Text)> MessageTable(string path)
+    {
+        var entries = new List<(uint Id, string Text)>();
+        var module = LoadLibraryExW(path, IntPtr.Zero, 0x22);
+        if (module == IntPtr.Zero) return entries;
+        try
+        {
+            var resource = FindResourceW(module, 1, 11);
+            if (resource == IntPtr.Zero) return entries;
+            var size = SizeofResource(module, resource);
+            var data = LockResource(LoadResource(module, resource));
+            if (data == IntPtr.Zero || size < 4) return entries;
+            var bytes = new byte[size];
+            System.Runtime.InteropServices.Marshal.Copy(data, bytes, 0, (int)size);
+            var blocks = BitConverter.ToInt32(bytes, 0);
+            for (var block = 0; block < blocks && 4 + block * 12 + 12 <= bytes.Length; block++)
+            {
+                var low = BitConverter.ToUInt32(bytes, 4 + block * 12);
+                var high = BitConverter.ToUInt32(bytes, 8 + block * 12);
+                var offset = BitConverter.ToInt32(bytes, 12 + block * 12);
+                for (var id = low; id <= high && offset + 4 <= bytes.Length; id++)
+                {
+                    var length = BitConverter.ToUInt16(bytes, offset);
+                    var unicode = (BitConverter.ToUInt16(bytes, offset + 2) & 1) != 0;
+                    if (length < 4 || offset + length > bytes.Length) break;
+                    var text = unicode
+                        ? Encoding.Unicode.GetString(bytes, offset + 4, length - 4)
+                        : Encoding.ASCII.GetString(bytes, offset + 4, length - 4);
+                    entries.Add((id, text.TrimEnd('\0')));
+                    offset += length;
+                }
+            }
+        }
+        finally
+        {
+            FreeLibrary(module);
+        }
+
+        return entries;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool FreeLibrary(IntPtr module);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+
+    private static IntPtr FindResourceW(IntPtr module, int name, int type) => FindResourceW(module, (IntPtr)name, (IntPtr)type);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern IntPtr LockResource(IntPtr data);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint SizeofResource(IntPtr module, IntPtr resource);
 
     private static void Ensure(bool condition, string message)
     {

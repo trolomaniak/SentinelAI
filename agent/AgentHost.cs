@@ -52,6 +52,8 @@ public static class AgentHost
                 SecurityEventTimings.From(provider.GetRequiredService<AgentOptions>()).ConfigurationRefresh)
             : new NoEventLogAccess());
         builder.Services.AddSingleton<EventCheckpointStore>();
+        // Read once: the SCM texts of every installed display language, so detection does not depend on English.
+        builder.Services.AddSingleton(_ => ServiceControlManagerText.Load());
         builder.Services.AddSingleton<ISecurityEventUploader, HttpSecurityEventUploader>();
         builder.Services.AddSingleton<SecurityEventPipeline>();
         builder.Services.AddSingleton<IEndpointTelemetrySource>(_ => OperatingSystem.IsWindows()

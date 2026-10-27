@@ -19,7 +19,7 @@ Only what is listed here is implemented today:
 - **Windows Update:** the automatic update setting and when updates were last searched for and installed.
 - **Pending restarts:** whether Windows is waiting for a restart to finish updates.
 - **Risky settings:** for example User Account Control switched off, Remote Desktop without network-level authentication, the old SMB1 file sharing protocol, automatic sign-in, and local administrator accounts.
-- **Security event detections:** for example Microsoft Defender finding malware or being switched off, an event log being cleared, a service or driver installed from an unusual place, or PowerShell flagging a suspicious script. Detections that need the Windows Security log (repeated failed sign-ins, risky Remote Desktop sign-ins, new scheduled tasks and clearing of the Security log) do not work in the standard installation, because the Agent's service account cannot read that log. Two detections read English Windows texts, so on Windows in another language, such as Polish, they do not work: driver installations and changes to how protection services start.
+- **Security event detections:** for example Microsoft Defender finding malware or being switched off, an event log being cleared, a service or driver installed from an unusual place, or PowerShell flagging a suspicious script. This includes detections from the Windows Security log (repeated failed sign-ins, risky Remote Desktop sign-ins, new scheduled tasks and clearing of the Security log): Setup gives the Agent read-only access to that log and turns on the Windows auditing of new scheduled tasks, and uninstalling undoes both. Detections work on Windows in any language, including Polish.
 - **Risk score:** each computer gets a score from 0 to 100 with an explanation, and the company's score is that of its riskiest computer.
 - **Alerts and incidents:** each finding becomes an alert with evidence and a recommended action. You mark it as investigating, accepted or resolved.
 - **Reports:** a security report for a chosen period, saved as an HTML file.
@@ -75,7 +75,7 @@ Alerts are raised for risky settings and detections. The other values, such as p
 
 **Will SentinelAI slow my computers down?** The Agent reads a fixed set of settings and events: a short status message every 30 seconds, the device inventory every six hours and within seconds after a monitored setting changes, the security status every hour, and new events as they happen.
 
-**Does SentinelAI change anything on our computers?** No. It only reads; it never changes Windows settings or your files. Changing a setting or removing a threat is always done by you.
+**Does SentinelAI change anything on our computers?** The Agent only reads; it never changes Windows settings or your files. Changing a setting or removing a threat is always done by you. Setup itself changes only what monitoring needs: the firewall rule on the central computer, and on every computer the Agent's read access to the Security log and the auditing of new scheduled tasks. Uninstalling undoes these changes.
 
 **Do you see our data?** No. Everything stays on your central computer and nothing is sent to us.
 

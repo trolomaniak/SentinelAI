@@ -25,6 +25,16 @@
 
 Wszystkie dane zostają na komputerze centralnym. Core w wersji pilotażowej nie nawiązuje połączeń wychodzących: nie ma usługi w chmurze, serwera licencji, telemetrii do dostawcy ani automatycznych aktualizacji.
 
+**Ustawienia Windows, które instalator zmienia dla Agenta**
+
+Aby Agent mógł czytać zdarzenia potrzebne do wykrywania, oba instalatory zmieniają trzy ustawienia Windows, a naprawa i aktualizacja je zachowują:
+
+- Usługa `SentinelAIAgent` dostaje własny identyfikator SID usługi, `NT SERVICE\SentinelAIAgent` (typ SID *unrestricted*).
+- Ten SID dostaje prawo tylko do odczytu dziennika **Zabezpieczenia** (Security) Windows i do niczego więcej. Konta, członkostwo w grupach ani inne dzienniki się nie zmieniają.
+- Podkategoria **Inspekcja innych zdarzeń dostępu do obiektów** (Audit Other Object Access Events) dostaje inspekcję **sukcesów**, więc Windows zapisuje tworzenie zaplanowanych zadań (zdarzenie 4698). Inspekcja niepowodzeń pozostaje bez zmian.
+
+Odinstalowanie Agenta albo instalacji centralnej usuwa dostęp do dziennika Zabezpieczenia i wyłącza inspekcję sukcesów, jeśli przed instalacją była wyłączona. Zasady grupy domeny, które ustawiają zasady inspekcji albo dostęp do dziennika Zabezpieczenia, mają pierwszeństwo i mogą cofnąć te ustawienia przy następnym odświeżeniu; jeśli zarządzacie nimi centralnie, ustawcie tam te same wartości.
+
 ## 2. Sieć
 
 - **Jeden port.** Core nasłuchuje na porcie TCP **5443** (HTTPS) na każdym interfejsie IPv4 komputera centralnego, wyłącznie dla Agentów. Wszystkie funkcje administracyjne, logowanie i Desktop są dostępne tylko pod `http://127.0.0.1:5000`, czyli z samego komputera centralnego. Żądania tych funkcji na porcie 5443 dostają odpowiedź `404`.
@@ -202,8 +212,10 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
   - W programach antywirusowych i EDR dopuść pliki po ich skrócie SHA-256 z `SHA256SUMS.txt`, zgodnie z polityką firmy.
 - Instalator nie wyłącza kontroli aplikacji, trybu ograniczonego języka ani innych zabezpieczeń; jeśli go blokują, zgłasza niepowodzenie.
 
-**Agent zgłasza dziennik Zabezpieczenia jako „access denied”**
-- To oczekiwane. Agent działa jako LocalService, które nie może czytać dziennika Zabezpieczenia Windows, więc oparte na nim wykrycia (nieudane logowania i logowania przez Pulpit zdalny, tworzenie zaplanowanych zadań, wyczyszczenie dziennika Zabezpieczenia) nie działają w standardowej instalacji. Wykrycia z dzienników System, PowerShell i Microsoft Defender działają, z wyjątkiem dwóch, które odczytują angielskie teksty Windows i dlatego działają tylko w angielskim Windows: instalacji sterowników i zmiany sposobu uruchamiania usług ochrony.
+**Agent zgłasza dziennik Zabezpieczenia jako „access denied” albo nowe zaplanowane zadania nie dają alertu**
+- Instalator daje Agentowi prawo odczytu dziennika Zabezpieczenia i włącza inspekcję tworzenia zaplanowanych zadań (sekcja 1). Na komputerze centralnym uruchom instalator i wybierz **Repair**; na innym komputerze zainstaluj Agenta ponownie.
+- Jeśli zasady grupy domeny ustawiają **Konfiguruj dostęp do dziennika** (Configure log access) dla dziennika Zabezpieczenia, dodaj tam odczyt dla `NT SERVICE\SentinelAIAgent`. Jeśli ustawiają zaawansowane zasady inspekcji, włącz tam inspekcję sukcesów dla **Inspekcja innych zdarzeń dostępu do obiektów**.
+- `auditpol /get /subcategory:{0CCE9227-69AE-11D9-BED3-505054503030}` pokazuje bieżące ustawienie w Windows w każdym języku.
 
 ## 10. Podsumowanie modelu bezpieczeństwa
 
@@ -214,7 +226,7 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
   - Kody nigdy nie trafiają do dzienników, a instalator Agenta sprawdza przypięcie, zanim wyśle token.
   - Dane uwierzytelniające każdego Agenta są chronione przez DPAPI jego konta LocalService.
 - **Najmniejsze uprawnienia.**
-  - Agent działa jako LocalService i tylko odczytuje dane; zapisuje wyłącznie własny stan i nigdy nie zmienia ustawień Windows ani Waszych plików.
+  - Agent działa jako LocalService i tylko odczytuje dane; zapisuje wyłącznie własny stan i nigdy nie zmienia ustawień Windows ani Waszych plików. Jego własny SID usługi może czytać dziennik Zabezpieczenia, a żadnego innego dziennika ani obiektu (sekcja 1).
   - Core działa na własnym wirtualnym koncie usługi.
   - Foldery programu i danych są zapisywalne tylko dla Administratorów i SYSTEM, a dla każdej usługi tylko tam, gdzie zapisuje własny stan. Żaden folder nie daje osobnego dostępu kontu Windows, które zainstalowało SentinelAI, więc programy tego konta uruchomione bez podniesienia uprawnień nie mogą zmienić tego, co uruchamia Core lub Agent, a instalację może konserwować dowolny administrator.
 - **Podpisane paczki.** Instalator weryfikuje podpis i skrót każdej paczki kluczem publicznym wbudowanym w instalator i wymienia kod programu transakcyjnie, z automatycznym wycofaniem zmian.

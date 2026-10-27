@@ -15,6 +15,13 @@ $script:ServiceSid = 'S-1-5-19'
 $script:AdministratorsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'
 $script:TrustedInstallerSid = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+# MVP-6 (owner decision of 2026-10-26): the Agent reads the Security log through its own service SID
+# (NT SERVICE\SentinelAIAgent) only, and Windows audits scheduled task creation (4698) through the
+# "Other Object Access Events" subcategory, named by GUID so it does not depend on the display language.
+$script:AgentServiceSid = 'S-1-5-80-3260565588-2217304288-1438658577-528527895-932542736'
+$script:OtherObjectAccessAudit = [Guid]'0cce9227-69ae-11d9-bed3-505054503030'
+$script:AuditBaselineKey = 'HKLM:\SOFTWARE\SentinelAI\Agent'
+$script:AuditBaselineValue = 'OtherObjectAccessAuditBaseline'
 $script:PilotPrepareTimeoutSeconds = 330
 $script:PilotLocalNetworkPort = 5443
 # Processes that could not be released after a kill (stuck in the kernel) are kept referenced, never disposed.
@@ -90,6 +97,7 @@ function Initialize-PilotNativeHelpers {
     if ('SentinelAI.Pilot.Native' -as [type]) { return }
     Add-Type -TypeDefinition @'
 using System;
+using System.ComponentModel;
 using System.IO;
 using System.Net.Security;
 using System.Runtime.InteropServices;
@@ -107,6 +115,43 @@ namespace SentinelAI.Pilot {
         }
         [DllImport("kernel32.dll", SetLastError=true)]
         private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation information);
+        [StructLayout(LayoutKind.Sequential)] private struct AuditPolicyInformation {
+            public Guid SubCategory; public uint AuditingInformation; public Guid Category;
+        }
+        [DllImport("advapi32.dll", SetLastError=true)]
+        private static extern bool AuditQuerySystemPolicy([In] Guid[] subCategories, uint count, out IntPtr policy);
+        [DllImport("advapi32.dll", SetLastError=true)]
+        private static extern bool AuditSetSystemPolicy([In] AuditPolicyInformation[] policy, uint count);
+        [DllImport("advapi32.dll")] private static extern void AuditFree(IntPtr buffer);
+        [DllImport("ntdll.dll")] private static extern int RtlAdjustPrivilege(int privilege, bool enable, bool currentThread, out bool previous);
+        private static void EnableSecurityPrivilege() {
+            // SeSecurityPrivilege (8): administrators hold it disabled, and the audit policy calls need it enabled.
+            bool previous;
+            if (RtlAdjustPrivilege(8, true, false, out previous) != 0) throw new InvalidOperationException("Cannot enable the security privilege.");
+        }
+        // Success (1) and failure (2) auditing of one subcategory.
+        public static uint GetAuditPolicy(Guid subCategory) {
+            EnableSecurityPrivilege();
+            IntPtr buffer;
+            if (!AuditQuerySystemPolicy(new[] { subCategory }, 1, out buffer)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            try { return ((AuditPolicyInformation)Marshal.PtrToStructure(buffer, typeof(AuditPolicyInformation))).AuditingInformation & 3; }
+            finally { AuditFree(buffer); }
+        }
+        public static void SetAuditPolicy(Guid subCategory, uint value) {
+            value &= 3;
+            // POLICY_AUDIT_EVENT_NONE (4) turns auditing off. If Windows merges rather than replaces the flags,
+            // clearing first still yields exactly the requested value.
+            SetAuditFlags(subCategory, value == 0 ? 4u : value);
+            if (GetAuditPolicy(subCategory) == value) return;
+            SetAuditFlags(subCategory, 4);
+            if (value != 0) SetAuditFlags(subCategory, value);
+            if (GetAuditPolicy(subCategory) != value) throw new InvalidOperationException("The audit policy did not take the requested value.");
+        }
+        private static void SetAuditFlags(Guid subCategory, uint flags) {
+            EnableSecurityPrivilege();
+            var policy = new AuditPolicyInformation { SubCategory = subCategory, AuditingInformation = flags };
+            if (!AuditSetSystemPolicy(new[] { policy }, 1)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
         private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
         public static uint GetLinkCount(string path) {
@@ -594,7 +639,82 @@ function Stop-PilotService {
     } finally { $service.Dispose() }
 }
 
+# Gives the Agent service its own SID and that SID read access to the Security log, and turns on success
+# auditing of "Other Object Access Events". Idempotent, so repair and upgrade keep (or add) it.
+function Grant-PilotSecurityLogAccess {
+    Invoke-PilotSc -Arguments @('sidtype', $script:ServiceName, 'unrestricted')
+    Set-PilotSecurityChannelAccess -Grant $true
+    Initialize-PilotNativeHelpers
+    $current = [SentinelAI.Pilot.Native]::GetAuditPolicy($script:OtherObjectAccessAudit)
+    # The first grant records Windows' own setting; later grants keep that record for uninstall.
+    if ($null -eq (Get-PilotAuditBaseline)) {
+        if (-not (Test-Path -LiteralPath $script:AuditBaselineKey)) { New-Item -Path $script:AuditBaselineKey -Force | Out-Null }
+        New-ItemProperty -LiteralPath $script:AuditBaselineKey -Name $script:AuditBaselineValue -PropertyType DWord -Value ([int]$current) -Force | Out-Null
+    }
+    if (($current -band 1) -eq 0) { [SentinelAI.Pilot.Native]::SetAuditPolicy($script:OtherObjectAccessAudit, ($current -bor 1)) }
+}
+
+# Undoes Grant-PilotSecurityLogAccess: removes the Agent's Security log entry and turns success auditing off
+# again only when Windows had it off before. Idempotent; uninstall calls it before the service is deleted.
+function Revoke-PilotSecurityLogAccess {
+    Set-PilotSecurityChannelAccess -Grant $false
+    $baseline = Get-PilotAuditBaseline
+    if ($null -eq $baseline) { return }
+    Initialize-PilotNativeHelpers
+    $current = [SentinelAI.Pilot.Native]::GetAuditPolicy($script:OtherObjectAccessAudit)
+    if (($baseline -band 1) -eq 0 -and ($current -band 1) -ne 0) {
+        [SentinelAI.Pilot.Native]::SetAuditPolicy($script:OtherObjectAccessAudit, ($current -band 2))
+    }
+    Remove-ItemProperty -LiteralPath $script:AuditBaselineKey -Name $script:AuditBaselineValue -Force
+    foreach ($key in @($script:AuditBaselineKey, (Split-Path -Parent $script:AuditBaselineKey))) {
+        $item = Get-Item -LiteralPath $key
+        if ($item.SubKeyCount -eq 0 -and $item.ValueCount -eq 0) { Remove-Item -LiteralPath $key -Force }
+    }
+}
+
+function Get-PilotAuditBaseline {
+    if (-not (Test-Path -LiteralPath $script:AuditBaselineKey)) { return $null }
+    $value = (Get-ItemProperty -LiteralPath $script:AuditBaselineKey -Name $script:AuditBaselineValue -ErrorAction SilentlyContinue)
+    if ($null -eq $value) { return $null }
+    $baseline = $value.$($script:AuditBaselineValue)
+    if ($baseline -isnot [int] -or $baseline -lt 0 -or $baseline -gt 3) { return $null }
+    return $baseline
+}
+
+# Exactly one read-only (0x1) entry for the Agent's service SID while granted, none otherwise. Other entries
+# of the Security log's access are never changed.
+function Set-PilotSecurityChannelAccess {
+    param([Parameter(Mandatory=$true)][bool]$Grant)
+    $sid = New-Object Security.Principal.SecurityIdentifier($script:AgentServiceSid)
+    $configuration = New-Object Diagnostics.Eventing.Reader.EventLogConfiguration('Security')
+    try {
+        $descriptor = New-Object Security.AccessControl.RawSecurityDescriptor($configuration.SecurityDescriptor)
+        $acl = $descriptor.DiscretionaryAcl
+        if ($null -eq $acl) { throw 'The Security log has no access list.' }
+        $kept = $false
+        $changed = $false
+        for ($index = $acl.Count - 1; $index -ge 0; $index--) {
+            $ace = $acl[$index]
+            if ($ace -isnot [Security.AccessControl.CommonAce] -or -not $ace.SecurityIdentifier.Equals($sid)) { continue }
+            if ($Grant -and -not $kept -and $ace.AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessAllowed -and
+                $ace.AccessMask -eq 1 -and $ace.AceFlags -eq [Security.AccessControl.AceFlags]::None) { $kept = $true; continue }
+            $acl.RemoveAce($index)
+            $changed = $true
+        }
+        if ($Grant -and -not $kept) {
+            $acl.InsertAce($acl.Count, (New-Object Security.AccessControl.CommonAce([Security.AccessControl.AceFlags]::None,
+                [Security.AccessControl.AceQualifier]::AccessAllowed, 1, $sid, $false, $null)))
+            $changed = $true
+        }
+        if ($changed) {
+            $configuration.SecurityDescriptor = $descriptor.GetSddlForm([Security.AccessControl.AccessControlSections]::All)
+            $configuration.SaveChanges()
+        }
+    } finally { $configuration.Dispose() }
+}
+
 function Remove-PilotService {
+    Revoke-PilotSecurityLogAccess
     Invoke-PilotSc -Arguments @('delete', $script:ServiceName)
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do {
@@ -922,7 +1042,7 @@ function Invoke-PilotInstall {
     }
     if ($Component -eq 'UninstallAgent') {
         if ($null -eq $receipt) { throw 'A matching pilot installation receipt is required to uninstall the Agent service.' }
-        if ($null -ne $service) { Stop-PilotService -TimeoutSeconds $TimeoutSeconds; Remove-PilotService }
+        if ($null -ne $service) { Stop-PilotService -TimeoutSeconds $TimeoutSeconds; Remove-PilotService } else { Revoke-PilotSecurityLogAccess }
         return [PSCustomObject]@{ component = 'Agent'; serviceRemoved = $true; dataPreserved = $true; codeDirectory = $CodeDirectory; dataDirectory = $DataDirectory }
     }
     if ([string]::IsNullOrWhiteSpace($BundleDirectory) -or [string]::IsNullOrWhiteSpace($PublicKeyPath) -or
@@ -1008,6 +1128,7 @@ function Invoke-PilotInstall {
                 } finally { $token = $null; $EnrollmentToken = $null }
             }
             if ($null -eq $service) { Register-PilotService -ExecutablePath $executable -ConfigurationPath $configurationPath; $createdService = $true }
+            Grant-PilotSecurityLogAccess
             Start-PilotService -TimeoutSeconds $TimeoutSeconds
             $identity = Wait-PilotAgentEnrollment -DataDirectory $DataDirectory -TimeoutSeconds $TimeoutSeconds
         }

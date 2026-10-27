@@ -96,6 +96,9 @@ function Remove-CoreServiceCertificate { param($Sha256); $script:events.Add('cer
 function Set-SetupLifecycleCodeAcl { param($Locations); }
 function Start-CoreService { param($TimeoutSeconds); $script:events.Add('start-core') }
 function Start-PilotService { param($TimeoutSeconds); $script:events.Add('start-agent') }
+# The Security log entry and audit policy are native Windows boundaries (Setup acceptance covers them).
+function Grant-PilotSecurityLogAccess { $script:events.Add('grant-security-log') }
+function Revoke-PilotSecurityLogAccess { $script:events.Add('revoke-security-log') }
 function Register-CoreService { param($ExecutablePath,$ConfigurationPath); $script:events.Add('register-core') }
 function Register-PilotService { param($ExecutablePath,$ConfigurationPath); $script:events.Add('register-agent') }
 function Set-CoreServiceRecovery { }
@@ -340,7 +343,7 @@ try {
                 $script:events.Clear()
                 Start-SetupLifecycleServices $locations
                 $rule = if ($central) { 'firewall-set:5443:SentinelAI.Core.exe' } else { 'firewall-remove' }
-                Assert-LifecycleTest (($script:events -join ',') -ceq ('register-core,register-agent,' + $rule + ',start-core,start-agent')) 'restoration recreates services and the owned rule before start'
+                Assert-LifecycleTest (($script:events -join ',') -ceq ('register-core,register-agent,' + $rule + ',grant-security-log,start-core,start-agent')) 'restoration recreates services and the owned rule before start'
             }
         }
     }
@@ -349,7 +352,7 @@ try {
     $fixture = New-LifecycleTestFixture -LocalNetwork; $locations = $fixture.Locations
     $fixture.FirewallRule = $null
     Start-SetupLifecycleServices $locations
-    Assert-LifecycleTest (($script:events -join ',') -ceq 'firewall-set:5443:SentinelAI.Core.exe,start-core,start-agent') 'repair restores the owned firewall rule'
+    Assert-LifecycleTest (($script:events -join ',') -ceq 'firewall-set:5443:SentinelAI.Core.exe,grant-security-log,start-core,start-agent') 'repair restores the owned firewall rule and keeps the Security log access'
     $script:events.Clear(); Test-SetupLifecycleHealth $locations
     Assert-LifecycleTest (($script:events -join ',') -ceq 'health:5443') 'health requires the local-network listener'
     $script:events.Clear(); $fixture.CertificatePresent = $false; Test-SetupLifecycleHealth $locations
@@ -363,7 +366,7 @@ try {
     New-SetupLifecycleContext $locations (New-LifecycleTestRequest $fixture '1.0.0')
     $fixture.FirewallRule = 'owned'; $script:events.Clear()
     Start-SetupLifecycleServices $locations
-    Assert-LifecycleTest (($script:events -join ',') -ceq 'firewall-remove' -and $null -eq $fixture.FirewallRule) 'retained rollback removes the rule again'
+    Assert-LifecycleTest (($script:events -join ',') -ceq 'revoke-security-log,firewall-remove' -and $null -eq $fixture.FirewallRule) 'retained rollback removes the Security log access and the rule again'
 
     # A changed local-network configuration is not an owned deployment; a lone rule is not a fresh computer.
     foreach ($network in @('port','pin','partial')) {

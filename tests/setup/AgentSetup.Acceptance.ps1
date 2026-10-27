@@ -158,6 +158,7 @@ function Invoke-AgentSetup([string[]]$Arguments, [string]$Executable = $script:A
 
 function Assert-AgentSetupAbsent([string]$Label, [int]$Devices = -1) {
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAIAgent')) ($Label + ': an Agent service exists.')
+    Assert-SetupSecurityLogAccess $false $Label
     foreach ($path in @($script:agentProductCode, $script:agentProductData, $script:appsKey)) {
         Assert-SetupAcceptance (-not (Test-Path -LiteralPath $path)) ($Label + ': Agent Setup left ' + $path)
     }
@@ -188,6 +189,7 @@ function Assert-AgentSetupInstalled([string]$Address, [string]$Pin, [DateTimeOff
                 Where-Object { $_.IdentityReference.Value -ceq $script:operatorSid }).Count -eq 0) 'Agent Setup granted the installing account its own access entry.'
         }
     }
+    Assert-SetupSecurityLogAccess $true 'Agent Setup'
     $endpointId = [Guid]::ParseExact([IO.File]::ReadAllText((Join-Path $script:agentProductData 'Agent\endpoint-id')).Trim(), 'D')
     Wait-ExactEndpoint $endpointId $Since
     Wait-SetupAcceptance { $null -ne (Get-AgentTelemetry $endpointId) } 'The Agent installed by Agent Setup did not report endpoint telemetry.' $script:TimeoutSeconds

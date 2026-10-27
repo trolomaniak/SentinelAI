@@ -33,7 +33,7 @@ Values are minimized before they leave the Agent:
 
 - **Identities are SIDs only.** `S-1-0-0` (no identity) becomes null. SIDs must use ASCII digits; IP addresses are canonical (IPv4-mapped addresses become IPv4 and IPv6 scope IDs are removed).
 - **Free text is derived, never copied.** `ImagePath` becomes only the executable or driver file name (`ImageFileName`) and a location class (`ImageLocation`: `windows`, `programFiles`, `programData`, `userProfile`, `temp`, `network` or `other`; null for other environment-variable or relative forms). `AccountName` becomes `AccountKind` (`localSystem`, `localService`, `networkService`, `virtualAccount` for `NT SERVICE\…`, otherwise `otherAccount`). Defender 5007 values become `SettingArea` (`exclusionPath`, `exclusionProcess`, `exclusionExtension`, `exclusionIpAddress`, `realTimeProtection`, `tamperProtection` or `other`) and `Change` (`added`, `removed` or `modified`).
-- **Closed vocabularies.** `ServiceType` is `userModeService`, `kernelDriver` or `fileSystemDriver`; start types are `boot`, `system`, `auto`, `demand` or `disabled`, from English SCM text or the numeric value 0–4.
+- **Closed vocabularies.** `ServiceType` is `userModeService`, `kernelDriver` or `fileSystemDriver`; start types are `boot`, `system`, `auto`, `demand` or `disabled`, from SCM text or the numeric value 0–4 (see the SCM text limit below).
 - **Bounded text.** `ServiceName`, `TaskName`, `ThreatName` and `ClearedChannel` are at most 256 characters, and `ImageFileName` at most 128. They are trimmed, and none may contain control, format (bidirectional) or unpaired surrogate characters. Strings longer than 1,024 characters never cross the Windows adapter.
 - **A bad field value never suppresses an event.** An empty or `-` value is absent (null). A present value that fails conversion or validation becomes null and is counted in `fieldsDiscarded`, and the observation is still sent. If rendering the fields fails, all of them become null and the occurrence is still reported. The exception is the data condition of 4624, 4104 and 7040: a record whose condition value renders but cannot be read is not selected and is counted in `fieldsDiscarded`, while a record whose condition cannot be rendered at all might be selected, so it is counted in `droppedUnparsed` and sent as a `dropped` gap.
 
@@ -61,26 +61,22 @@ Values are minimized before they leave the Agent:
 
 ## Channel access and LocalService
 
-The installed Agent runs as `NT AUTHORITY\LocalService`. TASK-027 changes no ACL, channel security descriptor (SDDL), group, privilege, service account, audit policy or channel enablement.
+The installed Agent runs as `NT AUTHORITY\LocalService` with its own service SID, `NT SERVICE\SentinelAIAgent` (`S-1-5-80-3260565588-2217304288-1438658577-528527895-932542736`, SID type unrestricted). MVP-6 (owner decision of 2026-10-26) took the narrowest of the options considered: Setup and Agent Setup add one read-only entry `(A;;0x1;;;<that SID>)` to the Security channel's access and change no other entry, group, privilege, service account or channel. Adding the service SID or LocalService to Event Log Readers would have granted every channel, and the latter every LocalService process.
 
-| Channel | Installed LocalService Agent |
+| Channel | Installed Agent |
 | --- | --- |
-| Security | **`accessDenied`.** LocalService has no read access to the Security channel, so 4624, 4625, 4698 and 1102 are not collected on a default installation. The Agent retries every minute. |
+| Security | Collected through the service SID's read entry. |
 | System | Collected. |
 | PowerShell/Operational | Collected where the channel is readable by the service account; otherwise its state is reported. |
 | Defender/Operational | Collected where the channel exists and is readable; `notFound` where Microsoft Defender's channel is absent. |
 
-A process whose token can already read Security, such as an Agent run from an elevated console, collects the documented minimal fields from it.
+**Audit policy.** Windows does not audit scheduled task creation (4698) by default. Setup turns on success auditing of the "Other Object Access Events" subcategory (`{0CCE9227-69AE-11D9-BED3-505054503030}`, named by GUID so it works in any display language) and leaves its failure auditing as it was. It records the setting it found under `HKLM\SOFTWARE\SentinelAI\Agent` (`OtherObjectAccessAuditBaseline`, writable only by administrators). Logon auditing (4624, 4625) is on by default on Windows 10 and 11 and is not changed, and 1102 is always written.
 
-Granting the installed Agent read access to Security changes a security boundary and requires the owner's approval. It has not been done. The options, narrowest first:
+**Lifecycle.** Fresh installation applies the grant before the Agent first starts; repair, upgrade and restoration apply it again, so an installation made before MVP-6 gains it at its first maintenance. Every uninstall (central, Agent Setup, and the rollback of a failed installation) removes the entry before deleting the service, so a failed uninstall is retried whole, and turns success auditing off again only if it was off before Setup. A domain Group Policy for audit policy or log access takes precedence and can undo either setting at its next refresh.
 
-1. Give the Agent service its own SID (`sc sidtype SentinelAIAgent unrestricted`) and add a read-only entry `(A;;0x1;;;<NT SERVICE\SentinelAIAgent SID>)` to the Security channel access, owned and restored exactly by Setup.
-2. Add the service SID to the Event Log Readers group.
-3. Add LocalService (`S-1-5-19`) to Event Log Readers, which grants every LocalService process read access, or change the Agent's service account, which orphans its DPAPI-protected enrollment state.
+**Data.** Security-derived SIDs (4624, 4625 and 4698), remote IP addresses (4624 and 4625) and log clears (1102) are stored in Core, available to SentinelAI administrators who need not be Windows administrators on the endpoint. Runtime rules copy some of them (source addresses, target and task-creator SIDs, task names) into alert evidence, which is kept for the life of the alert rather than the 30-day observation retention.
 
-Approval also covers the data: Security-derived SIDs (4624, 4625 and 4698), remote IP addresses (4624 and 4625) and log clears (1102) would then be stored in Core, available to SentinelAI administrators who need not be Windows administrators on the endpoint. Runtime rules would copy some of them (source addresses, target and task-creator SIDs, task names) into alert evidence, which is kept for the life of the alert rather than the 30-day observation retention.
-
-The pipeline picks up a grant without a code or configuration change. At its next one-minute retry the channel becomes `collecting` and coverage starts at the log's newest record with a `coverageStarted` gap (normally cause `noCheckpoint`, with `coverageRestart` false). Events written before the grant are not backfilled.
+A channel that becomes readable while the Agent runs (for example after a repair) needs no code or configuration change. At its next one-minute retry the channel becomes `collecting` and coverage starts at the log's newest record with a `coverageStarted` gap (normally cause `noCheckpoint`, with `coverageRestart` false). Events written before the grant are not backfilled.
 
 Other degraded states follow the same rule. A missing channel is `notFound`, any other failure (including a read timeout) is `error` with its HResult in `lastErrorCode`, and each is retried every minute. A channel disabled in Windows is reported as `disabled` and is still read. One channel's failure never affects the other channels, heartbeats, inventory or posture monitoring.
 
@@ -259,8 +255,8 @@ Reading it:
 - Collection is polled. A new event normally reaches Core within one poll interval plus the delivery spacing and request (up to about 7 seconds by default); a backlog or a failed delivery delays it further.
 - Channel retention bounds outage recovery: records overwritten before delivery resumes are lost and reported as `overwritten` gaps.
 - A backlog is scanned at up to 1,024 records per second per channel, and at most 128 observations per second are delivered per endpoint. Storms above that, such as many network (type 3) logons rejected by the 4624 condition on a busy server with a Security grant, build a backlog that can end in `overwritten` gaps.
-- Windows audit policy decides whether 4624, 4625 and 4698 are logged at all. SentinelAI does not change audit policy.
-- Localized SCM text for 7045 `ServiceType`/`StartType` and 7040 `param3` maps to null (Unknown) on non-English systems; numeric start types still map.
+- Windows audit policy decides whether 4624, 4625 and 4698 are logged at all. Setup turns on only the success auditing that 4698 needs (see channel access); a domain audit policy can override it.
+- SCM writes 7045 `ServiceType`/`StartType` and 7040 `param3` as text in the system's display language. At startup the Agent loads those texts from services.exe's messages for every installed display language, plus English, so they are recognized on Windows in any language. A text it cannot recognize (for example one written in a display language since removed, or one that means two values across the installed languages) maps to null (Unknown); numeric start types always map.
 - A failed logon (4625) usually carries the NULL SID (`S-1-0-0`, mapped to null), even for a wrong password on an existing account, and local failures carry no address. Names are never collected, so the failed-logon rule reports how many failures had no target SID or address beside the distinct known values.
 - `ClearedChannel` of a 104 event is null on a Windows build where its UserData path does not render; the event is still collected.
 - Schedules (polling, delivery, status and channel retries) follow the Agent's wall clock. When the clock steps back (a time correction or a manual change), every schedule moves back by the same amount, so collection resumes within one poll interval instead of waiting out the step.
