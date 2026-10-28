@@ -376,6 +376,73 @@ function New-SetupUpdateTaskDefinition {
 function Remove-SetupCentralUpdateTask {
     [void](Suspend-SetupScheduledTask $script:CentralUpdateTaskName)
     Unregister-SetupScheduledTask $script:CentralUpdateTaskName
+    Remove-SetupProgramsWriter
+}
+
+# MVP-7: Windows' shared Start Menu Programs folder may let the account that runs Setup write there (owner decision of
+# 2026-10-26). The nightly upgrade runs as SYSTEM, so when an administrator installs, repairs or upgrades, Setup records
+# that one account beside the update task's own record, and only the nightly upgrade accepts it (owner decision of
+# 2026-10-28). Administrators and SYSTEM only.
+function Get-SetupProgramsWriterRecord {
+    return (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) 'SentinelAI-Setup\central-update\programs-writer.json')
+}
+
+function Remove-SetupProgramsWriter {
+    $record = Get-SetupProgramsWriterRecord
+    if (Test-Path -LiteralPath $record) { Remove-Item -LiteralPath $record -Force }
+}
+
+function Sync-SetupProgramsWriter {
+    $current = Get-PilotCurrentOperatorSid
+    # The nightly upgrade keeps what an administrator's Setup recorded.
+    if ($current -ceq 'S-1-5-18') { return }
+    $programs = (Get-PilotSharedProgramsPath).TrimEnd('\')
+    $writes = $false
+    if ($current -cmatch '\AS-1-(?:5-21|12-1)-\d+-\d+-\d+-\d+\z' -and $programs.Length -ne 0 -and (Test-Path -LiteralPath $programs -PathType Container)) {
+        $rights = [Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+            [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+            [Security.AccessControl.FileSystemRights]::TakeOwnership
+        foreach ($rule in (Get-Acl -LiteralPath $programs).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+            if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $rule.IdentityReference.Value -ceq $current -and
+                ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and ($rule.FileSystemRights -band $rights) -ne 0) { $writes = $true }
+        }
+    }
+    Remove-SetupProgramsWriter
+    if (-not $writes) { return }
+    $record = Get-SetupProgramsWriterRecord
+    $directory = [IO.Path]::GetDirectoryName($record)
+    # Setup's own administrator-only staging folder, which this worker runs from, holds it; the update task's folder gets
+    # the same protection. Never created here: it would inherit ProgramData's Users write access.
+    $staging = [IO.Path]::GetDirectoryName($directory)
+    if (-not (Test-Path -LiteralPath $staging -PathType Container)) { throw 'Setup staging unavailable.' }
+    Assert-PilotTrustedPath -Path $staging
+    if (-not (Test-Path -LiteralPath $directory)) {
+        $security = New-Object Security.AccessControl.DirectorySecurity
+        $security.SetAccessRuleProtection($true, $false)
+        $security.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+        foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+            $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)),
+                [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+                [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)))
+        }
+        [void][IO.Directory]::CreateDirectory($directory, $security)
+    }
+    Assert-PilotTrustedPath -Path $directory
+    Write-PilotProtectedFile -Path $record -Content (@{ format = 'sentinelai-programs-writer-v1'; sid = $current } | ConvertTo-Json -Compress) -Kind Receipt
+}
+
+# Read only by the nightly upgrade: link-free, written by administrators or SYSTEM only, one ordinary account. Anything
+# else counts as no record, so Setup's ownership checks refuse that writer as before.
+function Read-SetupProgramsWriter {
+    $record = Get-SetupProgramsWriterRecord
+    try {
+        if (-not (Test-Path -LiteralPath $record -PathType Leaf)) { return $null }
+        Assert-PilotTrustedPath -Path $record
+        $document = Read-PilotStrictJson -Json (Read-PilotUtf8Document -Path $record -MaximumBytes 1024)
+        Assert-PilotObjectProperties -Object $document -Names @('format','sid')
+        if ($document.format -cne 'sentinelai-programs-writer-v1' -or $document.sid -cnotmatch '\AS-1-(?:5-21|12-1)-\d+-\d+-\d+-\d+\z') { return $null }
+        return [string]$document.sid
+    } catch { return $null }
 }
 
 # MVP-7: Core downloads a newer Setup into this folder. Core may create files but no folders in its data directory, so
@@ -399,8 +466,10 @@ function Sync-SetupCentralUpdateTask {
     if (-not (Test-Path -LiteralPath (Join-Path $Locations.CoreCode 'update-server.json') -PathType Leaf)) {
         Unregister-SetupScheduledTask $script:CentralUpdateTaskName
         Remove-SetupCentralUpdateDownloads $Locations
+        Remove-SetupProgramsWriter
         return
     }
+    Sync-SetupProgramsWriter
     $downloads = Get-SetupCentralUpdateDownloads $Locations
     if (-not (Test-Path -LiteralPath $downloads)) {
         [void](New-Item -ItemType Directory -Path $downloads)

@@ -958,6 +958,24 @@ function Assert-SetupCentralUpdate {
         ($coreFolderRights[0] -band [Security.AccessControl.FileSystemRights]::CreateFiles) -ne 0 -and
         ($coreFolderRights[0] -band ([Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::CreateDirectories -bor
             [Security.AccessControl.FileSystemRights]::ChangePermissions)) -eq 0) 'Setup did not provide the protected, empty download folder Core fills.'
+    # The account running Setup is recorded for the nightly upgrade exactly when it may write to the shared Programs folder.
+    $operator = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $writeRights = [Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $operatorWrites = @((Get-Acl -LiteralPath ([Environment]::GetFolderPath('CommonPrograms'))).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+        Where-Object { $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $_.IdentityReference.Value -ceq $operator -and
+            ($_.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and ($_.FileSystemRights -band $writeRights) -ne 0 }).Count -ne 0
+    $writerRecord = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'SentinelAI-Setup\central-update\programs-writer.json'
+    if ($operatorWrites) {
+        $recordAcl = Get-Acl -LiteralPath $writerRecord
+        Assert-SetupAcceptance ([string](Get-Content -Raw -LiteralPath $writerRecord | ConvertFrom-Json).sid -ceq $operator -and
+            $recordAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ceq 'S-1-5-32-544' -and
+            @($recordAcl.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-32-544','S-1-5-18') }).Count -eq 0) 'Setup did not record the Start Menu account for the nightly upgrade.'
+    } else {
+        Assert-SetupAcceptance (-not (Test-Path -LiteralPath $writerRecord)) 'Setup recorded a Start Menu account that cannot write there.'
+    }
+    Write-Output ('StartMenuAccountRecorded: ' + $operatorWrites)
 }
 
 function Get-SetupAgentAlerts([Guid]$EndpointId, [string]$RuleId) {

@@ -445,6 +445,8 @@ function Invoke-SetupLifecycleWorker {
     # and only until the first change removes it (Get-SetupLifecycleLegacyOperatorSid).
     $legacy = Get-SetupLifecycleLegacyOperatorSid $locations
     if ($null -ne $legacy) { Set-PilotLegacyOperatorSid -Sid $legacy }
+    # The nightly upgrade runs as SYSTEM: the Start Menu account an administrator's Setup recorded stays accepted there.
+    if ((Get-PilotCurrentOperatorSid) -ceq 'S-1-5-18') { Set-PilotSharedProgramsWriterSid -Sid (Read-SetupProgramsWriter) }
     if ($Request.action -ceq 'inspect') {
         $state = Inspect-SetupLifecycleInstallation $locations
         Write-Output ('STATE|' + $state.Kind + '|' + $state.Version)

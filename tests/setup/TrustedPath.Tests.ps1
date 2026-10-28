@@ -47,7 +47,9 @@ function Import-TrustedPathTestFunctions([string]$Path, [hashtable]$Names) {
 Import-TrustedPathTestFunctions (Join-Path $repo 'installer/pilot/PilotInstaller.psm1') @{
     'Assert-PilotTrustedPath' = 'Assert-PilotTrustedPath'; 'Initialize-PilotNativeHelpers' = 'Initialize-PilotNativeHelpers'
     'Get-PilotAcl' = 'Get-PilotAclSource'; 'Get-PilotTrustedAccountSids' = 'Get-PilotTrustedAccountSids'
-    'Get-PilotOperatorAccessSid' = 'Get-PilotOperatorAccessSid'; 'Set-PilotLegacyOperatorSid' = 'Set-PilotLegacyOperatorSid' }
+    'Get-PilotOperatorAccessSid' = 'Get-PilotOperatorAccessSid'; 'Set-PilotLegacyOperatorSid' = 'Set-PilotLegacyOperatorSid'
+    'Set-PilotSharedProgramsWriterSid' = 'Set-PilotSharedProgramsWriterSid' }
+$script:SharedProgramsWriterSid = $null
 $script:ServiceSid = 'S-1-5-19'
 $script:AdministratorsSid = 'S-1-5-32-544'
 $script:SystemSid = 'S-1-5-18'
@@ -325,6 +327,19 @@ try {
         Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $programs } $untrustedWriter 'The shared Programs folder was trusted as a target rather than a parent.'
         $script:rules[$programs] = @(New-TrustedPathTestRule 'S-1-5-21-3000-3000-3000-1003' $writable)
         Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'Another account was trusted on the shared Programs folder.'
+        # MVP-7: the nightly upgrade (SYSTEM) accepts the one account an administrator's Setup recorded, there only.
+        Set-PilotSharedProgramsWriterSid -Sid 'S-1-5-21-3000-3000-3000-1003'
+        try {
+            Assert-PilotTrustedPath -Path $menu -Tree
+            $script:rules[$menu] = @(New-TrustedPathTestRule 'S-1-5-21-3000-3000-3000-1003' $writable)
+            Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'The recorded Start Menu account was trusted on Setup''s own Start Menu folder.'
+            $script:rules.Remove($menu)
+            $script:owners[$programs] = 'S-1-5-21-3000-3000-3000-1003'
+            Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedOwner 'The recorded Start Menu account was trusted as owner of the shared Programs folder.'
+            $script:owners.Remove($programs)
+            Reject-TrustedPathTest { Set-PilotSharedProgramsWriterSid -Sid 'S-1-5-32-545' } '' 'A group was accepted as the recorded Start Menu account.'
+        } finally { Set-PilotSharedProgramsWriterSid -Sid $null }
+        Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'A cleared Start Menu account record was still trusted.'
         $script:rules[$programs] = @(New-TrustedPathTestRule 'S-1-5-32-545' $writable)
         Reject-TrustedPathTest { Assert-PilotTrustedPath -Path $menu -Tree } $untrustedWriter 'Users were trusted on the shared Programs folder.'
         $script:rules.Remove($programs)

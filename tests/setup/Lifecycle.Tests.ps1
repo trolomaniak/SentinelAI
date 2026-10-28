@@ -95,6 +95,12 @@ function Unregister-SetupFullApps { param($Locations); $script:events.Add('apps-
 function Remove-SetupCentralUpdateTask { $script:events.Add('update-task-remove') }
 function Remove-SetupCentralUpdateDownloads { param($Locations); $script:events.Add('update-downloads-remove') }
 function Sync-SetupCentralUpdateTask { param($Locations); $script:events.Add('update-task') }
+# The account running maintenance; the nightly upgrade runs as SYSTEM and then accepts the recorded Start Menu account.
+$script:currentSid = 'S-1-5-21-1000-1000-1000-500'
+$script:programsWriter = 'not-set'
+function Get-PilotCurrentOperatorSid { return $script:currentSid }
+function Read-SetupProgramsWriter { return 'S-1-5-21-1000-1000-1000-1001' }
+function Set-PilotSharedProgramsWriterSid { param([AllowNull()][string]$Sid); $script:programsWriter = $Sid }
 function Test-CoreServiceCertificate { param($Sha256); return $script:fixture.CertificatePresent -and $Sha256 -ceq $script:fixture.Pin }
 function Remove-CoreServiceCertificate { param($Sha256); $script:events.Add('certificate-remove:' + $Sha256.Substring(0, 4)) }
 function Set-SetupLifecycleCodeAcl { param($Locations); }
@@ -444,6 +450,13 @@ try {
     $output = @(Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'inspect'; workDirectory = $fixture.Root; preserveData = 'true' }))
     Assert-LifecycleTest ($output -contains 'STATE|Installed|1.0.0') 'a legacy installation is inspected as owned'
     Assert-LifecycleTest ($script:events.Count -eq 1 -and $script:events[0] -ceq ('legacy:' + $legacy)) 'inspection accepts but never removes the legacy account'
+    Assert-LifecycleTest ($script:programsWriter -ceq 'not-set') 'an administrator''s maintenance accepts no recorded Start Menu account'
+    $script:currentSid = 'S-1-5-18'
+    $output = @(Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'inspect'; workDirectory = $fixture.Root; preserveData = 'true' }))
+    Assert-LifecycleTest ($output -contains 'STATE|Installed|1.0.0' -and $script:programsWriter -ceq 'S-1-5-21-1000-1000-1000-1001') 'the nightly upgrade accepts the recorded Start Menu account'
+    $script:currentSid = 'S-1-5-21-1000-1000-1000-500'; $script:programsWriter = 'not-set'
+    $script:events.Clear()
+    [void]$script:events.Add('legacy:' + $legacy)
 
     $script:events.Clear()
     Invoke-SetupLifecycleWorker ([pscustomobject]@{ action = 'lifecycle-stop'; workDirectory = $fixture.Root; preserveData = 'true' }) | Out-Null

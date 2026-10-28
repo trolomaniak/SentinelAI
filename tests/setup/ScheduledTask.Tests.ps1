@@ -9,6 +9,9 @@ $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Import-Module (Join-Path $repo 'installer/pilot/CoreServiceInstaller.psm1') -Force -DisableNameChecking
 $coreSid = 'S-1-5-80-1772522954-4099193962-4247269631-2556497313-4219375900'
 function Get-SetupLifecycleCoreSid { return $coreSid }
+# The Start Menu account record is covered by the Setup acceptance; here it stays out of the runner's own folders.
+function Sync-SetupProgramsWriter { }
+function Remove-SetupProgramsWriter { }
 # The temporary tree belongs to the runner's account, which the installed tree never trusts; removal is covered on the
 # installed tree by the Setup acceptance.
 function Assert-PilotTrustedPath { param($Path, [switch]$Tree, [switch]$AllowServiceWrite, $ServiceWriteSid, $ServiceWriteRoot)
