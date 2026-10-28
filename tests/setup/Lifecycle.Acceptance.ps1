@@ -526,10 +526,28 @@ try {
             [string]$_.ExecutablePath -like ($programData + '\SentinelAI-Setup*') }).Count
         $runs = @(Get-ChildItem -LiteralPath (Join-Path $programData 'SentinelAI-Setup\central-update') -Directory -Force -ErrorAction SilentlyContinue).Count
         $receipt = try { [string](Get-Content -Raw -LiteralPath (Join-Path $coreData 'pilot-installation.json') | ConvertFrom-Json).version } catch { 'unreadable' }
-        throw ('The quiet upgrade did not complete. SetupProcessesRunning={0}; RunDirectories={1}; CoreServiceRunning={2}; AgentServiceRunning={3}; CoreReceiptVersion={4}; AppsVersion={5}.' -f
+        # The same verified copy run quietly by a SYSTEM task of its own, so its exit code (SetupUpgradeExitCode or a bootstrap code) is known.
+        $quietExit = 'none'
+        $copy = @(Get-ChildItem -LiteralPath (Join-Path $programData 'SentinelAI-Setup\central-update') -Directory -Force -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName 'SentinelAI-Setup.exe' } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }) | Select-Object -First 1
+        if ($null -ne $copy) {
+            try {
+                Register-ScheduledTask -TaskPath '\SentinelAI-Acceptance\' -TaskName 'Quiet upgrade probe' -Force `
+                    -Action (New-ScheduledTaskAction -Execute $copy -Argument '/upgrade /quiet') -Principal (New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest) | Out-Null
+                $probeStarted = [DateTime]::Now.AddSeconds(-1)
+                Start-ScheduledTask -TaskPath '\SentinelAI-Acceptance\' -TaskName 'Quiet upgrade probe'
+                $deadline = [DateTime]::UtcNow.AddMinutes(20)
+                do { Start-Sleep -Seconds 5; $probe = Get-ScheduledTaskInfo -TaskPath '\SentinelAI-Acceptance\' -TaskName 'Quiet upgrade probe' }
+                while ([DateTime]::UtcNow -lt $deadline -and ($probe.LastRunTime -lt $probeStarted -or [string](Get-ScheduledTask -TaskPath '\SentinelAI-Acceptance\' -TaskName 'Quiet upgrade probe').State -ceq 'Running'))
+                $quietExit = [string]$probe.LastTaskResult
+            } catch { $quietExit = 'probe-failed' }
+            finally { Unregister-ScheduledTask -TaskPath '\SentinelAI-Acceptance\' -TaskName 'Quiet upgrade probe' -Confirm:$false -ErrorAction SilentlyContinue }
+        }
+        throw ('The quiet upgrade did not complete. SetupProcessesRunning={0}; RunDirectories={1}; CoreServiceRunning={2}; AgentServiceRunning={3}; CoreReceiptVersion={4}; AppsVersion={5}; SystemTaskQuietUpgradeExit={6}.' -f
             $setupProcesses, $runs, ([string](Get-SetupService 'SentinelAICore').State -ceq 'Running'), ([string](Get-SetupService 'SentinelAIAgent').State -ceq 'Running'),
             $(if ($receipt -cmatch '\A[0-9]{1,5}(\.[0-9]{1,5}){2}\z') { $receipt } else { 'other' }),
-            $(if ([string](Get-ItemProperty -LiteralPath $apps -ErrorAction SilentlyContinue).DisplayVersion -cmatch '\A[0-9]{1,5}(\.[0-9]{1,5}){2}\z') { (Get-ItemProperty -LiteralPath $apps).DisplayVersion } else { 'other' }))
+            $(if ([string](Get-ItemProperty -LiteralPath $apps -ErrorAction SilentlyContinue).DisplayVersion -cmatch '\A[0-9]{1,5}(\.[0-9]{1,5}){2}\z') { (Get-ItemProperty -LiteralPath $apps).DisplayVersion } else { 'other' }),
+            $(if ($quietExit -cmatch '\A-?[0-9]{1,10}\z|\A(none|probe-failed)\z') { $quietExit } else { 'other' }))
     }
     Open-LifecycleCore; Wait-ExactEndpoint $endpointId $since
     Assert-LifecycleVersion '1.3.0'; Assert-LifecyclePreserved
