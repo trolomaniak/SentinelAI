@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     public LocalNetworkViewModel? LocalNetwork { get; }
     public ComputerEnrollmentViewModel? ComputerEnrollment { get; }
     public PilotLicenseViewModel? Pilot { get; }
+    public CentralUpdateViewModel? CentralUpdate { get; }
     public AiExplanationViewModel? AiExplanation { get; }
     public DesktopIntegrationViewModel? DesktopIntegration { get; }
     public WindowsServiceStatusModel? ServiceStatus { get; }
@@ -53,7 +54,7 @@ public partial class MainWindow : Window
         LicenseViewModel? license, AiExplanationViewModel? aiExplanation,
         DesktopIntegrationViewModel? desktopIntegration, WindowsServiceStatusModel? serviceStatus,
         LocalNetworkViewModel? localNetwork = null, ComputerEnrollmentViewModel? computerEnrollment = null,
-        PilotLicenseViewModel? pilot = null)
+        PilotLicenseViewModel? pilot = null, CentralUpdateViewModel? centralUpdate = null)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
@@ -67,6 +68,7 @@ public partial class MainWindow : Window
         LocalNetwork = localNetwork;
         ComputerEnrollment = computerEnrollment;
         Pilot = pilot;
+        CentralUpdate = centralUpdate;
         AiExplanation = aiExplanation;
         DesktopIntegration = desktopIntegration;
         ServiceStatus = serviceStatus;
@@ -83,6 +85,7 @@ public partial class MainWindow : Window
         if (aiExplanation is not null) aiExplanation.SessionExpired += OnWorkspaceSessionExpired;
         if (localNetwork is not null) localNetwork.SessionExpired += OnWorkspaceSessionExpired;
         if (computerEnrollment is not null) computerEnrollment.SessionExpired += OnWorkspaceSessionExpired;
+        if (centralUpdate is not null) centralUpdate.SessionExpired += OnWorkspaceSessionExpired;
         if (pilot is not null)
         {
             pilot.SessionExpired += OnWorkspaceSessionExpired;
@@ -140,7 +143,7 @@ public partial class MainWindow : Window
         PageRow.Height = authorized ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         if (!authorized)
         {
-            AiExplanation?.Clear(); License?.Clear(); LocalNetwork?.Clear(); ComputerEnrollment?.Clear(); Pilot?.Clear();
+            AiExplanation?.Clear(); License?.Clear(); LocalNetwork?.Clear(); ComputerEnrollment?.Clear(); Pilot?.Clear(); CentralUpdate?.Clear();
             Devices?.Clear(); Alerts?.Clear(); Risk?.Clear(); Reports?.Clear();
         }
         else if (authorizationChanged)
@@ -176,6 +179,7 @@ public partial class MainWindow : Window
         if (License is not null && _viewModel.CurrentPage.Id is PageId.Settings or PageId.Alerts)
             _ = License.RefreshAsync();
         if (LocalNetwork is not null && _viewModel.CurrentPage.Id == PageId.Settings) _ = LocalNetwork.RefreshAsync();
+        if (CentralUpdate is not null && _viewModel.CurrentPage.Id == PageId.Settings) _ = CentralUpdate.RefreshAsync();
         // The pilot notice belongs to every page; Core reads the key offline, so this stays local and cheap.
         if (Pilot is not null) _ = Pilot.RefreshAsync();
         if (Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
@@ -256,6 +260,7 @@ public partial class MainWindow : Window
         if (AiExplanation is not null) { AiExplanation.SessionExpired -= OnWorkspaceSessionExpired; AiExplanation.Dispose(); }
         if (LocalNetwork is not null) { LocalNetwork.SessionExpired -= OnWorkspaceSessionExpired; LocalNetwork.Dispose(); }
         if (ComputerEnrollment is not null) { ComputerEnrollment.SessionExpired -= OnWorkspaceSessionExpired; ComputerEnrollment.Dispose(); }
+        if (CentralUpdate is not null) { CentralUpdate.SessionExpired -= OnWorkspaceSessionExpired; CentralUpdate.Dispose(); }
         _pilotTimer.Stop();
         _pilotTimer.Tick -= OnPilotTick;
         if (Pilot is not null) { Pilot.SessionExpired -= OnWorkspaceSessionExpired; Pilot.Dispose(); }

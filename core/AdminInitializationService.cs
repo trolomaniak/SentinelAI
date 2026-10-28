@@ -11,6 +11,7 @@ internal sealed class AdminInitializationService(
     AlertStore alerts,
     EndpointTelemetryStore telemetry,
     LicenseStateStore licenses,
+    CentralUpdateStore centralUpdates,
     CoreHostingMode hostingMode) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -24,6 +25,7 @@ internal sealed class AdminInitializationService(
         await telemetry.InitializeAsync(cancellationToken);
         await inventories.BackfillAlertsAsync(cancellationToken);
         await licenses.InitializeAsync(cancellationToken);
+        await centralUpdates.InitializeAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

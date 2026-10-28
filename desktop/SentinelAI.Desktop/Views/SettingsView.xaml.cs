@@ -30,6 +30,21 @@ public partial class SettingsView : UserControl
         if (Window.GetWindow(this) is MainWindow { LocalNetwork: { CanRefresh: true } model }) await model.RefreshAsync();
     }
 
+    private async void OnRefreshUpdates(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this) is MainWindow { CentralUpdate: { CanRefresh: true } model }) await model.RefreshAsync();
+    }
+
+    private async void OnCheckForUpdates(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this) is MainWindow { CentralUpdate: { CanCheckNow: true } model }) await model.CheckNowAsync();
+    }
+
+    private async void OnInstallUpdate(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this) is MainWindow { CentralUpdate: { CanInstall: true } model }) await model.InstallAsync();
+    }
+
     private async void OnRefreshDesktopSettings(object sender, RoutedEventArgs e)
     {
         if (Window.GetWindow(this) is not MainWindow window) return;

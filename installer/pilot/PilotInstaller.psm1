@@ -9,6 +9,9 @@ $script:OperatorAccess = -not $AdministratorsOnly
 # The one account an earlier central installation granted full control. Setup's maintenance accepts it
 # only until it removed that account's entries (Set-PilotLegacyOperatorSid).
 $script:LegacyOperatorSid = $null
+# The one account an administrator's Setup recorded writing to Windows' shared Start Menu Programs folder. Only the
+# nightly upgrade, which runs as SYSTEM, accepts it, and only there (Set-PilotSharedProgramsWriterSid).
+$script:SharedProgramsWriterSid = $null
 $script:ServiceName = 'SentinelAIAgent'
 $script:ServiceAccount = 'NT AUTHORITY\LocalService'
 $script:ServiceSid = 'S-1-5-19'
@@ -62,6 +65,14 @@ function Get-PilotTrustedAccountSids {
 }
 
 function Get-PilotSharedProgramsPath { return [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms) }
+
+function Set-PilotSharedProgramsWriterSid {
+    param([AllowNull()][string]$Sid)
+    if ([string]::IsNullOrEmpty($Sid)) { $script:SharedProgramsWriterSid = $null; return }
+    # Only an ordinary local, domain or Microsoft Entra account, never a group or built-in identity.
+    if ($Sid -cnotmatch '\AS-1-(?:5-21|12-1)-\d+-\d+-\d+-\d+\z') { throw 'Invalid Start Menu account.' }
+    $script:SharedProgramsWriterSid = $Sid
+}
 
 function Set-PilotLegacyOperatorSid {
     param([AllowNull()][string]$Sid)
@@ -332,6 +343,7 @@ function Assert-PilotTrustedPath {
         if ($isAncestor -and $isContainer -and $sharedPrograms.Length -ne 0 -and
             [string]::Equals($current.TrimEnd('\'), $sharedPrograms, [StringComparison]::OrdinalIgnoreCase)) {
             $currentWriters += @(Get-PilotCurrentOperatorSid)
+            if ($null -ne $script:SharedProgramsWriterSid) { $currentWriters += $script:SharedProgramsWriterSid }
         }
         foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
             if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and

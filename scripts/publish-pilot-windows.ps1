@@ -7,7 +7,9 @@ param(
     [ValidateSet('stable', 'pilot', 'beta')][string]$Channel = 'pilot',
     [string]$OutputDirectory,
     # MVP-3: a prepared pilot-license directory (trust/<key ID>.pem public keys, optional contact.json) deployed next to Core.
-    [string]$PilotLicenseDirectory
+    [string]$PilotLicenseDirectory,
+    # MVP-7: the owner's HTTPS update server, built into Core as update-server.json; without it Core offers no central update.
+    [string]$UpdateServerUrl = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,6 +29,9 @@ try {
     foreach ($part in $Version.Split('.')) { if ([int]$part -gt 65535) { throw 'Invalid version.' } }
     if (-not [IO.Path]::IsPathRooted($DevelopmentPrivateKey) -or -not (Test-Path -LiteralPath $DevelopmentPrivateKey -PathType Leaf)) { throw 'A development key outside source is required.' }
     if (Test-Path -LiteralPath $OutputDirectory) { throw 'The output directory must be new.' }
+    if ($UpdateServerUrl.Length -gt 0 -and ($UpdateServerUrl.Length -gt 256 -or $UpdateServerUrl -cnotmatch '\Ahttps://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(/[A-Za-z0-9._~-]+)*\z')) {
+        throw 'The update server must be a lowercase https:// URL without credentials, query, fragment or trailing slash.'
+    }
     # Validate key placement before creating artifacts. The separate signer repeats this check.
     for ($directory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($DevelopmentPrivateKey)); $null -ne $directory; $directory = [IO.Path]::GetDirectoryName($directory)) {
         if ((Test-Path -LiteralPath (Join-Path $directory '.git')) -or
@@ -54,6 +59,10 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $publish $executable) -PathType Leaf)) { throw 'The Windows executable was not published.' }
         if ($component -eq 'core' -and -not [string]::IsNullOrWhiteSpace($PilotLicenseDirectory)) {
             Copy-Item -LiteralPath $PilotLicenseDirectory -Destination (Join-Path $publish 'pilot-license') -Recurse
+        }
+        if ($component -eq 'core' -and $UpdateServerUrl.Length -gt 0) {
+            $server = [ordered]@{ url = $UpdateServerUrl; channel = $Channel } | ConvertTo-Json -Compress
+            [IO.File]::WriteAllText((Join-Path $publish 'update-server.json'), $server, (New-Object Text.UTF8Encoding($false)))
         }
         if ($component -eq 'core') {
             $agentUpdate = Join-Path $publish 'agent-update'

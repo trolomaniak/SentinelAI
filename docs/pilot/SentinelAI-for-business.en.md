@@ -30,7 +30,7 @@ Alerts are raised for risky settings and detections. The other values, such as p
 
 - **One central computer** in the company runs SentinelAI: the central service (Core), the Desktop application where you see everything, and its own Agent.
 - **Every other computer** runs only the small SentinelAI Agent, which reports to the central computer over your local network.
-- **Your data stays in your company.** Everything is stored on the central computer. SentinelAI does not send your data to us or to any cloud service, and the pilot makes no internet connections.
+- **Your data stays in your company.** Everything is stored on the central computer. SentinelAI does not send your data to us or to any cloud service. It connects to the internet only if you turn on updates from our server, and then only to download new versions.
 
 ## What is collected and what is not
 
@@ -64,7 +64,7 @@ Alerts are raised for risky settings and detections. The other values, such as p
 - **The installers are not code-signed.** Windows SmartScreen will warn that the publisher is unknown. Always check the downloads against the published SHA-256 checksums before running them. Smart App Control or some antivirus or EDR products may block unsigned programs.
 - **Windows only.** There is no Linux or macOS version yet.
 - **Desktop only on the central computer.** Alerts and reports are viewed there; there is no web or mobile access.
-- **You update the central computer.** We provide new versions; you run them on the central computer, and the Agents on the other computers update from it automatically, usually within two hours.
+- **Updates are your choice.** Updates from our server are off until you turn them on in Desktop; then the central computer installs new versions at night, or when you select Install now. Otherwise you run the new version we provide. The Agents on the other computers update from the central computer automatically, usually within two hours.
 - **English interface.** The program itself is in English.
 
 ## Contact

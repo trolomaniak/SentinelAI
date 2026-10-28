@@ -17,6 +17,7 @@ public partial class App : Application
     private LocalNetworkViewModel? _localNetwork;
     private ComputerEnrollmentViewModel? _computerEnrollment;
     private PilotLicenseViewModel? _pilot;
+    private CentralUpdateViewModel? _centralUpdate;
     private AiExplanationViewModel? _aiExplanation;
     private WindowsDesktopInstance? _instance;
     private WindowsServiceStatusModel? _serviceStatus;
@@ -62,6 +63,9 @@ public partial class App : Application
             _pilot = new PilotLicenseViewModel((IPilotLicenseClient)authenticationClient, new WindowsSetupUninstallLauncher());
             // Setup refuses to uninstall while Desktop runs; monitoring continues in the services meanwhile.
             _pilot.ExitRequested += (_, _) => Dispatcher.BeginInvoke(() => Shutdown());
+            // MVP-7: Setup refuses to upgrade while Desktop runs; Install now closes Desktop once the verified Setup started.
+            _centralUpdate = new CentralUpdateViewModel((ICentralUpdateClient)authenticationClient, new WindowsCentralUpdateInstaller());
+            _centralUpdate.ExitRequested += (_, _) => Dispatcher.BeginInvoke(() => Shutdown());
             _aiExplanation = new AiExplanationViewModel((IAiExplanationClient)authenticationClient);
             var assembly = typeof(App).Assembly;
             var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -72,7 +76,7 @@ public partial class App : Application
             var integration = new DesktopIntegrationViewModel(new WindowsDesktopPreferences());
             _serviceStatus = new WindowsServiceStatusModel();
             var window = new MainWindow(_shell, _authentication, _devices, _alerts, _risk, _reports, _license, _aiExplanation,
-                integration, _serviceStatus, _localNetwork, _computerEnrollment, _pilot);
+                integration, _serviceStatus, _localNetwork, _computerEnrollment, _pilot, _centralUpdate);
             MainWindow = window;
             _tray = new WindowsDesktopTray(window, integration, _serviceStatus, OpenSentinelAi, () => Shutdown());
             window.DesktopTray = _tray;
@@ -119,6 +123,7 @@ public partial class App : Application
         _localNetwork?.Dispose();
         _computerEnrollment?.Dispose();
         _pilot?.Dispose();
+        _centralUpdate?.Dispose();
         _aiExplanation?.Dispose();
         _authentication?.Dispose();
         _instance?.Dispose();

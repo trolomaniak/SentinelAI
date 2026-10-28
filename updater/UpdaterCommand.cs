@@ -5,7 +5,8 @@ namespace SentinelAI.Updater;
 
 /// <summary>
 /// Operator-controlled local verification, staging and fresh code preparation, and (MVP-7) the scheduled SYSTEM
-/// installation of an Agent update that the Agent fetched from Core. It never downloads code.
+/// installation of an Agent update that the Agent fetched from Core, and of a central update that Core fetched from the
+/// owner's server. It never downloads code.
 /// </summary>
 public static class UpdaterCommand
 {
@@ -14,6 +15,7 @@ public static class UpdaterCommand
     internal static readonly TimeSpan PrepareDeadline = TimeSpan.FromMinutes(5);
     internal const int DeadlineExitCode = 2;
     internal static readonly TimeSpan AgentUpdateDeadline = TimeSpan.FromMinutes(15);
+    internal static readonly TimeSpan CentralUpdateDeadline = TimeSpan.FromMinutes(30);
 
     public static Task<int> RunAsync(string[] args, TextWriter output, TextWriter error) =>
         RunAsync(args, output, error, PrepareDeadline);
@@ -26,10 +28,11 @@ public static class UpdaterCommand
         {
             if (args.Length == 1 && args[0] == "--help")
             {
-                await output.WriteLineAsync("verify|stage|prepare --manifest FILE --package ZIP --public-key PEM --key-id ID --environment development|production --channel stable|pilot|beta --artifact-id ID --installed-version X.Y.Z [stage: --output ABSOLUTE_NEW_FILE; prepare: --output ABSOLUTE_NEW_DIRECTORY] | apply-agent-update");
+                await output.WriteLineAsync("verify|stage|prepare --manifest FILE --package ZIP --public-key PEM --key-id ID --environment development|production --channel stable|pilot|beta --artifact-id ID --installed-version X.Y.Z [stage: --output ABSOLUTE_NEW_FILE; prepare: --output ABSOLUTE_NEW_DIRECTORY] | apply-agent-update | apply-central-update [--now]");
                 return 0;
             }
             if (args is ["apply-agent-update"]) return await ApplyAgentUpdateAsync(output, error);
+            if (args is ["apply-central-update"] or ["apply-central-update", "--now"]) return await ApplyCentralUpdateAsync(args.Length == 1, output);
             var allowed = new[] { "manifest", "package", "public-key", "key-id", "environment", "channel", "artifact-id", "installed-version" };
             var command = args.FirstOrDefault();
             if (command is not ("verify" or "stage" or "prepare")) throw new ArgumentException();
@@ -99,7 +102,8 @@ public static class UpdaterCommand
             return DeadlineExitCode;
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or
-                                         UpdateValidationException or System.Security.Cryptography.CryptographicException or JsonException)
+                                         UpdateValidationException or System.Security.Cryptography.CryptographicException or JsonException or
+                                         InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             await error.WriteLineAsync("Update verification failed. Check the manifest, package and explicitly configured trust policy.");
             return 1;
@@ -145,6 +149,44 @@ public static class UpdaterCommand
             AgentUpdateOutcome.RolledBack or AgentUpdateOutcome.NotRetried => 4,
             _ => 5
         };
+    }
+
+    /// <summary>
+    /// The central computer's nightly SYSTEM task (exit 0 also when there is nothing to do), or "--now" from Desktop's
+    /// Install, elevated: 0 the Setup was started, 6 nothing newer is downloaded, 3 rejected, 4 given up after three attempts.
+    /// </summary>
+    private static async Task<int> ApplyCentralUpdateAsync(bool scheduled, TextWriter output)
+    {
+        if (!OperatingSystem.IsWindows()) throw new ArgumentException();
+        RequireAdministrator();
+        using var deadline = new CancellationTokenSource(CentralUpdateDeadline);
+        var layout = CentralUpdateLayout.Default;
+        var outcome = await new CentralUpdateApplier(layout, new WindowsCentralUpdateHost(layout), TimeProvider.System)
+            .ApplyAsync(scheduled, deadline.Token);
+        await output.WriteLineAsync(outcome switch
+        {
+            CentralUpdateOutcome.Started => "SentinelAI Setup was started for the update.",
+            CentralUpdateOutcome.NoUpdate => "No newer SentinelAI is downloaded.",
+            CentralUpdateOutcome.NotScheduled => "Automatic installation is off; an administrator installs from Desktop.",
+            CentralUpdateOutcome.GivenUp => "This update did not install after three attempts; install it from Desktop.",
+            _ => "The downloaded update was rejected; nothing was changed."
+        });
+        return outcome switch
+        {
+            CentralUpdateOutcome.Started => 0,
+            CentralUpdateOutcome.NoUpdate or CentralUpdateOutcome.NotScheduled => scheduled ? 0 : 6,
+            CentralUpdateOutcome.GivenUp => 4,
+            _ => 3
+        };
+    }
+
+    private static void RequireAdministrator()
+    {
+        if (!OperatingSystem.IsWindows()) throw new ArgumentException();
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        if (!identity.IsSystem && !new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+            throw new UnauthorizedAccessException();
     }
 
     private static Dictionary<string, string> Parse(string[] args, string[] required)

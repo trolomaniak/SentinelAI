@@ -286,6 +286,204 @@ function Unregister-SetupFullApps {
     Remove-SetupOwnedTree -Path $Locations.InstallerCode
 }
 
+# MVP-7: SentinelAI's update tasks live in Task Scheduler's \SentinelAI folder and run as SYSTEM by SID.
+$script:SetupTaskFolder = 'SentinelAI'
+$script:CentralUpdateTaskName = 'SentinelAI Update'
+
+function Get-SetupTaskRoot {
+    $scheduler = New-Object -ComObject 'Schedule.Service'
+    $scheduler.Connect()
+    return $scheduler.GetFolder('\')
+}
+
+function Get-SetupScheduledTask {
+    param([string]$Name)
+    $root = Get-SetupTaskRoot
+    try { return $root.GetFolder($script:SetupTaskFolder).GetTask($Name) } catch { return $null }
+}
+
+function Register-SetupScheduledTask {
+    param([string]$Name, [string]$Definition)
+    $root = Get-SetupTaskRoot
+    try { $folder = $root.GetFolder($script:SetupTaskFolder) } catch { $folder = $root.CreateFolder($script:SetupTaskFolder, $null) }
+    # TASK_CREATE_OR_UPDATE (6) with TASK_LOGON_SERVICE_ACCOUNT (5).
+    [void]$folder.RegisterTask($Name, $Definition, 6, $null, $null, 5)
+}
+
+# No new run starts; a running one gets two minutes to finish or roll back before it is stopped (state 4 = running).
+function Suspend-SetupScheduledTask {
+    param([string]$Name)
+    $task = Get-SetupScheduledTask $Name
+    if ($null -eq $task) { return $false }
+    $task.Enabled = $false
+    $deadline = [DateTime]::UtcNow.AddMinutes(2)
+    while ((Get-SetupScheduledTask $Name).State -eq 4 -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    if ((Get-SetupScheduledTask $Name).State -eq 4) { $task.Stop(0) }
+    return $true
+}
+
+function Resume-SetupScheduledTask {
+    param([string]$Name)
+    $task = Get-SetupScheduledTask $Name
+    if ($null -ne $task) { $task.Enabled = $true }
+}
+
+# The registered task runs exactly this Updater command, is enabled and runs as SYSTEM.
+function Test-SetupScheduledTask {
+    param([string]$Name, [string]$Updater, [string]$Arguments)
+    $task = Get-SetupScheduledTask $Name
+    if ($null -eq $task -or -not $task.Enabled) { return $false }
+    $definition = $task.Definition
+    if ($definition.Actions.Count -ne 1 -or $definition.Principal.UserId -notin @('S-1-5-18', 'SYSTEM', 'NT AUTHORITY\SYSTEM')) { return $false }
+    $action = $definition.Actions.Item(1)
+    return [string]$action.Path -ceq ('"' + $Updater + '"') -and [string]$action.Arguments -ceq $Arguments
+}
+
+function Unregister-SetupScheduledTask {
+    param([string]$Name)
+    $root = Get-SetupTaskRoot
+    try { $folder = $root.GetFolder($script:SetupTaskFolder) } catch { return }
+    if ($null -ne (Get-SetupScheduledTask $Name)) { $folder.DeleteTask($Name, 0) }
+    if ($folder.GetTasks(1).Count -eq 0 -and $folder.GetFolders(0).Count -eq 0) { $root.DeleteFolder($script:SetupTaskFolder, 0) }
+}
+
+# SYSTEM by SID, quoted command (the path has spaces), never two at once, bounded; the action is the installed Updater.
+function New-SetupUpdateTaskDefinition {
+    param([string]$Description, [string]$Triggers, [string]$Updater, [string]$Arguments, [bool]$CatchUp)
+    $command = [Security.SecurityElement]::Escape('"' + $Updater + '"')
+    # PowerShell names ignore case: a $catchUp local would be the [bool] parameter and render True, which Task Scheduler rejects.
+    $startWhenAvailable = if ($CatchUp) { 'true' } else { 'false' }
+    return @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>$Description</Description></RegistrationInfo>
+  <Triggers>$Triggers</Triggers>
+  <Principals><Principal id="System"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>$startWhenAvailable</StartWhenAvailable>
+    <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="System"><Exec><Command>$command</Command><Arguments>$Arguments</Arguments></Exec></Actions>
+</Task>
+"@
+}
+
+# Held first, so it never starts a Setup during or after uninstall, then deleted.
+function Remove-SetupCentralUpdateTask {
+    [void](Suspend-SetupScheduledTask $script:CentralUpdateTaskName)
+    Unregister-SetupScheduledTask $script:CentralUpdateTaskName
+    Remove-SetupProgramsWriter
+}
+
+# MVP-7: Windows' shared Start Menu Programs folder may let the account that runs Setup write there (owner decision of
+# 2026-10-26). The nightly upgrade runs as SYSTEM, so when an administrator installs, repairs or upgrades, Setup records
+# that one account beside the update task's own record, and only the nightly upgrade accepts it (owner decision of
+# 2026-10-28). Administrators and SYSTEM only.
+function Get-SetupProgramsWriterRecord {
+    return (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) 'SentinelAI-Setup\central-update\programs-writer.json')
+}
+
+function Remove-SetupProgramsWriter {
+    $record = Get-SetupProgramsWriterRecord
+    if (Test-Path -LiteralPath $record) { Remove-Item -LiteralPath $record -Force }
+}
+
+function Sync-SetupProgramsWriter {
+    $current = Get-PilotCurrentOperatorSid
+    # The nightly upgrade keeps what an administrator's Setup recorded.
+    if ($current -ceq 'S-1-5-18') { return }
+    $programs = (Get-PilotSharedProgramsPath).TrimEnd('\')
+    $writes = $false
+    if ($current -cmatch '\AS-1-(?:5-21|12-1)-\d+-\d+-\d+-\d+\z' -and $programs.Length -ne 0 -and (Test-Path -LiteralPath $programs -PathType Container)) {
+        $rights = [Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+            [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+            [Security.AccessControl.FileSystemRights]::TakeOwnership
+        foreach ($rule in (Get-Acl -LiteralPath $programs).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+            if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $rule.IdentityReference.Value -ceq $current -and
+                ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and ($rule.FileSystemRights -band $rights) -ne 0) { $writes = $true }
+        }
+    }
+    Remove-SetupProgramsWriter
+    if (-not $writes) { return }
+    $record = Get-SetupProgramsWriterRecord
+    $directory = [IO.Path]::GetDirectoryName($record)
+    # Setup's own administrator-only staging folder, which this worker runs from, holds it; the update task's folder gets
+    # the same protection. Never created here: it would inherit ProgramData's Users write access.
+    $staging = [IO.Path]::GetDirectoryName($directory)
+    if (-not (Test-Path -LiteralPath $staging -PathType Container)) { throw 'Setup staging unavailable.' }
+    Assert-PilotTrustedPath -Path $staging
+    if (-not (Test-Path -LiteralPath $directory)) {
+        $security = New-Object Security.AccessControl.DirectorySecurity
+        $security.SetAccessRuleProtection($true, $false)
+        $security.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+        foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+            $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)),
+                [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+                [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)))
+        }
+        [void][IO.Directory]::CreateDirectory($directory, $security)
+    }
+    Assert-PilotTrustedPath -Path $directory
+    Write-PilotProtectedFile -Path $record -Content (@{ format = 'sentinelai-programs-writer-v1'; sid = $current } | ConvertTo-Json -Compress) -Kind Receipt
+}
+
+# Read only by the nightly upgrade: link-free, written by administrators or SYSTEM only, one ordinary account. Anything
+# else counts as no record, so Setup's ownership checks refuse that writer as before.
+function Read-SetupProgramsWriter {
+    $record = Get-SetupProgramsWriterRecord
+    try {
+        if (-not (Test-Path -LiteralPath $record -PathType Leaf)) { return $null }
+        Assert-PilotTrustedPath -Path $record
+        $document = Read-PilotStrictJson -Json (Read-PilotUtf8Document -Path $record -MaximumBytes 1024)
+        Assert-PilotObjectProperties -Object $document -Names @('format','sid')
+        if ($document.format -cne 'sentinelai-programs-writer-v1' -or $document.sid -cnotmatch '\AS-1-(?:5-21|12-1)-\d+-\d+-\d+-\d+\z') { return $null }
+        return [string]$document.sid
+    } catch { return $null }
+}
+
+# MVP-7: Core downloads a newer Setup into this folder. Core may create files but no folders in its data directory, so
+# Setup provides it with the data directory's rights: Core creates and changes its own files in it, and only administrators
+# and SYSTEM change the folder. The update task treats everything in it as untrusted.
+function Get-SetupCentralUpdateDownloads { param($Locations) return (Join-Path $Locations.CoreData 'central-update') }
+
+function Remove-SetupCentralUpdateDownloads {
+    param($Locations)
+    $downloads = Get-SetupCentralUpdateDownloads $Locations
+    if (-not (Test-Path -LiteralPath $downloads)) { return }
+    # Link-free and owned by administrators, SYSTEM or Core before anything below it is removed.
+    Assert-PilotTrustedPath -Path $downloads -Tree -AllowServiceWrite -ServiceWriteSid (Get-SetupLifecycleCoreSid) -ServiceWriteRoot $Locations.CoreData
+    Remove-Item -LiteralPath $downloads -Recurse -Force
+}
+
+# MVP-7: a build with the owner's update server gets the nightly task that installs a downloaded newer SentinelAI
+# (between 02:00 and 04:00, only while an administrator keeps automatic installation on); a build without one has none.
+function Sync-SetupCentralUpdateTask {
+    param($Locations)
+    if (-not (Test-Path -LiteralPath (Join-Path $Locations.CoreCode 'update-server.json') -PathType Leaf)) {
+        Unregister-SetupScheduledTask $script:CentralUpdateTaskName
+        Remove-SetupCentralUpdateDownloads $Locations
+        Remove-SetupProgramsWriter
+        return
+    }
+    Sync-SetupProgramsWriter
+    $downloads = Get-SetupCentralUpdateDownloads $Locations
+    if (-not (Test-Path -LiteralPath $downloads)) {
+        [void](New-Item -ItemType Directory -Path $downloads)
+        Set-CoreServiceAcl -Path $downloads -Kind DataDirectory
+    }
+    # An unchanged task is left as it is: each re-registration is an audited change on this monitored computer.
+    $updater = Join-Path $Locations.UpdaterCode 'SentinelAI.Updater.exe'
+    if (Test-SetupScheduledTask $script:CentralUpdateTaskName $updater 'apply-central-update') { return }
+    # Schema order: the trigger's common elements, then RandomDelay, then the schedule.
+    $triggers = '<CalendarTrigger><StartBoundary>2026-01-01T02:00:00</StartBoundary><Enabled>true</Enabled><RandomDelay>PT2H</RandomDelay><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger>'
+    Register-SetupScheduledTask $script:CentralUpdateTaskName (New-SetupUpdateTaskDefinition -Description 'Installs a SentinelAI update downloaded from the provider''s update server.' `
+        -Triggers $triggers -Updater $updater -Arguments 'apply-central-update' -CatchUp $false)
+}
+
 function Invoke-SetupInstallation {
     param($Request)
     $locations = Get-SetupLocations
@@ -327,12 +525,15 @@ function Invoke-SetupInstallation {
         Write-SetupProgress 'services'
         $started = Invoke-CoreServiceManagement -Action Start -CodeDirectory $locations.CoreCode -DataDirectory $locations.CoreData -TimeoutSeconds 60
         if ($started.component -cne 'Core') { throw 'Core service failed.' }
+        # Registered before the Agent first starts, so the task's own creation is not reported as a finding.
+        Sync-SetupCentralUpdateTask $locations
         Write-SetupProgress 'agent'
         $agent = Invoke-PilotInstall -Component Agent @policy -CodeDirectory $locations.AgentCode -DataDirectory $locations.AgentData -EnrollmentToken $Request.enrollmentToken -TimeoutSeconds 180
         if ($agent.component -cne 'Agent') { throw 'Agent service failed.' }
         Write-SetupProgress 'desktop'
         Install-SetupAuxiliaryCode -Source (Join-Path $Request.workDirectory 'desktop') -Destination $locations.DesktopCode -Executable 'SentinelAI.Desktop.exe' -PublicRead
-        Install-SetupAuxiliaryCode -Source (Join-Path $bundle 'updater') -Destination $locations.UpdaterCode -Executable 'SentinelAI.Updater.exe'
+        # MVP-7: Desktop's Install now checks the Updater before Windows elevates it, so Users may read and run it.
+        Install-SetupAuxiliaryCode -Source (Join-Path $bundle 'updater') -Destination $locations.UpdaterCode -Executable 'SentinelAI.Updater.exe' -PublicRead
         New-PilotProtectedDirectory -Path $locations.SetupData -Kind Container
         Write-PilotProtectedFile -Path (Join-Path $locations.SetupData 'public-key.pem') -Content ([IO.File]::ReadAllText($root)) -Kind Receipt
         $receipt = @{ format = 'sentinelai-setup-v1'; keyId = $Request.keyId; environment = 'development'; channel = $Request.channel;

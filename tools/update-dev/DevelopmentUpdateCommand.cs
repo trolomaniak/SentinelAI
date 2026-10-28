@@ -77,7 +77,7 @@ public static class DevelopmentUpdateCommand
                 var parameters = key.ExportParameters(false);
                 if (parameters.Curve.Oid.Value != ECCurve.NamedCurves.nistP256.Oid.Value || key.KeySize != 256) throw new ArgumentException();
                 await using var package = new FileStream(options["package"], FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
-                if (package.Length is <= 0 or > 512L * 1024 * 1024) throw new ArgumentException();
+                if (package.Length <= 0 || package.Length > UpdateManifestFormat.MaximumBytes(options["artifact-id"])) throw new ArgumentException();
                 var size = package.Length;
                 var hash = Convert.ToHexStringLower(await SHA256.HashDataAsync(package));
                 if (package.Position != size || package.Length != size) throw new ArgumentException();

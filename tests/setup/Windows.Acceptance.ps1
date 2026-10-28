@@ -451,17 +451,21 @@ function Get-SetupFailureSummary {
             }
         }
     } catch { }
-    $serviceProbeSucceeded = $true; $corePresent = $false; $agentPresent = $false
+    $serviceProbeSucceeded = $true; $corePresent = $false; $agentPresent = $false; $coreRunning = $false
     try {
-        $corePresent = $null -ne (Get-SetupService 'SentinelAICore')
+        $core = Get-SetupService 'SentinelAICore'
+        $corePresent = $null -ne $core
+        $coreRunning = $corePresent -and [string]$core.State -ceq 'Running'
         $agentPresent = $null -ne (Get-SetupService 'SentinelAIAgent')
     } catch { $serviceProbeSucceeded = $false }
-    return ('The actual Setup executable reported a safe installation failure. Stage="{0}"; ServiceProbeSucceeded={1}; CoreServicePresent={2}; AgentServicePresent={3}; CoreCodePresent={4}; CoreDataPresent={5}; AgentCodePresent={6}; AgentDataPresent={7}; DesktopCodePresent={8}; UpdaterCodePresent={9}; Ancestors: {10}.' -f
+    $updateTaskPresent = $false
+    try { $updateTaskPresent = @(Get-SetupCentralUpdateTask).Count -ne 0 } catch { }
+    return ('The actual Setup executable reported a safe installation failure. Stage="{0}"; ServiceProbeSucceeded={1}; CoreServicePresent={2}; CoreServiceRunning={11}; AgentServicePresent={3}; CoreCodePresent={4}; CoreDataPresent={5}; AgentCodePresent={6}; AgentDataPresent={7}; DesktopCodePresent={8}; UpdaterCodePresent={9}; UpdateTaskPresent={12}; Ancestors: {10}.' -f
         $stage, $serviceProbeSucceeded, $corePresent, $agentPresent,
         (Test-Path -LiteralPath $script:coreCode -PathType Container), (Test-Path -LiteralPath $script:coreData -PathType Container),
         (Test-Path -LiteralPath $script:agentCode -PathType Container), (Test-Path -LiteralPath $script:agentData -PathType Container),
         (Test-Path -LiteralPath $script:desktopCode -PathType Container), (Test-Path -LiteralPath $script:updaterCode -PathType Container),
-        (Get-SetupAncestorTrustSummary))
+        (Get-SetupAncestorTrustSummary), $coreRunning, $updateTaskPresent)
 }
 function Get-SetupTimeoutSummary {
     # Same disclosure rule as Get-SetupFailureSummary: fixed literals, service
@@ -927,6 +931,53 @@ function Assert-SetupSecurityLogAccess([bool]$Granted, [string]$When) {
         Assert-SetupAcceptance ($null -eq $baselineValue) ($When + ': the recorded audit setting remained.')
     }
 }
+# MVP-7: a build with the provider's update server has the nightly SYSTEM task, and Core reports checking off.
+function Get-SetupCentralUpdateTask { return @(Get-ScheduledTask -TaskPath '\SentinelAI\' -TaskName 'SentinelAI Update' -ErrorAction SilentlyContinue) }
+function Assert-SetupCentralUpdate {
+    $configured = Test-Path -LiteralPath (Join-Path $script:coreCode 'update-server.json') -PathType Leaf
+    $tasks = @(Get-SetupCentralUpdateTask)
+    $status = Invoke-SetupCoreRequest '/api/admin/updates' 'GET' $null $script:accessToken | ConvertFrom-Json
+    if (-not $configured) {
+        Assert-SetupAcceptance ($tasks.Count -eq 0 -and $status.configured -eq $false) 'A build without an update server has update settings or the nightly task.'
+        return
+    }
+    $user = if ($tasks.Count -eq 1) { [string]$tasks[0].Principal.UserId } else { '' }
+    $sid = if ($user -like 'S-1-*' -or $user.Length -eq 0) { $user } else { ([Security.Principal.NTAccount]$user).Translate([Security.Principal.SecurityIdentifier]).Value }
+    Assert-SetupAcceptance ($tasks.Count -eq 1 -and [string]$tasks[0].State -cne 'Disabled' -and @($tasks[0].Actions).Count -eq 1 -and
+        [string]$tasks[0].Actions[0].Execute -ceq ('"' + (Join-Path $script:updaterCode 'SentinelAI.Updater.exe') + '"') -and
+        [string]$tasks[0].Actions[0].Arguments -ceq 'apply-central-update' -and $sid -ceq 'S-1-5-18') 'Setup did not register the nightly SYSTEM update task.'
+    Assert-SetupAcceptance ($status.configured -eq $true -and $status.checkEnabled -eq $false -and $status.autoInstall -eq $true -and
+        [string]$status.lastCheck -ceq 'never' -and $null -eq $status.readyVersion) 'Core did not report central updates off by default.'
+    # Core creates no folders in its data directory: Setup provides the download folder, which Core may fill but not remove.
+    $downloads = Join-Path $script:coreData 'central-update'
+    $acl = if (Test-Path -LiteralPath $downloads -PathType Container) { Get-Acl -LiteralPath $downloads } else { $null }
+    $coreFolderRights = @(if ($null -ne $acl) { $acl.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -ceq $coreSid -and
+        ($_.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 } | ForEach-Object { $_.FileSystemRights } })
+    Assert-SetupAcceptance ($null -ne $acl -and $acl.AreAccessRulesProtected -and $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ceq 'S-1-5-32-544' -and
+        @(Get-ChildItem -LiteralPath $downloads -Force).Count -eq 0 -and $coreFolderRights.Count -eq 1 -and
+        ($coreFolderRights[0] -band [Security.AccessControl.FileSystemRights]::CreateFiles) -ne 0 -and
+        ($coreFolderRights[0] -band ([Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::CreateDirectories -bor
+            [Security.AccessControl.FileSystemRights]::ChangePermissions)) -eq 0) 'Setup did not provide the protected, empty download folder Core fills.'
+    # The account running Setup is recorded for the nightly upgrade exactly when it may write to the shared Programs folder.
+    $operator = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $writeRights = [Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $operatorWrites = @((Get-Acl -LiteralPath ([Environment]::GetFolderPath('CommonPrograms'))).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+        Where-Object { $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $_.IdentityReference.Value -ceq $operator -and
+            ($_.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and ($_.FileSystemRights -band $writeRights) -ne 0 }).Count -ne 0
+    $writerRecord = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'SentinelAI-Setup\central-update\programs-writer.json'
+    if ($operatorWrites) {
+        $recordAcl = Get-Acl -LiteralPath $writerRecord
+        Assert-SetupAcceptance ([string](Get-Content -Raw -LiteralPath $writerRecord | ConvertFrom-Json).sid -ceq $operator -and
+            $recordAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ceq 'S-1-5-32-544' -and
+            @($recordAcl.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-32-544','S-1-5-18') }).Count -eq 0) 'Setup did not record the Start Menu account for the nightly upgrade.'
+    } else {
+        Assert-SetupAcceptance (-not (Test-Path -LiteralPath $writerRecord)) 'Setup recorded a Start Menu account that cannot write there.'
+    }
+    Write-Output ('StartMenuAccountRecorded: ' + $operatorWrites)
+}
+
 function Get-SetupAgentAlerts([Guid]$EndpointId, [string]$RuleId) {
     $page = Invoke-SetupCoreRequest ('/api/admin/alerts?endpointId=' + $EndpointId.ToString('D') + '&limit=100') 'GET' $null $script:accessToken | ConvertFrom-Json
     return @($page.alerts | Where-Object { [string]$_.ruleId -ceq $RuleId })
@@ -1042,7 +1093,7 @@ try {
     Assert-ServiceAcl $agentCode $localServiceSid $readExecute $mutation
     Assert-ServiceAcl (Join-Path $coreCode 'coreclr.dll') $coreSid $readExecute $mutation
     Assert-ServiceAcl (Join-Path $agentCode 'coreclr.dll') $localServiceSid $readExecute $mutation
-    Assert-ServiceAcl (Join-Path $updaterCode 'coreclr.dll') 'S-1-5-32-545' 0 $mutation
+    Assert-ServiceAcl (Join-Path $updaterCode 'coreclr.dll') 'S-1-5-32-545' $readExecute $mutation
     Assert-ServiceAcl $agentData $localServiceSid $modify 0
     Assert-ServiceAcl (Join-Path $coreData 'sentinelai.db') $coreSid $modify 0
     $parentMutation = [int]([Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::Delete -bor
@@ -1106,6 +1157,7 @@ try {
         $pilotStatus = $null
     }
     Wait-ExactEndpoint $endpointId $installationSince
+    Assert-SetupCentralUpdate
     $stateDigest = Read-SetupStateDigest $statePath
     $identityDigest = Read-SetupStateDigest (Join-Path $agentData 'installation-id')
     $agentService = Get-Service 'SentinelAIAgent'
@@ -1131,6 +1183,8 @@ try {
         $system.Count -eq 1 -and [string]$system[0].state -ceq 'collecting' -and $null -ne $system[0].checkpointRecordId -and
             $security.Count -eq 1 -and [string]$security[0].state -ceq 'collecting' -and $null -ne $security[0].checkpointRecordId
     } 'The installed LocalService Agent did not report System and Security collecting.' $script:TimeoutSeconds
+    # Setup registers its own update task before the Agent first starts, so the task is never reported as a finding.
+    Assert-SetupAcceptance (@(Get-SetupAgentAlerts $endpointId 'SA-EVT-PERSIST-003').Count -eq 0) 'Setup''s own update task was reported as a finding.'
     # A scheduled task outside \Microsoft\ is audited as Security 4698 and raises SA-EVT-PERSIST-003.
     $taskProbe = '\SentinelAIAcceptance' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
     try {

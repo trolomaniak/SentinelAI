@@ -20,15 +20,17 @@ public partial class App : Application
         string? product = null;
         try { using var installation = EmbeddedInstallation.Open(); product = installation.Metadata.Product; }
         catch (Exception) { }
-        var quiet = arguments.Mode is SetupMode.QuietInstall or SetupMode.QuietUninstall;
+        var quiet = arguments.Mode is SetupMode.QuietInstall or SetupMode.QuietUninstall or SetupMode.QuietUpgrade;
         if (product == SetupMetadata.AgentProduct)
         {
+            if (arguments.Mode == SetupMode.QuietUpgrade) { Finish(AgentSetupExitCode.InvalidArguments); return; }
             if (quiet) { RunQuiet(arguments, _image); return; }
             MainWindow = new AgentSetupWindow(_image, arguments.Mode == SetupMode.Uninstall);
         }
         else
         {
-            // The full Setup has no quiet mode; its interactive window reports an unreadable payload itself.
+            // The full Setup's only quiet mode is the unattended upgrade; its interactive window reports an unreadable payload itself.
+            if (arguments.Mode == SetupMode.QuietUpgrade && product is not null) { RunQuietUpgrade(_image); return; }
             if (quiet) { Finish(product is null ? AgentSetupExitCode.Failed : AgentSetupExitCode.InvalidArguments); return; }
             MainWindow = new SetupWindow(_image, arguments.Mode == SetupMode.Uninstall);
         }
@@ -42,10 +44,19 @@ public partial class App : Application
         finally { Finish(code); }
     }
 
-    private void Finish(AgentSetupExitCode code)
+    private async void RunQuietUpgrade(SafeFileHandle image)
     {
-        Properties["ExitCode"] = (int)code;
-        Shutdown((int)code);
+        var code = SetupUpgradeExitCode.Failed;
+        try { code = await QuietUpgrade.RunAsync(image); }
+        finally { Finish((int)code); }
+    }
+
+    private void Finish(AgentSetupExitCode code) => Finish((int)code);
+
+    private void Finish(int code)
+    {
+        Properties["ExitCode"] = code;
+        Shutdown(code);
     }
 
     protected override void OnExit(ExitEventArgs e)

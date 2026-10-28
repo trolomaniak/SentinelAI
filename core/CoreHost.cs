@@ -109,6 +109,16 @@ public static class CoreHost
         builder.Services.AddSingleton<LicenseStateStore>();
         builder.Services.AddSingleton(PilotLicenseOptions.Load(builder.Configuration));
         builder.Services.AddSingleton(AgentUpdatePackage.Load(builder.Configuration));
+        // MVP-7: the optional central update from the owner's server, off until an administrator enables it.
+        builder.Services.AddSingleton(CentralUpdateOptions.Load(builder.Configuration));
+        builder.Services.AddSingleton<CentralUpdateStore>();
+        builder.Services.AddSingleton(services => new CentralUpdateService(
+            services.GetRequiredService<CentralUpdateOptions>(),
+            Path.Combine(Path.GetDirectoryName(services.GetRequiredService<AdminStore>().DatabasePath)!, "central-update"),
+            services.GetRequiredService<CentralUpdateStore>(),
+            new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = Timeout.InfiniteTimeSpan },
+            services.GetRequiredService<TimeProvider>(),
+            services.GetRequiredService<ILogger<CentralUpdateService>>()));
         builder.Services.AddSingleton<LicenseClock>();
         builder.Services.AddSingleton<ILicenseLeaseClient, LicenseLeaseClient>();
         builder.Services.AddSingleton<LicenseStateService>();
@@ -118,6 +128,7 @@ public static class CoreHost
         builder.Services.AddSingleton<AiExplanationService>();
         builder.Services.AddHostedService<AdminInitializationService>();
         builder.Services.AddHostedService<LicenseRenewalWorker>();
+        builder.Services.AddHostedService(services => services.GetRequiredService<CentralUpdateService>());
 
         builder.Services.AddDataProtection()
             .UseEphemeralDataProtectionProvider()
@@ -969,6 +980,34 @@ public static class CoreHost
                 };
             }).RequireAuthorization().RequireRateLimiting("license-verification")
             .WithMetadata(new RequestSizeLimitAttribute(4096));
+
+        // MVP-7: the optional central update from the owner's update server; checking is off until enabled here.
+        app.MapGet("/api/admin/updates", async (HttpContext context, CentralUpdateService updates,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Ok(await updates.GetStatusAsync(cancellationToken));
+            }).RequireAuthorization();
+
+        app.MapPost("/api/admin/updates/settings", async (CentralUpdateSettingsRequest? request, HttpContext context,
+                CentralUpdateService updates, CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (request?.CheckEnabled is not { } checkEnabled || request.AutoInstall is not { } autoInstall) return Results.BadRequest();
+                var status = await updates.SetSettingsAsync(checkEnabled, autoInstall, cancellationToken);
+                return status is null ? Results.NotFound() : Results.Ok(status);
+            }).RequireAuthorization().WithMetadata(new RequestSizeLimitAttribute(1024));
+
+        app.MapPost("/api/admin/updates/check", async (HttpContext context, CentralUpdateService updates,
+                CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (context.Request.ContentLength > 0) return Results.BadRequest();
+                // 409: this build has no update server, or an administrator has not enabled checking.
+                var status = await updates.CheckNowAsync(cancellationToken);
+                return status is null ? Results.Conflict() : Results.Ok(status);
+            }).RequireAuthorization().WithMetadata(new RequestSizeLimitAttribute(1024));
 
         app.MapPost("/api/admin/license/renew", async (HttpContext context, LicenseStateService licensing,
                 CancellationToken cancellationToken) =>

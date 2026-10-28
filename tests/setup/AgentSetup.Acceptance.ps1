@@ -167,7 +167,7 @@ function Invoke-AgentSetup([string[]]$Arguments, [string]$Executable = $script:A
 
 # MVP-7: the installed Updater, as SYSTEM, from a task that only administrators and SYSTEM can change.
 function Assert-AgentUpdateTask {
-    $tasks = @(Get-ScheduledTask -TaskPath $script:updateTaskPath -ErrorAction SilentlyContinue)
+    $tasks = @(Get-ScheduledTask -TaskPath $script:updateTaskPath -TaskName $script:updateTaskName -ErrorAction SilentlyContinue)
     $user = if ($tasks.Count -eq 1) { [string]$tasks[0].Principal.UserId } else { '' }
     $sid = if ($user -like 'S-1-*' -or $user.Length -eq 0) { $user } else { ([Security.Principal.NTAccount]$user).Translate([Security.Principal.SecurityIdentifier]).Value }
     $updater = '"' + (Join-Path $script:agentProductCode 'Updater\SentinelAI.Updater.exe') + '"'
@@ -193,7 +193,7 @@ function Get-AgentReceiptVersion { return [string]([IO.File]::ReadAllText($scrip
 
 function Assert-AgentSetupAbsent([string]$Label, [int]$Devices = -1) {
     Assert-SetupAcceptance ($null -eq (Get-SetupService 'SentinelAIAgent')) ($Label + ': an Agent service exists.')
-    Assert-SetupAcceptance (@(Get-ScheduledTask -TaskPath $script:updateTaskPath -ErrorAction SilentlyContinue).Count -eq 0) ($Label + ': the Agent update task remained.')
+    Assert-SetupAcceptance (@(Get-ScheduledTask -TaskPath $script:updateTaskPath -TaskName $script:updateTaskName -ErrorAction SilentlyContinue).Count -eq 0) ($Label + ': the Agent update task remained.')
     Assert-SetupSecurityLogAccess $false $Label
     foreach ($path in @($script:agentProductCode, $script:agentProductData, $script:appsKey)) {
         Assert-SetupAcceptance (-not (Test-Path -LiteralPath $path)) ($Label + ': Agent Setup left ' + $path)

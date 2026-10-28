@@ -32,13 +32,16 @@ internal static class AgentSetupTests
         Ensure(SetupArguments.TryParse(["--image", "8", "--uninstall", "--quiet"], out parsed) && parsed!.Mode == SetupMode.QuietUninstall, "quiet uninstall");
         Ensure(SetupArguments.TryParse(["--image", "8", "--quiet", "--codefile", root], out parsed) &&
                parsed == new SetupArguments(SetupMode.QuietInstall, 8, root), "quiet install with a code file");
+        Ensure(SetupArguments.TryParse(["--image", "8", "--upgrade", "--quiet"], out parsed) && parsed!.Mode == SetupMode.QuietUpgrade, "quiet upgrade");
         foreach (var invalid in new string[][]
         {
             [], ["--uninstall"], ["--image"], ["--image", "0"], ["--image", "08"], ["--image", "-8"], ["--image", "x"], ["--image", "99999999999999999999"],
             ["--image", "8", "--quiet"], ["--image", "8", "--codefile", root], ["--image", "8", "--quiet", "--codefile"],
             ["--image", "8", "--quiet", "--codefile", "relative.sentinelai-enroll"], ["--image", "8", "--quiet", "--uninstall"],
             ["--image", "8", "--UNINSTALL"], ["--image", "8", "/uninstall"], ["--image", "8", "--uninstall", "--quiet", "--quiet"],
-            ["--image", "8", "--quiet", "--codefile", root, "--uninstall"], ["--image", "8", "--image", "9"]
+            ["--image", "8", "--quiet", "--codefile", root, "--uninstall"], ["--image", "8", "--image", "9"],
+            ["--image", "8", "--upgrade"], ["--image", "8", "--quiet", "--upgrade"], ["--image", "8", "--upgrade", "--uninstall"], ["--image", "8", "--upgrade", "--quiet", "--quiet"],
+            ["--image", "8", "--UPGRADE"], ["--image", "8", "/upgrade"], ["--image", "8", "--upgrade", "--quiet", "--codefile", root]
         })
             Ensure(!SetupArguments.TryParse(invalid, out parsed) && parsed is null, "rejects " + string.Join(' ', invalid));
 

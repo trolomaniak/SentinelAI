@@ -632,12 +632,14 @@ namespace
     // Documented exit codes shared with the Setup host (docs/SETUP.md).
     constexpr int kInvalidArguments = 2;
 
-    // The only accepted command lines: none; "/uninstall"; "/uninstall /quiet"; "/quiet /codefile <path>".
-    // Options are case-insensitive and may come in any order; the host receives them in one canonical form.
+    // The only accepted command lines: none; "/uninstall"; "/uninstall /quiet"; "/quiet /codefile <path>"; and the full
+    // Setup's unattended upgrade (MVP-7) "/upgrade /quiet". Options are case-insensitive and may come in any order; the
+    // host receives them in one canonical form and refuses those its product does not support.
     struct Options
     {
         bool quiet = false;
         bool uninstall = false;
+        bool upgrade = false;
         std::wstring code_file;
     };
 
@@ -672,6 +674,7 @@ namespace
             const std::wstring argument(values[index]);
             if (EqualOrdinal(argument, L"/quiet") && !options.quiet) options.quiet = true;
             else if (EqualOrdinal(argument, L"/uninstall") && !options.uninstall) options.uninstall = true;
+            else if (EqualOrdinal(argument, L"/upgrade") && !options.upgrade) options.upgrade = true;
             else if (EqualOrdinal(argument, L"/codefile") && !code_file && index + 1 < count)
             {
                 code_file = true;
@@ -687,7 +690,8 @@ namespace
             }
             else Require(false);
         }
-        Require(options.uninstall ? !code_file : code_file == options.quiet);
+        Require(!options.upgrade || (options.quiet && !options.uninstall));
+        Require(options.uninstall || options.upgrade ? !code_file : code_file == options.quiet);
         return options;
     }
 
@@ -739,6 +743,7 @@ namespace
         const std::wstring executable = staging.Path() + L"\\" + kHostName;
         std::wstring command = L"\"" + executable + L"\" --image " + std::to_wstring(reinterpret_cast<std::uintptr_t>(image));
         if (options.uninstall) command += options.quiet ? L" --uninstall --quiet" : L" --uninstall";
+        else if (options.upgrade) command += L" --upgrade --quiet";
         else if (options.quiet) command += L" --quiet --codefile \"" + options.code_file + L"\"";
         std::vector<wchar_t> command_line(command.begin(), command.end());
         command_line.push_back(L'\0');
@@ -790,7 +795,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         {
             // Only /quiet suppresses this message; any other text is never interpreted.
             if (!HasQuietOption(api) && api.message_box)
-                api.message_box(nullptr, L"SentinelAI Setup accepts no options, /uninstall, /uninstall /quiet or /quiet /codefile <path>.",
+                api.message_box(nullptr, L"SentinelAI Setup accepts no options, /uninstall, /uninstall /quiet, /upgrade /quiet or /quiet /codefile <path>.",
                     L"SentinelAI Setup", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
             return kInvalidArguments;
         }

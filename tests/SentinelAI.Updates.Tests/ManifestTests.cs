@@ -171,6 +171,11 @@ public static class ManifestTests
             Throws<ArgumentException>(() => UpdateManifestFormat.CreateSigningData(manifest with { Sha256 = hash }, KeyId));
         foreach (var size in new[] { 0L, -1, UpdateManifestFormat.MaximumArtifactBytes + 1 })
             Throws<ArgumentException>(() => UpdateManifestFormat.CreateSigningData(manifest with { SizeBytes = size }, KeyId));
+        // MVP-7: only the full Setup executable may exceed the package bound, and only up to 1 GiB.
+        var setup = manifest with { ArtifactId = UpdateManifestFormat.SetupArtifactId };
+        Check(UpdateManifestFormat.CreateSigningData(setup with { SizeBytes = UpdateManifestFormat.MaximumSetupArtifactBytes }, KeyId).Length > 0,
+            "A full Setup up to 1 GiB must be signable.");
+        Throws<ArgumentException>(() => UpdateManifestFormat.CreateSigningData(setup with { SizeBytes = UpdateManifestFormat.MaximumSetupArtifactBytes + 1 }, KeyId));
         foreach (var channel in new[] { "", "Stable", "canary", "pilot/beta" })
             Throws<ArgumentException>(() => UpdateManifestFormat.CreateSigningData(manifest with { Channel = channel }, KeyId));
         foreach (var environment in new[] { "", "test", "Production", "production\n" })
