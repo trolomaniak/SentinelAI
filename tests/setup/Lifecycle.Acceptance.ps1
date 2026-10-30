@@ -259,7 +259,11 @@ function Assert-LifecycleVersion([string]$Version, [switch]$AllowLegacy) {
     }
 }
 function Select-LifecycleAction([string]$Name) {
-    Wait-SetupAcceptance { Test-SetupControl 'SetupLifecycleAction' } 'Setup did not expose detected lifecycle actions.'
+    # Inspection walks every owned tree with its ownership checks, which after an upgrade can take longer than 30 seconds.
+    try { Wait-SetupAcceptance { Test-SetupControl 'SetupLifecycleAction' } 'Setup did not expose detected lifecycle actions.' 120 }
+    catch {
+        throw ((Get-SetupFailureSummary) -replace '\AThe actual Setup executable reported a safe installation failure\. ', 'Setup did not expose detected lifecycle actions. ')
+    }
     $control = Find-SetupControl 'SetupLifecycleAction'
     $expand = [Windows.Automation.ExpandCollapsePattern]$control.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern)
     $expand.Expand()

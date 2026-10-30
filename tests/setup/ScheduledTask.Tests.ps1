@@ -1,6 +1,7 @@
 # Windows-only (MVP-7): the Setup's real update task definitions are registered with Task Scheduler in a throwaway
-# folder, read back and removed, and the download folder Core fills is provided with Core's data rights. Synthetic paths
-# only; nothing runs. Requires an elevated Windows PowerShell 5.1.
+# folder, read back and removed, the download folder Core fills is provided with Core's data rights, and a synthetic
+# probe shows that a process a SYSTEM task starts outlives the task. Synthetic paths and scripts only. Requires an
+# elevated Windows PowerShell 5.1.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -73,26 +74,25 @@ try {
     try { [void](Get-SetupTaskRoot).GetFolder($script:SetupTaskFolder) } catch { $folderRemoved = $true }
     Assert-TaskTest $folderRemoved 'the empty task folder was kept'
 
-    # The nightly Updater starts SentinelAI Setup and exits, because the upgrade replaces the Updater too. This probe
-    # shows whether a process started that way outlives a SYSTEM task, directly and through WMI (synthetic scripts only).
+    # The nightly Updater starts SentinelAI Setup and exits, because the upgrade replaces the Updater too: a process it
+    # starts must outlive the SYSTEM task (synthetic scripts only).
     $probe = Join-Path $work 'probe'
     [void][IO.Directory]::CreateDirectory($probe)
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $marker = Join-Path $probe 'alive'
     [IO.File]::WriteAllText((Join-Path $probe 'child.ps1'), 'param([string]$Marker) Start-Sleep -Seconds 15; [IO.File]::WriteAllText($Marker, ''alive'')')
-    $child = '"' + $powershell + '" -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $probe 'child.ps1') + '" -Marker "'
     [IO.File]::WriteAllText((Join-Path $probe 'parent.ps1'), (
-        '$start = New-Object Diagnostics.ProcessStartInfo(''' + $powershell + ''', ''-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $probe 'child.ps1') + '" -Marker "' + (Join-Path $probe 'direct') + '"'')' + "`r`n" +
-        '$start.UseShellExecute = $false; [void][Diagnostics.Process]::Start($start)' + "`r`n" +
-        '[void](Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ''' + $child + (Join-Path $probe 'wmi') + '"'' })'))
+        '$start = New-Object Diagnostics.ProcessStartInfo(''' + $powershell + ''', ''-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $probe 'child.ps1') + '" -Marker "' + $marker + '"'')' + "`r`n" +
+        '$start.UseShellExecute = $false; [void][Diagnostics.Process]::Start($start)'))
     $triggers = '<TimeTrigger><StartBoundary>2099-01-01T00:00:00</StartBoundary><Enabled>true</Enabled></TimeTrigger>'
     Register-SetupScheduledTask 'SentinelAI Child Probe' (New-SetupUpdateTaskDefinition -Description 'Synthetic probe.' -Triggers $triggers -Updater $powershell `
         -Arguments ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $probe 'parent.ps1') + '"') -CatchUp $false)
     [void](Get-SetupScheduledTask 'SentinelAI Child Probe').Run($null)
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
-    while ([DateTime]::UtcNow -lt $deadline -and -not ((Test-Path -LiteralPath (Join-Path $probe 'direct')) -and (Test-Path -LiteralPath (Join-Path $probe 'wmi')))) { Start-Sleep -Seconds 1 }
+    while ([DateTime]::UtcNow -lt $deadline -and -not (Test-Path -LiteralPath $marker)) { Start-Sleep -Seconds 1 }
     $probeTask = Get-SetupScheduledTask 'SentinelAI Child Probe'
-    Write-Output ('SetupTaskChildProbe: TaskState={0}; TaskResult={1}; DirectChildSurvived={2}; WmiChildSurvived={3}' -f $probeTask.State, $probeTask.LastTaskResult,
-        (Test-Path -LiteralPath (Join-Path $probe 'direct')), (Test-Path -LiteralPath (Join-Path $probe 'wmi')))
+    # TASK_STATE_READY (3): the task had ended while its child kept running.
+    Assert-TaskTest ((Test-Path -LiteralPath $marker) -and $probeTask.State -eq 3 -and $probeTask.LastTaskResult -eq 0) 'a process started by a SYSTEM task did not outlive the task'
     Unregister-SetupScheduledTask 'SentinelAI Child Probe'
 } finally {
     try {
