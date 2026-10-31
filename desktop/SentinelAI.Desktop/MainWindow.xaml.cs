@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     public DevicesViewModel? Devices { get; }
     public AlertsViewModel? Alerts { get; }
     public RiskViewModel? Risk { get; }
+    public RiskRegisterViewModel? RiskRegister { get; }
     public ReportsViewModel? Reports { get; }
     public LicenseViewModel? License { get; }
     public LocalNetworkViewModel? LocalNetwork { get; }
@@ -57,7 +58,8 @@ public partial class MainWindow : Window
         DesktopIntegrationViewModel? desktopIntegration, WindowsServiceStatusModel? serviceStatus,
         LocalNetworkViewModel? localNetwork = null, ComputerEnrollmentViewModel? computerEnrollment = null,
         PilotLicenseViewModel? pilot = null, CentralUpdateViewModel? centralUpdate = null,
-        VulnerabilityFeedViewModel? vulnerabilityFeed = null, DeviceVulnerabilitiesViewModel? deviceVulnerabilities = null)
+        VulnerabilityFeedViewModel? vulnerabilityFeed = null, DeviceVulnerabilitiesViewModel? deviceVulnerabilities = null,
+        RiskRegisterViewModel? riskRegister = null)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
@@ -66,6 +68,7 @@ public partial class MainWindow : Window
         Devices = devices;
         Alerts = alerts;
         Risk = risk;
+        RiskRegister = riskRegister;
         Reports = reports;
         License = license;
         LocalNetwork = localNetwork;
@@ -81,6 +84,7 @@ public partial class MainWindow : Window
         if (devices is not null) devices.SessionExpired += OnWorkspaceSessionExpired;
         if (alerts is not null) alerts.SessionExpired += OnWorkspaceSessionExpired;
         if (risk is not null) risk.SessionExpired += OnWorkspaceSessionExpired;
+        if (riskRegister is not null) riskRegister.SessionExpired += OnWorkspaceSessionExpired;
         if (reports is not null) reports.SessionExpired += OnWorkspaceSessionExpired;
         if (license is not null)
         {
@@ -152,7 +156,7 @@ public partial class MainWindow : Window
         {
             AiExplanation?.Clear(); License?.Clear(); LocalNetwork?.Clear(); ComputerEnrollment?.Clear(); Pilot?.Clear(); CentralUpdate?.Clear();
             VulnerabilityFeed?.Clear(); DeviceVulnerabilities?.Clear();
-            Devices?.Clear(); Alerts?.Clear(); Risk?.Clear(); Reports?.Clear();
+            Devices?.Clear(); Alerts?.Clear(); Risk?.Clear(); RiskRegister?.Clear(); Reports?.Clear();
         }
         else if (authorizationChanged)
         {
@@ -177,6 +181,7 @@ public partial class MainWindow : Window
         Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices ? "DevicesTemplate" :
         Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts ? "AlertsTemplate" :
         Risk is not null && _viewModel.CurrentPage.Id == PageId.Risk ? "RiskTemplate" :
+        RiskRegister is not null && _viewModel.CurrentPage.Id == PageId.RiskRegister ? "RiskRegisterTemplate" :
         Reports is not null && _viewModel.CurrentPage.Id == PageId.Reports ? "ReportsTemplate" :
         License is not null && _viewModel.CurrentPage.Id == PageId.Settings ? "SettingsTemplate" : "PlaceholderTemplate");
 
@@ -194,6 +199,7 @@ public partial class MainWindow : Window
         if (Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
         else if (Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts) await Alerts.RefreshAsync();
         else if (Risk is not null && _viewModel.CurrentPage.Id == PageId.Risk) await Risk.RefreshAsync();
+        else if (RiskRegister is not null && _viewModel.CurrentPage.Id == PageId.RiskRegister) await RiskRegister.RefreshAsync();
     }
 
     private void OnLicenseChanged(object? sender, PropertyChangedEventArgs e)
@@ -260,6 +266,7 @@ public partial class MainWindow : Window
             Alerts.SessionExpired -= OnWorkspaceSessionExpired; Alerts.Dispose();
         }
         if (Risk is not null) { Risk.SessionExpired -= OnWorkspaceSessionExpired; Risk.Dispose(); }
+        if (RiskRegister is not null) { RiskRegister.SessionExpired -= OnWorkspaceSessionExpired; RiskRegister.Dispose(); }
         if (Reports is not null) { Reports.SessionExpired -= OnWorkspaceSessionExpired; Reports.Dispose(); }
         if (License is not null)
         {

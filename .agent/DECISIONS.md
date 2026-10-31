@@ -328,3 +328,10 @@ Implements the owner decisions above (TLS policy, pin-only trust, Domain/Private
 - **Alerts and Risk.** Fixed policy, no model: SA-VULN-001 critical (CISA KEV), SA-VULN-002 high (other, CVSS critical), SA-VULN-003 medium (other, CVSS high). Lower severities are listed but raise no alert. The rules are evaluated at telemetry ingest and scored as telemetry detections, so new data reaches alerts at each computer's next hourly report.
 - **Freshness.** Version, build time, age (stale after 14 days), sources and retrieval times are shown in Settings and with every device assessment. No patch is executed.
 
+## 2026-10-31 — Order after TASK-030 (owner decision) and TASK-032 Risk Register
+
+- **Order (owner decision).** TASK-032 (Risk Management v2) comes before TASK-031 (Risk History and Trends). After TASK-032: a Polish language version of the application, then a final MVP review with fixes and the first cold emails.
+- **Business risk apart from the technical score.** A register record is an administrator's judgement: likelihood × impact from 1 to 5 before and after existing controls (levels Low 1–4, Medium 5–9, High 10–16, Critical 20–25), never higher after controls. It is a separate page and API and never changes an alert, its status, a detection rule or a score.
+- **Accepted risks.** Treatment Accept needs a named owner, a rationale and an expiry at most 366 days after it is set; a date that is set or changed may not already lie in the past. Overdue reviews, expired acceptances and passed target dates of open risks are flagged and listed first.
+- **Auditable history.** Every create, change and review appends an entry (version, UTC time, administrator, field old and new values, note); entries are never edited. Writes name the version that was read and are refused on a conflict; Desktop never repeats a save whose answer was lost.
+- **Bounds.** 2,000 records, 200 history entries per record, 32 computers, 64 alerts and 16 tickets per record; links are added only to enrolled computers and tracked alerts and may outlive them. Status is Open, Monitoring (needs a treatment) or Closed; there is no deletion.

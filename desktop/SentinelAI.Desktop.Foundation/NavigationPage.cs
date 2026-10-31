@@ -6,6 +6,7 @@ public enum PageId
     Devices,
     Alerts,
     Risk,
+    RiskRegister,
     Reports,
     Settings
 }

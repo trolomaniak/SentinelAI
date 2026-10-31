@@ -18,6 +18,9 @@
         <DataTemplate x:Key="RiskTemplate">
             <views:RiskView DataContext="{Binding Risk, RelativeSource={RelativeSource AncestorType=Window}}" />
         </DataTemplate>
+        <DataTemplate x:Key="RiskRegisterTemplate">
+            <views:RiskRegisterView DataContext="{Binding RiskRegister, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </DataTemplate>
         <DataTemplate x:Key="ReportsTemplate">
             <views:ReportsView DataContext="{Binding Reports, RelativeSource={RelativeSource AncestorType=Window}}" />
         </DataTemplate>

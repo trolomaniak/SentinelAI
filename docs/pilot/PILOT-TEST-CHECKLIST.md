@@ -130,7 +130,19 @@ Do it once on Windows 10 and once on Windows 11, with B reporting.
 - [ ] The same view lists programs that were not assessed, for example an ambiguous match, and states whether Windows was assessed.
 - [ ] With checking for updates on, upload a newer signed file to `<URL>/vulnerability-feed.manifest.json` and `<URL>/vulnerability-feed/<version>/vulnerability-feed.json`. After **Check now**, Settings shows the newer version, downloaded from the update server.
 
-## 10. Record
+## 10. Risk Register
+
+Do it once on Windows 10 and once on Windows 11, with B enrolled and at least one alert for B.
+
+- [ ] Desktop → **Risk Register** says business ratings never change alerts, detection or the technical score, and lists no records.
+- [ ] **New risk**: enter a title, owner, ratings (residual lower than inherent), treatment **Mitigate**, a target date and the next review. Tick B, select **Show alerts of the ticked computers**, tick one alert and add a ticket reference. **Save**: the record gets `R-0001`, its history shows the creation.
+- [ ] Set the treatment to **Accept** without a rationale or expiry: Core refuses and names what is missing. Add a rationale and an expiry more than a year ahead: refused. Choose an expiry within a year: saved.
+- [ ] **Alerts** and **Risk** for B are unchanged by the accepted register risk (same alert status and score).
+- [ ] Switch to another Windows user on A, sign in to Desktop, open the same record and save a change. Back in the first session, save a different change: it is refused and asks to open the record again.
+- [ ] **Record a review** with a date after today and a note: the history shows the review and the reviewer.
+- [ ] Filters by status, treatment, residual level and **Needing attention only** select the expected records. Restart the central computer: records and history are still there.
+
+## 11. Record
 
 - [ ] Note any SmartScreen, Smart App Control or antivirus behavior seen on each computer.
 - [ ] Note anything the customer documents describe differently from what you saw, and correct the documents before release.

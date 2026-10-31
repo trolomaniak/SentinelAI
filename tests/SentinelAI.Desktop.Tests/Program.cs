@@ -28,6 +28,7 @@ assertions += await DesktopIntegrationTests.RunAsync();
 assertions += await PilotLicenseTests.RunAsync();
 assertions += await CentralUpdateSettingsTests.RunAsync();
 assertions += await VulnerabilityTests.RunAsync();
+assertions += await RiskRegisterTests.RunAsync();
 Console.WriteLine($"Desktop foundation: {assertions} assertions passed.");
 
 void Ensure(bool condition, string message)
@@ -72,14 +73,14 @@ void NavigationTests()
         shell.CurrentPage = page;
         Ensure(ReferenceEquals(shell.CurrentPage, page), "Navigation failed to select its placeholder.");
     }
-    Ensure(changes.Count == 5 && changes.All(name => name == nameof(shell.CurrentPage)), "Navigation must notify only actual page changes.");
+    Ensure(changes.Count == shell.Pages.Count - 1 && changes.All(name => name == nameof(shell.CurrentPage)), "Navigation must notify only actual page changes.");
     shell.CurrentPage = shell.CurrentPage;
-    Ensure(changes.Count == 5, "Selecting the current page created an unnecessary notification.");
+    Ensure(changes.Count == shell.Pages.Count - 1, "Selecting the current page created an unnecessary notification.");
     var selected = shell.CurrentPage;
     Throws<ArgumentException>(() => shell.CurrentPage = selected with { Title = "Injected" }, "A copied or injected page entered the shell.");
     Throws<ArgumentException>(() => shell.CurrentPage = new NavigationPage((PageId)99, "Injected", "Injected"), "An undefined page entered the shell.");
     Throws<ArgumentNullException>(() => shell.CurrentPage = null!, "A null page entered the shell.");
-    Ensure(ReferenceEquals(shell.CurrentPage, selected) && changes.Count == 5, "Rejected navigation changed selection or raised notifications.");
+    Ensure(ReferenceEquals(shell.CurrentPage, selected) && changes.Count == shell.Pages.Count - 1, "Rejected navigation changed selection or raised notifications.");
     Throws<ArgumentNullException>(() => _ = new ShellViewModel(null!, "1.0"), "A null service was accepted.");
     Throws<ArgumentException>(() => _ = new ShellViewModel(client, " "), "An empty application version was accepted.");
 }
