@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using SentinelAI.Desktop.Foundation;
 using SentinelAI.Desktop.Views;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop;
 
@@ -11,7 +12,7 @@ public sealed class SetupWindow : Window
     private readonly AuthenticationViewModel _model;
     public SetupWindow(IAdministratorSetupClient setup)
     {
-        Title = "SentinelAI — initial administrator setup";
+        Title = T("SentinelAI — initial administrator setup");
         Width = 620; Height = 650; MinWidth = 480; MinHeight = 420;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         FontFamily = new System.Windows.Media.FontFamily("Segoe UI"); FontSize = 14;

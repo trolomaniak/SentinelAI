@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -67,16 +68,16 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
         {
             lock (_gate)
             {
-                if (_info is not { } info) return _state == PilotLicenseState.Loading ? "Reading the pilot license…" : "Not loaded";
+                if (_info is not { } info) return _state == PilotLicenseState.Loading ? T("Reading the pilot license…") : T("Not loaded");
                 return info.State switch
                 {
-                    "unavailable" => "This SentinelAI build does not use pilot license keys.",
-                    "none" => "No pilot license key has been entered.",
-                    "invalid" => "The stored pilot license key is not valid. Enter a new key.",
-                    "scheduled" => "The pilot for " + info.Customer + " starts on " + Date(info.StartsUtc) + ".",
-                    "active" => "The pilot for " + info.Customer + " is active.",
+                    "unavailable" => T("This SentinelAI build does not use pilot license keys."),
+                    "none" => T("No pilot license key has been entered."),
+                    "invalid" => T("The stored pilot license key is not valid. Enter a new key."),
+                    "scheduled" => T("The pilot for ") + info.Customer + T(" starts on ") + Date(info.StartsUtc) + ".",
+                    "active" => T("The pilot for ") + info.Customer + T(" is active."),
                     "ending" => EndingText(info.DaysLeft),
-                    _ => "The pilot for " + info.Customer + " has ended. All monitoring continues."
+                    _ => T("The pilot for ") + info.Customer + T(" has ended. All monitoring continues.")
                 };
             }
         }
@@ -95,7 +96,7 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
                 return _info?.State switch
                 {
                     "ending" => EndingText(_info.DaysLeft),
-                    "ended" => "Your SentinelAI pilot has ended",
+                    "ended" => T("Your SentinelAI pilot has ended"),
                     _ => string.Empty
                 };
         }
@@ -107,8 +108,8 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
             lock (_gate)
                 return _info?.State switch
                 {
-                    "ending" => "Monitoring continues after the pilot ends. To keep using SentinelAI, contact us for a license key.",
-                    "ended" => "All monitoring continues. To keep using SentinelAI, contact us for a license key. To remove SentinelAI, use Uninstall SentinelAI below: your data is kept unless you choose to delete it in Setup.",
+                    "ending" => T("Monitoring continues after the pilot ends. To keep using SentinelAI, contact us for a license key."),
+                    "ended" => T("All monitoring continues. To keep using SentinelAI, contact us for a license key. To remove SentinelAI, use Uninstall SentinelAI below: your data is kept unless you choose to delete it in Setup."),
                     _ => string.Empty
                 };
         }
@@ -119,11 +120,11 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
         {
             lock (_gate)
             {
-                if (_info?.Contact is not { } contact) return "Contact your SentinelAI provider.";
+                if (_info?.Contact is not { } contact) return T("Contact your SentinelAI provider.");
                 var lines = new List<string> { contact.Company };
-                if (contact.Email.Length != 0) lines.Add("E-mail: " + contact.Email);
-                if (contact.Phone.Length != 0) lines.Add("Phone: " + contact.Phone);
-                if (contact.Website.Length != 0) lines.Add("Website: " + contact.Website);
+                if (contact.Email.Length != 0) lines.Add(T("E-mail: ") + contact.Email);
+                if (contact.Phone.Length != 0) lines.Add(T("Phone: ") + contact.Phone);
+                if (contact.Website.Length != 0) lines.Add(T("Website: ") + contact.Website);
                 return string.Join(Environment.NewLine, lines);
             }
         }
@@ -169,9 +170,9 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
             if (_disposed) return;
             _uninstallStatusText = outcome switch
             {
-                UninstallLaunchOutcome.Started => "SentinelAI Setup opened with Uninstall selected, and Desktop closes so it can continue. Your data is kept unless you type DELETE there.",
-                UninstallLaunchOutcome.Cancelled => "Uninstall was not started.",
-                _ => "SentinelAI Setup could not be started. Uninstall SentinelAI from Windows Settings → Apps instead."
+                UninstallLaunchOutcome.Started => T("SentinelAI Setup opened with Uninstall selected, and Desktop closes so it can continue. Your data is kept unless you type DELETE there."),
+                UninstallLaunchOutcome.Cancelled => T("Uninstall was not started."),
+                _ => T("SentinelAI Setup could not be started. Uninstall SentinelAI from Windows Settings → Apps instead.")
             };
         }
         Notify(nameof(UninstallStatusText));
@@ -195,7 +196,7 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
             else
             {
                 _state = PilotLicenseState.Submitting;
-                _submitStatusText = "Core is checking the pilot license key…";
+                _submitStatusText = T("Core is checking the pilot license key…");
             }
             NotifyAll();
             _ = CompleteAsync(pending);
@@ -228,7 +229,7 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
                     if (pending.Key is not null)
                     {
                         _keyText = string.Empty;
-                        _submitStatusText = "Pilot license key accepted. " + StatusText;
+                        _submitStatusText = T("Pilot license key accepted. ") + StatusText;
                     }
                 }
                 else if (pending.Key is not null && result.Outcome is PilotLicenseOutcome.Rejected or PilotLicenseOutcome.Expired or PilotLicenseOutcome.NotConfigured)
@@ -237,9 +238,9 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
                     _state = _info is null ? PilotLicenseState.NotLoaded : PilotLicenseState.Ready;
                     _submitStatusText = result.Outcome switch
                     {
-                        PilotLicenseOutcome.Rejected => "This is not a valid SentinelAI pilot license key. Check that the whole key was copied.",
-                        PilotLicenseOutcome.Expired => "This pilot license key has already expired. Contact us for a new key.",
-                        _ => "This SentinelAI build does not accept pilot license keys."
+                        PilotLicenseOutcome.Rejected => T("This is not a valid SentinelAI pilot license key. Check that the whole key was copied."),
+                        PilotLicenseOutcome.Expired => T("This pilot license key has already expired. Contact us for a new key."),
+                        _ => T("This SentinelAI build does not accept pilot license keys.")
                     };
                 }
                 else SetFailureLocked(result.Outcome, pending.Key is not null);
@@ -274,14 +275,14 @@ public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
         _state = PilotLicenseState.Unavailable;
         _errorText = outcome switch
         {
-            PilotLicenseOutcome.UntrustedConnection => "The local Core connection could not be trusted.",
-            PilotLicenseOutcome.InvalidResponse or PilotLicenseOutcome.TooLarge or PilotLicenseOutcome.Success => "Core returned an invalid pilot license response. Refresh license status.",
-            _ => "Local Core is unavailable. Restore Core, then refresh license status."
+            PilotLicenseOutcome.UntrustedConnection => T("The local Core connection could not be trusted."),
+            PilotLicenseOutcome.InvalidResponse or PilotLicenseOutcome.TooLarge or PilotLicenseOutcome.Success => T("Core returned an invalid pilot license response. Refresh license status."),
+            _ => T("Local Core is unavailable. Restore Core, then refresh license status.")
         };
-        if (submitted) _submitStatusText = "The result is unknown. Refresh license status to see whether the key was accepted.";
+        if (submitted) _submitStatusText = T("The result is unknown. Refresh license status to see whether the key was accepted.");
     }
 
-    private static string EndingText(int? daysLeft) => daysLeft == 1 ? "Pilot ends in 1 day — contact us" : $"Pilot ends in {daysLeft} days — contact us";
+    private static string EndingText(int? daysLeft) => daysLeft == 1 ? T("Pilot ends in 1 day — contact us") : F("Pilot ends in {0} days — contact us", daysLeft);
     private static string Date(DateTimeOffset? value) => value?.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) ?? NotApplicable;
     private bool Current(Pending pending) => !_disposed && pending.Generation == _generation && ReferenceEquals(_pending, pending) && !pending.Token.IsCancellationRequested;
 

@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using SentinelAI.Desktop.Foundation;
 using SentinelAI.Desktop.Services;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Views;
 
@@ -72,6 +73,6 @@ public partial class AuthenticationView : UserControl
     {
         PasswordInput.Clear();
         if (!WindowsCoreServices.OpenElevatedSetup())
-            MessageBox.Show("Initial setup needs administrator permission. You can try again when ready.", "SentinelAI", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(T("Initial setup needs administrator permission. You can try again when ready."), "SentinelAI", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 }

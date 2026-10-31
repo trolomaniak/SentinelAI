@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -39,23 +40,23 @@ public sealed class LicenseViewModel : INotifyPropertyChanged, IDisposable
     public bool CanRefresh { get { lock (_gate) return !_disposed && _pending is null; } }
     public bool CanRenew { get { lock (_gate) return !_disposed && _pending is null && !_requiresRefresh && _status is not null && _status.Mode != "RECOVERING"; } }
     public bool RequiresRefresh { get { lock (_gate) return _requiresRefresh; } }
-    public string ModeText { get { lock (_gate) return _status?.Mode ?? "Not loaded"; } }
-    public string FeaturesText { get { lock (_gate) return _status is null ? "Not loaded" : _status.EnabledFeatures.Count == 0 ? "No optional features permitted." : string.Join(", ", _status.EnabledFeatures); } }
-    public string LastValidationText { get { lock (_gate) return _status is null ? "Not loaded" : Timestamp(_status.LastSuccessfulValidationUtc, "No signed validation"); } }
-    public string FullModeUntilText { get { lock (_gate) return _status is null ? "Not loaded" : Timestamp(_status.FullModeUntil, "No signed expiry"); } }
-    public string EffectiveTimeText { get { lock (_gate) return _status is null ? "Not loaded" : Timestamp(_status.EffectiveUtc, string.Empty); } }
-    public string ClockRollbackText { get { lock (_gate) return _status is null ? "Not loaded" : _status.ClockRollbackDetected ? "Detected. Core retains its effective UTC time floor." : "Not detected by Core."; } }
+    public string ModeText { get { lock (_gate) return _status?.Mode ?? T("Not loaded"); } }
+    public string FeaturesText { get { lock (_gate) return _status is null ? T("Not loaded") : _status.EnabledFeatures.Count == 0 ? T("No optional features permitted.") : string.Join(", ", _status.EnabledFeatures); } }
+    public string LastValidationText { get { lock (_gate) return _status is null ? T("Not loaded") : Timestamp(_status.LastSuccessfulValidationUtc, T("No signed validation")); } }
+    public string FullModeUntilText { get { lock (_gate) return _status is null ? T("Not loaded") : Timestamp(_status.FullModeUntil, T("No signed expiry")); } }
+    public string EffectiveTimeText { get { lock (_gate) return _status is null ? T("Not loaded") : Timestamp(_status.EffectiveUtc, string.Empty); } }
+    public string ClockRollbackText { get { lock (_gate) return _status is null ? T("Not loaded") : _status.ClockRollbackDetected ? T("Detected. Core retains its effective UTC time floor.") : T("Not detected by Core."); } }
     public string LocalSecurityText
     {
         get
         {
             lock (_gate)
             {
-                if (_status is null) return "Local monitoring remains independent of license renewal.";
+                if (_status is null) return T("Local monitoring remains independent of license renewal.");
                 var capabilities = _status.Capabilities;
                 return capabilities.CriticalTelemetryCollection && capabilities.LocalDetectionRules && capabilities.CriticalAlerts && capabilities.RecentIncidents && capabilities.EmergencyExport
-                    ? "Local monitoring, detection, alerts, incidents and emergency export remain permitted."
-                    : "Review Core's reported local capabilities.";
+                    ? T("Local monitoring, detection, alerts, incidents and emergency export remain permitted.")
+                    : T("Review Core's reported local capabilities.");
             }
         }
     }
@@ -73,9 +74,9 @@ public sealed class LicenseViewModel : INotifyPropertyChanged, IDisposable
             _pending = pending;
             _status = null;
             _state = renew ? LicenseState.Renewing : LicenseState.Loading;
-            _statusText = renew ? "Core is attempting license renewal…" : "Reading the current Core licensing state…";
+            _statusText = renew ? T("Core is attempting license renewal…") : T("Reading the current Core licensing state…");
             _errorText = string.Empty;
-            if (renew) _renewalStatusText = "One manual renewal attempt is in progress.";
+            if (renew) _renewalStatusText = T("One manual renewal attempt is in progress.");
             NotifyAll();
             _ = CompleteRequestAsync(pending);
             return pending.Task;
@@ -101,9 +102,9 @@ public sealed class LicenseViewModel : INotifyPropertyChanged, IDisposable
                     _errorText = string.Empty;
                     if (pending.Renew) _renewalStatusText = _status.Mode switch
                     {
-                        "FULL" => "Renewal completed. Core reports FULL.",
-                        "RECOVERING" => "Core reports renewal in progress. Refresh for its current status.",
-                        _ => "Renewal completed without restoring FULL. Core reports " + _status.Mode + "."
+                        "FULL" => T("Renewal completed. Core reports FULL."),
+                        "RECOVERING" => T("Core reports renewal in progress. Refresh for its current status."),
+                        _ => T("Renewal completed without restoring FULL. Core reports ") + _status.Mode + "."
                     };
                     else if (_renewalStatusText != InitialRenewal) _renewalStatusText = "Status refreshed. Core's current mode is " + _status.Mode + ".";
                 }
@@ -138,25 +139,25 @@ public sealed class LicenseViewModel : INotifyPropertyChanged, IDisposable
         if (renew && outcome is LicenseRequestOutcome.Indeterminate or LicenseRequestOutcome.InvalidResponse or LicenseRequestOutcome.TooLarge or LicenseRequestOutcome.Success)
         {
             _requiresRefresh = true;
-            _errorText = "The renewal result is unknown. Refresh license status before requesting another renewal.";
+            _errorText = T("The renewal result is unknown. Refresh license status before requesting another renewal.");
         }
         else _errorText = outcome switch
         {
-            LicenseRequestOutcome.UntrustedConnection => "The local Core connection could not be trusted.",
-            LicenseRequestOutcome.Throttled => "Core rate limited this request. Wait, then refresh license status.",
-            LicenseRequestOutcome.InvalidResponse or LicenseRequestOutcome.Success => "Core returned an invalid license response. Refresh license status.",
-            LicenseRequestOutcome.TooLarge => "The license response exceeds the supported size.",
-            _ => renew ? "License renewal is unavailable. Check Core's renewal configuration, then refresh license status." : "Local Core is unavailable. Restore Core, then refresh license status."
+            LicenseRequestOutcome.UntrustedConnection => T("The local Core connection could not be trusted."),
+            LicenseRequestOutcome.Throttled => T("Core rate limited this request. Wait, then refresh license status."),
+            LicenseRequestOutcome.InvalidResponse or LicenseRequestOutcome.Success => T("Core returned an invalid license response. Refresh license status."),
+            LicenseRequestOutcome.TooLarge => T("The license response exceeds the supported size."),
+            _ => renew ? T("License renewal is unavailable. Check Core's renewal configuration, then refresh license status.") : T("Local Core is unavailable. Restore Core, then refresh license status.")
         };
         _statusText = _errorText;
         if (renew) _renewalStatusText = _errorText;
     }
     private static string ModeDescription(string mode) => mode switch
     {
-        "FULL" => "Core reports FULL. Its permitted optional features are available.",
-        "GRACE" => "Core reports GRACE after a failed renewal. Its retained optional permissions remain authoritative.",
-        "SAFE_MODE" => "Core reports SAFE_MODE. Local security functions remain available; optional features are withheld.",
-        _ => "Core reports RECOVERING. An attempt is in progress; underlying permissions remain authoritative."
+        "FULL" => T("Core reports FULL. Its permitted optional features are available."),
+        "GRACE" => T("Core reports GRACE after a failed renewal. Its retained optional permissions remain authoritative."),
+        "SAFE_MODE" => T("Core reports SAFE_MODE. Local security functions remain available; optional features are withheld."),
+        _ => T("Core reports RECOVERING. An attempt is in progress; underlying permissions remain authoritative.")
     };
     private static bool ValidStatus(LicenseStatus? status) => status is { Capabilities: not null, EnabledFeatures: not null } &&
         status.Mode is "FULL" or "GRACE" or "SAFE_MODE" or "RECOVERING" && status.EnabledFeatures.Count <= 64 &&

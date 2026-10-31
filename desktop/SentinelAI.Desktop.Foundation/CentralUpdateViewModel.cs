@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -80,40 +81,40 @@ public sealed class CentralUpdateViewModel : INotifyPropertyChanged, IDisposable
         {
             lock (_gate)
             {
-                if (_info is not { } info) return _state == CentralUpdateState.Loading ? "Reading update settings…" : NotLoaded;
-                if (!info.Configured) return "This installation has no update server. Your provider delivers new versions as a new SentinelAI Setup.";
-                if (!info.CheckEnabled) return "Off. SentinelAI connects to no update server. Turn on checking to download new versions from " + info.Server + ".";
+                if (_info is not { } info) return _state == CentralUpdateState.Loading ? T("Reading update settings…") : NotLoaded;
+                if (!info.Configured) return T("This installation has no update server. Your provider delivers new versions as a new SentinelAI Setup.");
+                if (!info.CheckEnabled) return T("Off. SentinelAI connects to no update server. Turn on checking to download new versions from ") + info.Server + ".";
                 if (info.ReadyVersion is { } ready)
                 {
                     if (info.AutoInstall && info.InstallAttempts >= 3)
-                        return "SentinelAI " + ready + " did not install after 3 nights. Select Install now, or contact your provider.";
+                        return "SentinelAI " + ready + T(" did not install after 3 nights. Select Install now, or contact your provider.");
                     var plan = info.AutoInstall
-                        ? "SentinelAI " + ready + " is downloaded and installs tonight between 02:00 and 04:00. Desktop closes for the installation; monitoring continues."
-                        : "SentinelAI " + ready + " is downloaded. Select Install now to install it.";
+                        ? "SentinelAI " + ready + T(" is downloaded and installs tonight between 02:00 and 04:00. Desktop closes for the installation; monitoring continues.")
+                        : "SentinelAI " + ready + T(" is downloaded. Select Install now to install it.");
                     return info.InstallAttempts > 0
-                        ? plan + " Installation was started " + info.InstallAttempts.ToString(CultureInfo.InvariantCulture) + " time(s) and this computer still runs " + info.InstalledVersion + "."
+                        ? plan + T(" Installation was started ") + info.InstallAttempts.ToString(CultureInfo.InvariantCulture) + T(" time(s) and this computer still runs ") + info.InstalledVersion + "."
                         : plan;
                 }
                 return info.LastCheck switch
                 {
-                    "checking" => "Checking " + info.Server + " for a newer version…",
-                    "current" => "SentinelAI " + info.InstalledVersion + " is up to date.",
-                    "failed" => "The last check did not succeed. SentinelAI tries again within an hour.",
-                    _ => "Not checked yet. SentinelAI checks a few minutes after start and every six hours."
+                    "checking" => "Checking " + info.Server + T(" for a newer version…"),
+                    "current" => "SentinelAI " + info.InstalledVersion + T(" is up to date."),
+                    "failed" => T("The last check did not succeed. SentinelAI tries again within an hour."),
+                    _ => T("Not checked yet. SentinelAI checks a few minutes after start and every six hours.")
                 };
             }
         }
     }
 
     public string InstalledVersionText { get { lock (_gate) return _info?.InstalledVersion ?? NotLoaded; } }
-    public string ServerText { get { lock (_gate) return _info is null ? NotLoaded : _info.Server ?? "Not configured"; } }
+    public string ServerText { get { lock (_gate) return _info is null ? NotLoaded : _info.Server ?? T("Not configured"); } }
     public string LastCheckText
     {
         get
         {
             lock (_gate)
                 return _info is null ? NotLoaded
-                    : _info.LastCheckUtc?.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) ?? "Not since Core started";
+                    : _info.LastCheckUtc?.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) ?? T("Not since Core started");
         }
     }
 
@@ -133,7 +134,7 @@ public sealed class CentralUpdateViewModel : INotifyPropertyChanged, IDisposable
             if (!CanInstall) return;
             installer = _installer!;
             _installing = true;
-            _installStatusText = "Windows asks for administrator permission, then SentinelAI checks the downloaded update…";
+            _installStatusText = T("Windows asks for administrator permission, then SentinelAI checks the downloaded update…");
         }
         Notify(nameof(CanInstall), nameof(InstallStatusText));
         CentralUpdateInstallOutcome outcome;
@@ -145,11 +146,11 @@ public sealed class CentralUpdateViewModel : INotifyPropertyChanged, IDisposable
             if (_disposed) return;
             _installStatusText = outcome switch
             {
-                CentralUpdateInstallOutcome.Started => "SentinelAI Setup opened with Upgrade selected, and Desktop closes so it can continue.",
-                CentralUpdateInstallOutcome.Cancelled => "Installation was not started.",
-                CentralUpdateInstallOutcome.NothingToInstall => "There is no newer downloaded version to install. Refresh the update status.",
-                CentralUpdateInstallOutcome.Rejected => "The downloaded update did not pass verification and was not run. Check for updates again or contact your provider.",
-                _ => "The update could not be started. Run the newer SentinelAI Setup from your provider instead."
+                CentralUpdateInstallOutcome.Started => T("SentinelAI Setup opened with Upgrade selected, and Desktop closes so it can continue."),
+                CentralUpdateInstallOutcome.Cancelled => T("Installation was not started."),
+                CentralUpdateInstallOutcome.NothingToInstall => T("There is no newer downloaded version to install. Refresh the update status."),
+                CentralUpdateInstallOutcome.Rejected => T("The downloaded update did not pass verification and was not run. Check for updates again or contact your provider."),
+                _ => T("The update could not be started. Run the newer SentinelAI Setup from your provider instead.")
             };
         }
         Notify(nameof(CanInstall), nameof(InstallStatusText));
@@ -202,12 +203,12 @@ public sealed class CentralUpdateViewModel : INotifyPropertyChanged, IDisposable
                     _state = _info is null ? CentralUpdateState.Unavailable : CentralUpdateState.Ready;
                     _errorText = result.Outcome switch
                     {
-                        CentralUpdateRequestOutcome.NotConfigured => "This installation has no update server.",
-                        CentralUpdateRequestOutcome.NotEnabled => "Turn on checking for updates first.",
-                        CentralUpdateRequestOutcome.UntrustedConnection => "The local Core connection could not be trusted.",
+                        CentralUpdateRequestOutcome.NotConfigured => T("This installation has no update server."),
+                        CentralUpdateRequestOutcome.NotEnabled => T("Turn on checking for updates first."),
+                        CentralUpdateRequestOutcome.UntrustedConnection => T("The local Core connection could not be trusted."),
                         CentralUpdateRequestOutcome.InvalidResponse or CentralUpdateRequestOutcome.TooLarge or CentralUpdateRequestOutcome.Success =>
-                            "Core returned an invalid update response. Refresh the update status.",
-                        _ => "Local Core is unavailable. Restore Core, then refresh the update status."
+                            T("Core returned an invalid update response. Refresh the update status."),
+                        _ => T("Local Core is unavailable. Restore Core, then refresh the update status.")
                     };
                 }
                 NotifyAll();
@@ -219,7 +220,7 @@ public sealed class CentralUpdateViewModel : INotifyPropertyChanged, IDisposable
                 if (Current(pending))
                 {
                     _state = _info is null ? CentralUpdateState.Unavailable : CentralUpdateState.Ready;
-                    _errorText = "Local Core is unavailable. Restore Core, then refresh the update status.";
+                    _errorText = T("Local Core is unavailable. Restore Core, then refresh the update status.");
                     NotifyAll();
                 }
         }

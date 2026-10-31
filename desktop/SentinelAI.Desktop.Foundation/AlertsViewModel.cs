@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -15,7 +16,7 @@ public enum AlertStatusFilter { All, Open, Investigating, Accepted, Resolved }
 public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
 {
     public const int PageSize = 50;
-    private static readonly AlertEndpointOption AllEndpoints = new(null, "All endpoints");
+    private static readonly AlertEndpointOption AllEndpoints = new(null, T("All endpoints"));
     private readonly object _gate = new();
     private readonly IAlertsClient _client;
     private readonly IDevicesClient _devices;
@@ -30,7 +31,7 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
     private AlertDetailState _detailState;
     private AlertQuery _appliedQuery = new();
     private long _totalAlerts;
-    private string _listStatusText = "Open Alerts to load tracked alerts.";
+    private string _listStatusText = T("Open Alerts to load tracked alerts.");
     private string _detailStatusText = string.Empty;
     private string _errorText = string.Empty;
     private string _statusMessage = string.Empty;
@@ -189,7 +190,7 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
             _visibleAlerts = Array.Empty<AlertRow>();
             _selectedAlert = null;
             _listState = AlertListState.Loading;
-            _listStatusText = "Loading tracked alerts…";
+            _listStatusText = T("Loading tracked alerts…");
             _errorText = string.Empty;
             NotifyAll();
             _ = LoadListAsync(pending, query, refreshOptions || !_optionsLoaded);
@@ -210,7 +211,7 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
                     if (options.Outcome == DeviceReadOutcome.Unauthenticated) { ExpireLocked(); return; }
                     if (options.Outcome != DeviceReadOutcome.Success || options.Value is null)
                     {
-                        SetListFailure("Endpoint filters are unavailable. Restore Core, then refresh Alerts.");
+                        SetListFailure(T("Endpoint filters are unavailable. Restore Core, then refresh Alerts."));
                         NotifyAll();
                         return;
                     }
@@ -262,7 +263,7 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
             {
                 CloseDetailLocked();
                 _detailState = AlertDetailState.NotFound;
-                _detailStatusText = "This alert is no longer available. Refresh Alerts.";
+                _detailStatusText = T("This alert is no longer available. Refresh Alerts.");
                 NotifyAll();
                 return Task.CompletedTask;
             }
@@ -284,7 +285,7 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
         _detailPending = pending;
         _detail = null;
         _detailState = AlertDetailState.Loading;
-        _detailStatusText = "Loading alert details…";
+        _detailStatusText = T("Loading alert details…");
         _proposedStatus = null;
         _statusMessage = string.Empty;
         _errorText = string.Empty;
@@ -304,7 +305,7 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
                 if (result.Outcome == AlertOutcome.Success && ValidDetail(result.Value, alertId))
                 {
                     SetDetailLocked(result.Value!);
-                    if (refresh) _statusMessage = "Latest alert detail loaded. Choose a status to change.";
+                    if (refresh) _statusMessage = T("Latest alert detail loaded. Choose a status to change.");
                     ReconcileRowLocked(result.Value!.Alert);
                 }
                 else SetDetailFailure(result.Outcome);
@@ -336,7 +337,7 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
             var alertId = _detail.Row.AlertId;
             var version = _detail.Version;
             _proposedStatus = null;
-            _statusMessage = "Saving reviewed status…";
+            _statusMessage = T("Saving reviewed status…");
             _errorText = string.Empty;
             NotifyAll();
             _ = SaveAsync(pending, alertId, status, version);
@@ -375,16 +376,16 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
                     _needsDetailRefresh = true;
                     if (result.Outcome == AlertOutcome.NotFound) SetDetailFailure(AlertOutcome.NotFound);
                     _statusMessage = conflict
-                        ? "Status was not saved. Latest detail is unavailable; refresh it before choosing again."
-                        : "Status change could not be confirmed. Refresh latest detail before choosing a status again.";
+                        ? T("Status was not saved. Latest detail is unavailable; refresh it before choosing again.")
+                        : T("Status change could not be confirmed. Refresh latest detail before choosing a status again.");
                     NotifyAll();
                     return;
                 }
                 SetDetailLocked(result.Value!);
                 ReconcileRowLocked(result.Value!.Alert);
                 _statusMessage = conflict
-                    ? "Status was not saved because the alert changed. Review the latest detail and choose again."
-                    : "Status saved.";
+                    ? T("Status was not saved because the alert changed. Review the latest detail and choose again.")
+                    : T("Status saved.");
                 query = _appliedQuery;
                 NotifyAll();
             }
@@ -399,7 +400,7 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
                 if (!WriteCurrent(pending)) return;
                 if (page.Outcome == AlertOutcome.Unauthenticated) { ExpireLocked(); return; }
                 if (page.Outcome == AlertOutcome.Success && ValidPage(page.Value, query)) SetPageLocked(page.Value!, query);
-                else SetListFailure("The alert list could not refresh. The reviewed detail remains available; refresh Alerts before paging.");
+                else SetListFailure(T("The alert list could not refresh. The reviewed detail remains available; refresh Alerts before paging."));
                 NotifyAll();
             }
         }
@@ -457,8 +458,8 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
         _appliedQuery = query;
         _totalAlerts = page.Total;
         _listState = page.Alerts.Count == 0 ? AlertListState.Empty : AlertListState.Ready;
-        _listStatusText = page.Alerts.Count == 0 ? "No tracked alerts match this page and its filters."
-            : $"{page.Total} tracked alerts · page {PageNumber} of {TotalPages}";
+        _listStatusText = page.Alerts.Count == 0 ? T("No tracked alerts match this page and its filters.")
+            : F("{0} tracked alerts · page {1} of {2}", page.Total, PageNumber, TotalPages);
         _errorText = string.Empty;
     }
     private void SetDetailLocked(AlertDetail detail)
@@ -490,16 +491,16 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
     {
         _detail = null;
         _detailState = outcome == AlertOutcome.NotFound ? AlertDetailState.NotFound : AlertDetailState.Unavailable;
-        _detailStatusText = outcome == AlertOutcome.NotFound ? "This alert is no longer available. Refresh Alerts." : FailureText(outcome);
+        _detailStatusText = outcome == AlertOutcome.NotFound ? T("This alert is no longer available. Refresh Alerts.") : FailureText(outcome);
         _errorText = _detailStatusText;
         _proposedStatus = null;
     }
     private static string FailureText(AlertOutcome outcome) => outcome switch
     {
-        AlertOutcome.UntrustedConnection => "The local Core connection could not be trusted.",
-        AlertOutcome.InvalidResponse or AlertOutcome.Success => "Core returned an invalid alert response.",
-        AlertOutcome.TooLarge => "The alert response exceeds the supported size.",
-        _ => "Local Core is unavailable. Restore Core, then refresh Alerts."
+        AlertOutcome.UntrustedConnection => T("The local Core connection could not be trusted."),
+        AlertOutcome.InvalidResponse or AlertOutcome.Success => T("Core returned an invalid alert response."),
+        AlertOutcome.TooLarge => T("The alert response exceeds the supported size."),
+        _ => T("Local Core is unavailable. Restore Core, then refresh Alerts.")
     };
     private void ExpireLocked()
     {
@@ -548,7 +549,7 @@ public sealed class AlertsViewModel : INotifyPropertyChanged, IDisposable
         _appliedQuery = new();
         _totalAlerts = 0;
         _listState = AlertListState.NotLoaded;
-        _listStatusText = "Open Alerts to load tracked alerts.";
+        _listStatusText = T("Open Alerts to load tracked alerts.");
         _errorText = string.Empty;
     }
     public void Clear()

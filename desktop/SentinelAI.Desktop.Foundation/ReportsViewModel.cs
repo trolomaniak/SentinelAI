@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -20,7 +21,7 @@ public sealed class ReportsViewModel : INotifyPropertyChanged, IDisposable
     private DateTime? _toDate;
     private SecurityReportDocument? _document;
     private ReportState _state;
-    private string _statusText = "Choose inclusive UTC dates, then generate a security report.";
+    private string _statusText = T("Choose inclusive UTC dates, then generate a security report.");
     private string _errorText = string.Empty;
     private string _saveStatusText = string.Empty;
     private long _generation;
@@ -70,7 +71,7 @@ public sealed class ReportsViewModel : INotifyPropertyChanged, IDisposable
         get
         {
             lock (_gate) return TryReadPeriodLocked(out _) ? string.Empty :
-                "Select ordered inclusive UTC dates, at most 366 days, ending before 9999-12-31.";
+                T("Select ordered inclusive UTC dates, at most 366 days, ending before 9999-12-31.");
         }
     }
 
@@ -103,7 +104,7 @@ public sealed class ReportsViewModel : INotifyPropertyChanged, IDisposable
             var pending = new Pending(++_generation);
             _generatePending = pending;
             _state = ReportState.Generating;
-            _statusText = "Generating the security report through local Core…";
+            _statusText = T("Generating the security report through local Core…");
             _errorText = string.Empty;
             _saveStatusText = string.Empty;
             NotifyAll();
@@ -135,7 +136,7 @@ public sealed class ReportsViewModel : INotifyPropertyChanged, IDisposable
                     _document = received;
                     received = null;
                     _state = ReportState.Ready;
-                    _statusText = "Report generated. Save HTML to choose a destination.";
+                    _statusText = T("Report generated. Save HTML to choose a destination.");
                     _errorText = string.Empty;
                 }
                 else SetFailureLocked(result.Outcome);
@@ -169,7 +170,7 @@ public sealed class ReportsViewModel : INotifyPropertyChanged, IDisposable
             if (!CanSave) return Task.CompletedTask;
             var pending = new Pending(++_generation);
             _savePending = pending;
-            _saveStatusText = "Choose a destination for the generated HTML report.";
+            _saveStatusText = T("Choose a destination for the generated HTML report.");
             _errorText = string.Empty;
             NotifyAll();
             // Pass ownership by reference, without copying HTML before the
@@ -193,7 +194,7 @@ public sealed class ReportsViewModel : INotifyPropertyChanged, IDisposable
                         _saveStatusText = string.IsNullOrEmpty(result.FileName) ? "Report saved." : "Report saved as " + result.FileName + ".";
                         break;
                     case ReportSaveOutcome.Cancelled:
-                        _saveStatusText = "Save cancelled. The generated report remains available.";
+                        _saveStatusText = T("Save cancelled. The generated report remains available.");
                         break;
                     default:
                         SetSaveFailureLocked();
@@ -233,21 +234,21 @@ public sealed class ReportsViewModel : INotifyPropertyChanged, IDisposable
     private void SetFailureLocked(ReportOutcome outcome)
     {
         _state = ReportState.Unavailable;
-        _statusText = "The report was not generated.";
+        _statusText = T("The report was not generated.");
         _errorText = outcome switch
         {
-            ReportOutcome.CapacityExceeded => "The report exceeds Core's supported dataset or output capacity.",
-            ReportOutcome.TooLarge => "The report exceeds the supported download size. Choose a shorter period.",
-            ReportOutcome.UntrustedConnection => "The local Core connection could not be trusted.",
-            ReportOutcome.InvalidResponse or ReportOutcome.Success => "Core returned an invalid security report.",
-            ReportOutcome.InvalidPeriod => "Core rejected the report period. Choose ordered inclusive UTC dates of at most 366 days.",
-            _ => "Local Core is unavailable. Restore Core, then generate the report again."
+            ReportOutcome.CapacityExceeded => T("The report exceeds Core's supported dataset or output capacity."),
+            ReportOutcome.TooLarge => T("The report exceeds the supported download size. Choose a shorter period."),
+            ReportOutcome.UntrustedConnection => T("The local Core connection could not be trusted."),
+            ReportOutcome.InvalidResponse or ReportOutcome.Success => T("Core returned an invalid security report."),
+            ReportOutcome.InvalidPeriod => T("Core rejected the report period. Choose ordered inclusive UTC dates of at most 366 days."),
+            _ => T("Local Core is unavailable. Restore Core, then generate the report again.")
         };
     }
     private void SetSaveFailureLocked()
     {
-        _saveStatusText = "The report was not saved.";
-        _errorText = "The report could not be saved. Choose a destination and try again.";
+        _saveStatusText = T("The report was not saved.");
+        _errorText = T("The report could not be saved. Choose a destination and try again.");
     }
     private void SetDefaultDatesLocked()
     {
@@ -274,7 +275,7 @@ public sealed class ReportsViewModel : INotifyPropertyChanged, IDisposable
         _document = null;
         if (resetDates) SetDefaultDatesLocked();
         _state = ReportState.NotGenerated;
-        _statusText = "Choose inclusive UTC dates, then generate a security report.";
+        _statusText = T("Choose inclusive UTC dates, then generate a security report.");
         _errorText = string.Empty;
         _saveStatusText = string.Empty;
     }

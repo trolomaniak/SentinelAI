@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows.Input;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -10,7 +11,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private readonly RefreshCommand _refreshCommand;
     private NavigationPage _currentPage;
-    private string _coreStatusText = "Core status not checked";
+    private string _coreStatusText = T("Core status not checked");
     private bool _isCheckingCore;
     private bool _disposed;
     private Task? _pendingRefresh;
@@ -23,19 +24,19 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
         Version = version;
         Pages = Array.AsReadOnly(new[]
         {
-            new NavigationPage(PageId.Overview, "Overview", "Your local security workspace."),
-            new NavigationPage(PageId.Devices, "Devices", "Endpoint inventory and connection health."),
-            new NavigationPage(PageId.Alerts, "Alerts", "Security alerts and incident review."),
-            new NavigationPage(PageId.Risk, "Risk", "Organization and endpoint risk."),
-            new NavigationPage(PageId.RiskRegister, "Risk Register", "Business risks, owners, treatment and reviews."),
-            new NavigationPage(PageId.Reports, "Reports", "Local security reports."),
-            new NavigationPage(PageId.Settings, "Settings", "Local application settings and licensing.")
+            new NavigationPage(PageId.Overview, T("Overview"), T("Your local security workspace.")),
+            new NavigationPage(PageId.Devices, T("Devices"), T("Endpoint inventory and connection health.")),
+            new NavigationPage(PageId.Alerts, T("Alerts"), T("Security alerts and incident review.")),
+            new NavigationPage(PageId.Risk, T("Risk"), T("Organization and endpoint risk.")),
+            new NavigationPage(PageId.RiskRegister, T("Risk Register"), T("Business risks, owners, treatment and reviews.")),
+            new NavigationPage(PageId.Reports, T("Reports"), T("Local security reports.")),
+            new NavigationPage(PageId.Settings, T("Settings"), T("Local application settings and licensing."))
         });
         _currentPage = Pages[0];
         _refreshCommand = new RefreshCommand(this);
     }
 
-    public string Title => "SentinelAI";
+    public string Title => T("SentinelAI");
     public string Version { get; }
     public IReadOnlyList<NavigationPage> Pages { get; }
     public ICommand RefreshCoreCommand => _refreshCommand;
@@ -76,7 +77,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
 
             var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingRefresh = completion.Task;
-            SetCoreState("Checking local Core…", true);
+            SetCoreState(T("Checking local Core…"), true);
             _ = CompleteRefreshAsync(completion, _lifetime.Token);
             return completion.Task;
         }
@@ -102,7 +103,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
         {
             _pendingRefresh = null;
             if (!_disposed)
-                SetCoreState(result == CoreHealth.Available ? "Local Core available" : "Local Core unavailable", false);
+                SetCoreState(result == CoreHealth.Available ? T("Local Core available") : T("Local Core unavailable"), false);
             else
                 _lifetime.Dispose();
             completion.TrySetResult();

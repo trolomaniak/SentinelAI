@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -22,13 +23,13 @@ public sealed class DesktopIntegrationViewModel : INotifyPropertyChanged
     public bool AutoStartEnabled { get => _preferences.AutoStartEnabled; set => Save(_preferences with { AutoStartEnabled = value }); }
     public bool PreferencesAvailable => _outcome == DesktopPreferenceOutcome.Success;
     public bool CanConfigureNotifications => PreferencesAvailable && TrayEnabled;
-    public string StatusText => "Desktop preferences apply only to this Windows user. Closing Desktop leaves Core and Agent protection running.";
+    public string StatusText => T("Desktop preferences apply only to this Windows user. Closing Desktop leaves Core and Agent protection running.");
     public string ErrorText => _outcome switch
     {
         DesktopPreferenceOutcome.Success => string.Empty,
-        DesktopPreferenceOutcome.OwnershipConflict => "Desktop preferences cannot be changed because its startup entry is owned by another command. The existing entry was preserved.",
-        DesktopPreferenceOutcome.InvalidData => "Desktop preferences contain an unsupported value. The existing value was preserved.",
-        _ => "Desktop preferences are unavailable. Check current-user access, then refresh preferences."
+        DesktopPreferenceOutcome.OwnershipConflict => T("Desktop preferences cannot be changed because its startup entry is owned by another command. The existing entry was preserved."),
+        DesktopPreferenceOutcome.InvalidData => T("Desktop preferences contain an unsupported value. The existing value was preserved."),
+        _ => T("Desktop preferences are unavailable. Check current-user access, then refresh preferences.")
     };
 
     public void RefreshPreferences()

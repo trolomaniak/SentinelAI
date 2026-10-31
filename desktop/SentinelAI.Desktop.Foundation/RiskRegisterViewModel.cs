@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -78,19 +79,19 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
     public event EventHandler? SessionExpired;
 
     public static IReadOnlyList<RiskRegisterOption> StatusFilters { get; } =
-        [new("active", "Open and monitoring"), new("open", "Open"), new("monitoring", "Monitoring"), new("closed", "Closed"), new("all", "All records")];
+        [new("active", T("Open and monitoring")), new("open", T("Open")), new("monitoring", T("Monitoring")), new("closed", T("Closed")), new("all", T("All records"))];
     public static IReadOnlyList<RiskRegisterOption> TreatmentFilters { get; } =
-        [new("any", "Any treatment"), new("none", "Not decided"), new("avoid", "Avoid"), new("mitigate", "Mitigate"), new("transfer", "Transfer"), new("accept", "Accept")];
+        [new("any", T("Any treatment")), new("none", T("Not decided")), new("avoid", T("Avoid")), new("mitigate", T("Mitigate")), new("transfer", T("Transfer")), new("accept", T("Accept"))];
     public static IReadOnlyList<RiskRegisterOption> LevelFilters { get; } =
-        [new("any", "Any residual level"), new("low", "Low"), new("medium", "Medium"), new("high", "High"), new("critical", "Critical")];
-    public static IReadOnlyList<RiskRegisterOption> Statuses { get; } = [new("open", "Open"), new("monitoring", "Monitoring"), new("closed", "Closed")];
+        [new("any", T("Any residual level")), new("low", T("Low")), new("medium", T("Medium")), new("high", T("High")), new("critical", T("Critical"))];
+    public static IReadOnlyList<RiskRegisterOption> Statuses { get; } = [new("open", T("Open")), new("monitoring", T("Monitoring")), new("closed", T("Closed"))];
     public static IReadOnlyList<RiskRegisterOption> Treatments { get; } =
-        [new(string.Empty, "Not decided"), new("avoid", "Avoid"), new("mitigate", "Mitigate"), new("transfer", "Transfer"), new("accept", "Accept")];
+        [new(string.Empty, "Not decided"), new("avoid", T("Avoid")), new("mitigate", T("Mitigate")), new("transfer", T("Transfer")), new("accept", T("Accept"))];
     public static IReadOnlyList<int> Scale { get; } = [1, 2, 3, 4, 5];
 
     public string DistinctionText =>
-        "Register ratings are business judgements recorded by administrators: likelihood × impact from 1 to 5, before and after existing " +
-        "controls. They never change alerts, detection or the technical risk score shown in Risk.";
+        T("Register ratings are business judgements recorded by administrators: likelihood × impact from 1 to 5, before and after existing ") +
+        T("controls. They never change alerts, detection or the technical risk score shown in Risk.");
 
     // Filters (applied with ApplyFiltersAsync).
     public string StatusFilter { get => _statusFilter; set => Set(ref _statusFilter, value); }
@@ -106,18 +107,18 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
 
     public string ListText => _listState switch
     {
-        RiskRegisterListState.Loading => "Reading the Risk Register…",
-        RiskRegisterListState.Unavailable => "Local Core is unavailable. Restore Core, then select Refresh.",
-        RiskRegisterListState.Ready when _page is { Total: 0 } => "No risk matches these filters. Select New risk to record one.",
+        RiskRegisterListState.Loading => T("Reading the Risk Register…"),
+        RiskRegisterListState.Unavailable => T("Local Core is unavailable. Restore Core, then select Refresh."),
+        RiskRegisterListState.Ready when _page is { Total: 0 } => T("No risk matches these filters. Select New risk to record one."),
         RiskRegisterListState.Ready when _page is { } page => "Showing " + (_offset + 1).ToString(CultureInfo.InvariantCulture) + "–" +
                                                               (_offset + page.Records.Count).ToString(CultureInfo.InvariantCulture) + " of " +
-                                                              page.Total.ToString(CultureInfo.InvariantCulture) + ". Records needing attention come first.",
+                                                              page.Total.ToString(CultureInfo.InvariantCulture) + T(". Records needing attention come first."),
         _ => string.Empty
     };
 
     public string CountsText => _page is not { Counts: var counts } ? string.Empty :
-        "Open: " + counts.Open.ToString(CultureInfo.InvariantCulture) + " · Monitoring: " + counts.Monitoring.ToString(CultureInfo.InvariantCulture) +
-        " · Closed: " + counts.Closed.ToString(CultureInfo.InvariantCulture) + " · Needing attention: " + counts.NeedsAttention.ToString(CultureInfo.InvariantCulture);
+        T("Open: ") + counts.Open.ToString(CultureInfo.InvariantCulture) + T(" · Monitoring: ") + counts.Monitoring.ToString(CultureInfo.InvariantCulture) +
+        T(" · Closed: ") + counts.Closed.ToString(CultureInfo.InvariantCulture) + T(" · Needing attention: ") + counts.NeedsAttention.ToString(CultureInfo.InvariantCulture);
 
     public RiskRegisterRow? SelectedRow
     {
@@ -139,7 +140,7 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
     public bool CanReview => _mode == RiskRegisterEditorMode.Edit && _detail is { Status: not "closed" } && !_saving && !_disposed;
     public string EditorTitle => _mode switch
     {
-        RiskRegisterEditorMode.Create => "New risk",
+        RiskRegisterEditorMode.Create => T("New risk"),
         RiskRegisterEditorMode.Edit when _detail is { } detail => detail.Reference + " · " + detail.Title,
         _ => string.Empty
     };
@@ -178,9 +179,9 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
         {
             if (_mode != RiskRegisterEditorMode.Edit || _detail is not { } detail) return string.Empty;
             var lines = new List<string>();
-            if (detail.Flags.ReviewOverdue) lines.Add("Review overdue: it was due on " + detail.ReviewDate + ".");
-            if (detail.Flags.AcceptanceExpired) lines.Add("Acceptance expired on " + detail.AcceptanceExpiresOn + ": decide again, with its owner.");
-            if (detail.Flags.TargetDatePassed) lines.Add("Target date " + detail.TargetDate + " has passed while the risk is still open.");
+            if (detail.Flags.ReviewOverdue) lines.Add(T("Review overdue: it was due on ") + detail.ReviewDate + ".");
+            if (detail.Flags.AcceptanceExpired) lines.Add(T("Acceptance expired on ") + detail.AcceptanceExpiresOn + T(": decide again, with its owner."));
+            if (detail.Flags.TargetDatePassed) lines.Add(T("Target date ") + detail.TargetDate + T(" has passed while the risk is still open."));
             return string.Join(Environment.NewLine, lines);
         }
     }
@@ -195,11 +196,11 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
     private static IReadOnlyList<string> History(RiskRegisterDetail detail) =>
         detail.History.Select(entry =>
         {
-            var action = entry.Action switch { "created" => "Created", "reviewed" => "Reviewed", _ => "Changed" };
+            var action = entry.Action switch { "created" => T("Created"), "reviewed" => T("Reviewed"), _ => T("Changed") };
             var text = Format(entry.ChangedUtc) + " · " + entry.ChangedBy + " · " + action;
             if (entry.Changes.Count > 0)
                 text += ": " + string.Join("; ", entry.Changes.Select(change => FieldLabel(change.Field) + " " + (change.From ?? "—") + " → " + (change.To ?? "—")));
-            return entry.Note is { } note ? text + Environment.NewLine + "Note: " + note : text;
+            return entry.Note is { } note ? text + Environment.NewLine + T("Note: ") + note : text;
         }).ToArray();
 
     public string MessageText => _messageText;
@@ -279,7 +280,7 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
     {
         if (_disposed || _saving) return;
         var generation = ++_detailGeneration;
-        _messageText = "Reading the record…";
+        _messageText = T("Reading the record…");
         _validationText = string.Empty;
         Notify();
         RiskRegisterResult<RiskRegisterDetail> result;
@@ -296,10 +297,10 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
                 await LoadChoicesAsync(_detailGeneration, detail.Endpoints, detail.Alerts);
                 return;
             case RiskRegisterOutcome.NotFound:
-                _messageText = "This record no longer exists.";
+                _messageText = T("This record no longer exists.");
                 break;
             default:
-                _messageText = "Local Core is unavailable. Restore Core, then open the record again.";
+                _messageText = T("Local Core is unavailable. Restore Core, then open the record again.");
                 break;
         }
 
@@ -319,7 +320,7 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
         var draft = Draft();
         _saving = true;
         _validationText = string.Empty;
-        _messageText = "Saving…";
+        _messageText = T("Saving…");
         Notify();
         var editing = _mode == RiskRegisterEditorMode.Edit ? _detail : null;
         RiskRegisterResult<RiskRegisterDetail> result;
@@ -333,7 +334,7 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
         finally { _saving = false; }
 
         if (_disposed) return;
-        await AfterWriteAsync(result, editing is null ? "Risk recorded." : "Changes saved.");
+        await AfterWriteAsync(result, editing is null ? T("Risk recorded.") : T("Changes saved."));
     }
 
     public async Task RecordReviewAsync()
@@ -341,14 +342,14 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
         if (!CanReview || _detail is not { } detail) return;
         if (_nextReviewDate is not { } next)
         {
-            _validationText = "Choose the date of the next review.";
+            _validationText = T("Choose the date of the next review.");
             Notify();
             return;
         }
 
         _saving = true;
         _validationText = string.Empty;
-        _messageText = "Recording the review…";
+        _messageText = T("Recording the review…");
         Notify();
         RiskRegisterResult<RiskRegisterDetail> result;
         try
@@ -359,7 +360,7 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
         finally { _saving = false; }
 
         if (_disposed) return;
-        await AfterWriteAsync(result, "Review recorded.");
+        await AfterWriteAsync(result, T("Review recorded."));
     }
 
     /// <summary>Lists the alerts of the ticked computers, keeping alerts already linked.</summary>
@@ -383,12 +384,12 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
 
             if (result is not { Outcome: AlertOutcome.Success, Value: { } page })
             {
-                _messageText = "The alerts of " + endpoint.Text + " could not be read.";
+                _messageText = T("The alerts of ") + endpoint.Text + T(" could not be read.");
                 continue;
             }
 
             foreach (var alert in page.Alerts.Where(alert => !selected.ContainsKey(alert.AlertId)))
-                choices.Add(new RiskRegisterChoice(alert.AlertId, alert.EndpointName + " · " + alert.Title + " (" + alert.Severity + ", " + alert.Status + ")", false));
+                choices.Add(new RiskRegisterChoice(alert.AlertId, alert.EndpointName + " · " + T(alert.Title) + " (" + AlertRow.Label(alert.Severity) + ", " + AlertRow.Label(alert.Status) + ")", false));
         }
 
         Replace(AlertChoices, choices.DistinctBy(choice => choice.Id));
@@ -432,18 +433,18 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
                 await LoadPageAsync();
                 return;
             case RiskRegisterOutcome.Rejected when result.Errors is { Count: > 0 } errors:
-                _messageText = "Core did not save the record:";
+                _messageText = T("Core did not save the record:");
                 _validationText = string.Join(Environment.NewLine, errors.Select(ErrorText).Distinct());
                 break;
             case RiskRegisterOutcome.Conflict:
-                _messageText = "Another administrator changed this record after you opened it. Nothing was saved; open it again to see the latest version.";
+                _messageText = T("Another administrator changed this record after you opened it. Nothing was saved; open it again to see the latest version.");
                 break;
             case RiskRegisterOutcome.NotFound:
-                _messageText = "This record no longer exists. Nothing was saved.";
+                _messageText = T("This record no longer exists. Nothing was saved.");
                 break;
             default:
                 // A lost answer may still have been saved: never repeat it automatically.
-                _messageText = "Core did not confirm the save. Refresh the register to see whether it was recorded before trying again.";
+                _messageText = T("Core did not confirm the save. Refresh the register to see whether it was recorded before trying again.");
                 break;
         }
 
@@ -502,7 +503,7 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
         var endpoints = linkedEndpoints.Select(endpoint => new RiskRegisterChoice(endpoint.EndpointId,
             endpoint.Enrolled ? endpoint.Name! : "Computer no longer enrolled (" + endpoint.EndpointId.ToString("D") + ")", true)).ToList();
         Replace(AlertChoices, linkedAlerts.Select(alert => new RiskRegisterChoice(alert.AlertId,
-            alert.Exists ? alert.EndpointName + " · " + alert.Title + " (" + alert.Severity + ", " + alert.Status + ")" : "Alert no longer recorded", true)));
+            alert.Exists ? alert.EndpointName + " · " + T(alert.Title!) + " (" + AlertRow.Label(alert.Severity) + ", " + AlertRow.Label(alert.Status) + ")" : T("Alert no longer recorded"), true)));
         Replace(EndpointChoices, endpoints);
         if (_devices is null) return;
         DeviceReadResult<IReadOnlyList<DeviceSummary>> result;
@@ -517,7 +518,7 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
 
         if (result is not { Outcome: DeviceReadOutcome.Success, Value: { } devices })
         {
-            _messageText = "The list of computers could not be read; only the linked ones are shown.";
+            _messageText = T("The list of computers could not be read; only the linked ones are shown.");
             Notify();
             return;
         }
@@ -547,9 +548,9 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
     private static RiskRegisterRow Row(RiskRegisterSummary summary)
     {
         var attention = new List<string>();
-        if (summary.Flags.ReviewOverdue) attention.Add("Review overdue");
-        if (summary.Flags.AcceptanceExpired) attention.Add("Acceptance expired");
-        if (summary.Flags.TargetDatePassed) attention.Add("Target date passed");
+        if (summary.Flags.ReviewOverdue) attention.Add(T("Review overdue"));
+        if (summary.Flags.AcceptanceExpired) attention.Add(T("Acceptance expired"));
+        if (summary.Flags.TargetDatePassed) attention.Add(T("Target date passed"));
         return new RiskRegisterRow(summary.RiskId, summary.Reference, summary.Title,
             summary.Residual.Score.ToString(CultureInfo.InvariantCulture) + " · " + LevelText(summary.Residual.Level), StatusText(summary.Status),
             TreatmentText(summary.Treatment), summary.Owner ?? "—", summary.ReviewDate ?? "—", string.Join(", ", attention));
@@ -562,43 +563,43 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
         })
         : string.Empty;
 
-    private static string LevelText(string level) => level switch { "low" => "Low", "medium" => "Medium", "high" => "High", _ => "Critical" };
+    private static string LevelText(string level) => level switch { "low" => T("Low"), "medium" => T("Medium"), "high" => T("High"), _ => T("Critical") };
 
-    private static string StatusText(string status) => status switch { "open" => "Open", "monitoring" => "Monitoring", _ => "Closed" };
+    private static string StatusText(string status) => status switch { "open" => T("Open"), "monitoring" => T("Monitoring"), _ => T("Closed") };
 
     private static string TreatmentText(string? treatment) => treatment switch
     {
-        "avoid" => "Avoid", "mitigate" => "Mitigate", "transfer" => "Transfer", "accept" => "Accept", _ => "Not decided"
+        "avoid" => T("Avoid"), "mitigate" => T("Mitigate"), "transfer" => T("Transfer"), "accept" => T("Accept"), _ => T("Not decided")
     };
 
     private static string FieldLabel(string field) => field switch
     {
-        "title" => "Title", "description" => "Description", "owner" => "Owner", "likelihood" => "Likelihood", "impact" => "Impact",
-        "controls" => "Existing controls", "residualLikelihood" => "Residual likelihood", "residualImpact" => "Residual impact",
-        "residual" => "Residual risk", "treatment" => "Treatment", "acceptanceRationale" => "Acceptance rationale",
-        "acceptanceExpiresOn" => "Acceptance expires on", "targetDate" => "Target date", "reviewDate" => "Review date", "nextReviewDate" => "Next review",
-        "status" => "Status", "endpointIds" => "Computers", "alertIds" => "Alerts", "tickets" => "Tickets", "note" => "Note", _ => field
+        "title" => T("Title"), "description" => T("Description"), "owner" => T("Owner"), "likelihood" => T("Likelihood"), "impact" => T("Impact"),
+        "controls" => T("Existing controls"), "residualLikelihood" => T("Residual likelihood"), "residualImpact" => T("Residual impact"),
+        "residual" => T("Residual risk"), "treatment" => T("Treatment"), "acceptanceRationale" => T("Acceptance rationale"),
+        "acceptanceExpiresOn" => T("Acceptance expires on"), "targetDate" => T("Target date"), "reviewDate" => T("Review date"), "nextReviewDate" => T("Next review"),
+        "status" => T("Status"), "endpointIds" => T("Computers"), "alertIds" => T("Alerts"), "tickets" => T("Tickets"), "note" => T("Note"), _ => field
     };
 
     /// <summary>Core's field codes in words.</summary>
     public static string ErrorText(RiskRegisterError error) => (error.Field, error.Code) switch
     {
-        ("residual", "exceedsInherent") => "Residual risk cannot be higher than the risk before controls.",
-        ("owner", "requiredForAcceptance") => "An accepted risk needs a named owner.",
-        ("register", "full") => "The Risk Register is full (2,000 records).",
-        ("history", "full") => "This record has reached its limit of 200 changes. Close it and record a new one.",
-        ("status", "closed") => "A closed risk is not reviewed.",
-        (var field, "required") => FieldLabel(field) + " is required.",
-        (var field, "tooLong") => FieldLabel(field) + " is too long.",
-        (var field, "invalid") => FieldLabel(field) + " contains a value or characters that cannot be saved.",
-        (var field, "range") => FieldLabel(field) + " must be from 1 to 5.",
-        (var field, "notFuture") => FieldLabel(field) + " must be after today.",
-        (var field, "tooFar") => FieldLabel(field) + " can be at most one year ahead.",
-        (var field, "past") => FieldLabel(field) + " cannot be in the past.",
-        (var field, "onlyForAcceptance") => FieldLabel(field) + " applies only to an accepted risk.",
-        (var field, "unknown") => FieldLabel(field) + " include one that no longer exists. Refresh the choices.",
-        (var field, "duplicate") => FieldLabel(field) + " list the same entry twice.",
-        (var field, "tooMany") => FieldLabel(field) + " list too many entries.",
+        ("residual", "exceedsInherent") => T("Residual risk cannot be higher than the risk before controls."),
+        ("owner", "requiredForAcceptance") => T("An accepted risk needs a named owner."),
+        ("register", "full") => T("The Risk Register is full (2,000 records)."),
+        ("history", "full") => T("This record has reached its limit of 200 changes. Close it and record a new one."),
+        ("status", "closed") => T("A closed risk is not reviewed."),
+        (var field, "required") => FieldLabel(field) + T(" is required."),
+        (var field, "tooLong") => FieldLabel(field) + T(" is too long."),
+        (var field, "invalid") => FieldLabel(field) + T(" contains a value or characters that cannot be saved."),
+        (var field, "range") => FieldLabel(field) + T(" must be from 1 to 5."),
+        (var field, "notFuture") => FieldLabel(field) + T(" must be after today."),
+        (var field, "tooFar") => FieldLabel(field) + T(" can be at most one year ahead."),
+        (var field, "past") => FieldLabel(field) + T(" cannot be in the past."),
+        (var field, "onlyForAcceptance") => FieldLabel(field) + T(" applies only to an accepted risk."),
+        (var field, "unknown") => FieldLabel(field) + T(" include one that no longer exists. Refresh the choices."),
+        (var field, "duplicate") => FieldLabel(field) + T(" list the same entry twice."),
+        (var field, "tooMany") => FieldLabel(field) + T(" list too many entries."),
         (var field, var code) => FieldLabel(field) + ": " + code + "."
     };
 

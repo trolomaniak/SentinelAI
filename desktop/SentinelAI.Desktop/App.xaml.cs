@@ -4,6 +4,7 @@ using System.Windows;
 using SentinelAI.Desktop.Foundation;
 using SentinelAI.Desktop.Services;
 using SentinelAI.Localization;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop;
 
@@ -52,7 +53,7 @@ public partial class App : Application
                 if (await _instance.ActivateExistingAsync()) Shutdown();
                 else
                 {
-                    MessageBox.Show("SentinelAI is already running, but its window could not be opened. Wait for it to respond or close it, then try again.",
+                    MessageBox.Show(T("SentinelAI is already running, but its window could not be opened. Wait for it to respond or close it, then try again."),
                         "SentinelAI", MessageBoxButton.OK, MessageBoxImage.Information);
                     Shutdown(1);
                 }
@@ -107,7 +108,7 @@ public partial class App : Application
                 _shell.Dispose();
             else
                 client?.Dispose();
-            MessageBox.Show("SentinelAI could not start. Close the application and try again.",
+            MessageBox.Show(T("SentinelAI could not start. Close the application and try again."),
                 "SentinelAI", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }

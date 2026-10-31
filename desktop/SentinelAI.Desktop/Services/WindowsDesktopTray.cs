@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using SentinelAI.Desktop.Foundation;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Services;
 
@@ -22,7 +23,7 @@ public sealed class WindowsDesktopTray : INotifyPropertyChanged, IDisposable
     private bool _registered;
     private bool _disposed;
     private bool _isAvailable = true;
-    private string _statusText = "Tray integration is off.";
+    private string _statusText = T("Tray integration is off.");
     private readonly LocalServiceNotificationPolicy _notifications = new();
     private bool _notificationPermission;
 
@@ -83,23 +84,23 @@ public sealed class WindowsDesktopTray : INotifyPropertyChanged, IDisposable
         if (!_preferences.TrayEnabled)
         {
             DeleteIcon();
-            SetStatus(true, "Tray integration is off. Closing Desktop ends its session.");
+            SetStatus(true, T("Tray integration is off. Closing Desktop ends its session."));
             return;
         }
         if (_source is null)
         {
-            SetStatus(true, "Tray integration will start with the Desktop window.");
+            SetStatus(true, T("Tray integration will start with the Desktop window."));
             return;
         }
         if (_registered) return;
         var data = CreateData(0x0001 | 0x0002 | 0x0004); // MESSAGE, ICON, TIP
         data.Icon = LoadIcon(IntPtr.Zero, new IntPtr(32512)); // shared application icon
-        data.Tip = "SentinelAI — Open SentinelAI";
+        data.Tip = T("SentinelAI — Open SentinelAI");
         _registered = data.Icon != IntPtr.Zero && ShellNotifyIcon(0, ref data);
         UpdateNotificationPermission();
         SetStatus(_registered, _registered
-            ? "Tray is enabled. Open SentinelAI restores the window; Exit Desktop closes its session."
-            : "Tray integration is unavailable. Use the normal Desktop window.");
+            ? T("Tray is enabled. Open SentinelAI restores the window; Exit Desktop closes its session.")
+            : T("Tray integration is unavailable. Use the normal Desktop window."));
     }
 
     private void OnServiceStatusChanged(object? sender, LocalServiceStatusChangedEventArgs args)
@@ -107,12 +108,12 @@ public sealed class WindowsDesktopTray : INotifyPropertyChanged, IDisposable
         if (_disposed || !_registered || !_preferences.TrayEnabled || !_preferences.NotificationsEnabled) return;
         if (!_notifications.TryCreateNotification(args.Current, out var message)) return;
         var data = CreateData(0x0010); // INFO; all text is fixed, without endpoint or alert data
-        data.InfoTitle = "SentinelAI local service";
+        data.InfoTitle = T("SentinelAI local service");
         data.Info = message;
         data.InfoFlags = 2 | 0x80; // WARNING, RESPECT_QUIET_TIME
         data.TimeoutOrVersion = 10000;
         if (!ShellNotifyIcon(1, ref data))
-            SetStatus(false, "Tray notifications are unavailable. Service status remains visible in Settings.");
+            SetStatus(false, T("Tray notifications are unavailable. Service status remains visible in Settings."));
     }
 
     private IntPtr WindowMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -136,7 +137,7 @@ public sealed class WindowsDesktopTray : INotifyPropertyChanged, IDisposable
             else if (notification is 0x0205 or 0x007B)
                 ShowMenu(hwnd);
         }
-        catch { SetStatus(false, "The tray action is unavailable. Use the normal Desktop window."); }
+        catch { SetStatus(false, T("The tray action is unavailable. Use the normal Desktop window.")); }
         return IntPtr.Zero;
     }
 
@@ -146,8 +147,8 @@ public sealed class WindowsDesktopTray : INotifyPropertyChanged, IDisposable
         if (menu == IntPtr.Zero) return;
         try
         {
-            if (!AppendMenu(menu, 0, new UIntPtr(1), "Open SentinelAI") ||
-                !AppendMenu(menu, 0, new UIntPtr(2), "Exit Desktop") || !GetCursorPos(out var point)) return;
+            if (!AppendMenu(menu, 0, new UIntPtr(1), T("Open SentinelAI")) ||
+                !AppendMenu(menu, 0, new UIntPtr(2), T("Exit Desktop")) || !GetCursorPos(out var point)) return;
             SetForegroundWindow(hwnd);
             var choice = TrackPopupMenu(menu, 0x0100 | 0x0080 | 0x0002, point.X, point.Y, 0, hwnd, IntPtr.Zero);
             PostMessage(hwnd, 0, IntPtr.Zero, IntPtr.Zero);
@@ -262,9 +263,9 @@ public sealed class LocalServiceNotificationPolicy(TimeProvider? timeProvider = 
         var now = _time.GetTimestamp();
         if (_lastNotification is { } last && _time.GetElapsedTime(last, now) < TimeSpan.FromSeconds(30)) return false;
         _lastNotification = now;
-        message = coreStopped && agentStopped ? "The local Core and Agent services stopped. Open SentinelAI to check service status."
-            : coreStopped ? "The local Core service stopped. Open SentinelAI to check service status."
-            : "The local Agent service stopped. Open SentinelAI to check service status.";
+        message = coreStopped && agentStopped ? T("The local Core and Agent services stopped. Open SentinelAI to check service status.")
+            : coreStopped ? T("The local Core service stopped. Open SentinelAI to check service status.")
+            : T("The local Agent service stopped. Open SentinelAI to check service status.");
         return true;
     }
 

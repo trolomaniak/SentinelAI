@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using Microsoft.Win32;
 using SentinelAI.Desktop.Foundation;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Views;
 
@@ -78,7 +79,7 @@ public partial class DevicesView : UserControl
     private void OnSaveCodes(object sender, RoutedEventArgs e)
     {
         if (Enrollment is not { IssuedCodes.Count: > 0 } enrollment) return;
-        var dialog = new OpenFolderDialog { Title = "Choose a folder for the enrollment code files" };
+        var dialog = new OpenFolderDialog { Title = T("Choose a folder for the enrollment code files") };
         if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
         try
         {
@@ -86,7 +87,7 @@ public partial class DevicesView : UserControl
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(Window.GetWindow(this), "The code files could not be saved there. Choose another folder.", "SentinelAI",
+            MessageBox.Show(Window.GetWindow(this), T("The code files could not be saved there. Choose another folder."), "SentinelAI",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }

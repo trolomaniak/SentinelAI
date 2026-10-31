@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -21,7 +22,7 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
     private EndpointRiskPresentation? _detail;
     private RiskListState _listState;
     private RiskDetailState _detailState;
-    private string _listStatusText = "Open Risk to load the current Core evaluation.";
+    private string _listStatusText = T("Open Risk to load the current Core evaluation.");
     private string _detailStatusText = string.Empty;
     private string _errorText = string.Empty;
     private int _offset;
@@ -99,7 +100,7 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
             _selectedEndpoint = null;
             _organization = null;
             _listState = RiskListState.Loading;
-            _listStatusText = "Loading the current Core risk evaluation…";
+            _listStatusText = T("Loading the current Core risk evaluation…");
             _errorText = string.Empty;
             NotifyAll();
             _ = LoadListAsync(pending, offset);
@@ -155,7 +156,7 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
             {
                 CloseDetailLocked();
                 _detailState = RiskDetailState.NotFound;
-                _detailStatusText = "This endpoint is no longer on the current page. Refresh Risk.";
+                _detailStatusText = T("This endpoint is no longer on the current page. Refresh Risk.");
                 NotifyAll();
                 return Task.CompletedTask;
             }
@@ -180,7 +181,7 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
         _detailPending = pending;
         _detail = null;
         _detailState = RiskDetailState.Loading;
-        _detailStatusText = "Loading endpoint risk factors…";
+        _detailStatusText = T("Loading endpoint risk factors…");
         _errorText = string.Empty;
         NotifyAll();
         _ = LoadDetailAsync(pending, endpointId);
@@ -200,8 +201,8 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
                     _detail = new EndpointRiskPresentation(result.Value!);
                     _detailState = RiskDetailState.Ready;
                     _detailStatusText = _detail.Contributions.Count == 0
-                        ? "No scored alert contributions. Review coverage; a zero score is not a security assurance."
-                        : $"{_detail.Contributions.Count} scored alert contributions · evaluated {RiskText.Timestamp(result.Value!.Risk.CalculatedUtc)}";
+                        ? T("No scored alert contributions. Review coverage; a zero score is not a security assurance.")
+                        : F("{0} scored alert contributions · evaluated {1}", _detail.Contributions.Count, RiskText.Timestamp(result.Value!.Risk.CalculatedUtc));
                     _errorText = string.Empty;
                 }
                 else SetDetailFailure(result.Outcome);
@@ -240,8 +241,8 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
         _offset = offset;
         _totalEndpoints = page.Total;
         _listState = page.Total == 0 ? RiskListState.Empty : RiskListState.Ready;
-        _listStatusText = page.Total == 0 ? "No enrolled endpoints. A zero organization score is not a security assurance."
-            : $"{page.Total} endpoints · page {PageNumber} of {TotalPages} · ranked by Core";
+        _listStatusText = page.Total == 0 ? T("No enrolled endpoints. A zero organization score is not a security assurance.")
+            : F("{0} endpoints · page {1} of {2} · ranked by Core", page.Total, PageNumber, TotalPages);
         _errorText = string.Empty;
     }
     private void SetListFailure(string message)
@@ -259,15 +260,15 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
     {
         _detail = null;
         _detailState = outcome == RiskReadOutcome.NotFound ? RiskDetailState.NotFound : RiskDetailState.Unavailable;
-        _detailStatusText = outcome == RiskReadOutcome.NotFound ? "This endpoint is no longer available. Refresh Risk." : FailureText(outcome);
+        _detailStatusText = outcome == RiskReadOutcome.NotFound ? T("This endpoint is no longer available. Refresh Risk.") : FailureText(outcome);
         _errorText = _detailStatusText;
     }
     private static string FailureText(RiskReadOutcome outcome) => outcome switch
     {
-        RiskReadOutcome.UntrustedConnection => "The local Core connection could not be trusted.",
-        RiskReadOutcome.InvalidResponse or RiskReadOutcome.Success => "Core returned an invalid risk response. Refresh Risk.",
-        RiskReadOutcome.TooLarge => "The risk response exceeds the supported size.",
-        _ => "Local Core is unavailable. Restore Core, then refresh Risk."
+        RiskReadOutcome.UntrustedConnection => T("The local Core connection could not be trusted."),
+        RiskReadOutcome.InvalidResponse or RiskReadOutcome.Success => T("Core returned an invalid risk response. Refresh Risk."),
+        RiskReadOutcome.TooLarge => T("The risk response exceeds the supported size."),
+        _ => T("Local Core is unavailable. Restore Core, then refresh Risk.")
     };
     private void ExpireLocked()
     {
@@ -307,7 +308,7 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
         _offset = 0;
         _totalEndpoints = 0;
         _listState = RiskListState.NotLoaded;
-        _listStatusText = "Open Risk to load the current Core evaluation.";
+        _listStatusText = T("Open Risk to load the current Core evaluation.");
         _errorText = string.Empty;
     }
     public void Clear()
