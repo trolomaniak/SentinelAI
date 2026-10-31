@@ -20,6 +20,7 @@ public partial class App : Application
     private CentralUpdateViewModel? _centralUpdate;
     private VulnerabilityFeedViewModel? _vulnerabilityFeed;
     private DeviceVulnerabilitiesViewModel? _deviceVulnerabilities;
+    private RiskRegisterViewModel? _riskRegister;
     private AiExplanationViewModel? _aiExplanation;
     private WindowsDesktopInstance? _instance;
     private WindowsServiceStatusModel? _serviceStatus;
@@ -71,6 +72,9 @@ public partial class App : Application
             // TASK-030: Core verifies every vulnerability feed; Desktop shows the result and sends a file the administrator selects.
             _vulnerabilityFeed = new VulnerabilityFeedViewModel((IVulnerabilityClient)authenticationClient, new WindowsVulnerabilityFeedPicker());
             _deviceVulnerabilities = new DeviceVulnerabilitiesViewModel((IVulnerabilityClient)authenticationClient);
+            // TASK-032: business risks; Core validates, versions and keeps their history.
+            _riskRegister = new RiskRegisterViewModel((IRiskRegisterClient)authenticationClient, (IDevicesClient)authenticationClient,
+                (IAlertsClient)authenticationClient);
             _aiExplanation = new AiExplanationViewModel((IAiExplanationClient)authenticationClient);
             var assembly = typeof(App).Assembly;
             var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -81,7 +85,8 @@ public partial class App : Application
             var integration = new DesktopIntegrationViewModel(new WindowsDesktopPreferences());
             _serviceStatus = new WindowsServiceStatusModel();
             var window = new MainWindow(_shell, _authentication, _devices, _alerts, _risk, _reports, _license, _aiExplanation,
-                integration, _serviceStatus, _localNetwork, _computerEnrollment, _pilot, _centralUpdate, _vulnerabilityFeed, _deviceVulnerabilities);
+                integration, _serviceStatus, _localNetwork, _computerEnrollment, _pilot, _centralUpdate, _vulnerabilityFeed, _deviceVulnerabilities,
+                _riskRegister);
             MainWindow = window;
             _tray = new WindowsDesktopTray(window, integration, _serviceStatus, OpenSentinelAi, () => Shutdown());
             window.DesktopTray = _tray;
@@ -131,6 +136,7 @@ public partial class App : Application
         _centralUpdate?.Dispose();
         _vulnerabilityFeed?.Dispose();
         _deviceVulnerabilities?.Dispose();
+        _riskRegister?.Dispose();
         _aiExplanation?.Dispose();
         _authentication?.Dispose();
         _instance?.Dispose();

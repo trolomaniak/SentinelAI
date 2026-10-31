@@ -26,6 +26,8 @@ public static class RiskRegisterPolicy
     public const int MaximumOwnerLength = 128;
     public const int MaximumTextLength = 2_000;
     public const int MaximumTicketLength = 64;
+    /// <summary>A record at every maximum, with non-ASCII text escaped as JSON writers do (six bytes per character).</summary>
+    public const long MaximumRequestBytes = 128 * 1024;
     public static IReadOnlyList<string> Statuses { get; } = ["open", "monitoring", "closed"];
     public static IReadOnlyList<string> Treatments { get; } = ["avoid", "mitigate", "transfer", "accept"];
     public static IReadOnlyList<string> Levels { get; } = ["low", "medium", "high", "critical"];

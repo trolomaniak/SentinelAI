@@ -27,6 +27,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
             new NavigationPage(PageId.Devices, "Devices", "Endpoint inventory and connection health."),
             new NavigationPage(PageId.Alerts, "Alerts", "Security alerts and incident review."),
             new NavigationPage(PageId.Risk, "Risk", "Organization and endpoint risk."),
+            new NavigationPage(PageId.RiskRegister, "Risk Register", "Business risks, owners, treatment and reviews."),
             new NavigationPage(PageId.Reports, "Reports", "Local security reports."),
             new NavigationPage(PageId.Settings, "Settings", "Local application settings and licensing.")
         });

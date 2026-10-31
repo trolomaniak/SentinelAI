@@ -778,7 +778,7 @@ public static class CoreHost
                 return RiskRegisterResponse(await register.CreateAsync(request, actor, cancellationToken), created: true);
             })
             .RequireAuthorization()
-            .WithMetadata(new RequestSizeLimitAttribute(64 * 1024));
+            .WithMetadata(new RequestSizeLimitAttribute(RiskRegisterPolicy.MaximumRequestBytes));
 
         app.MapPut("/api/admin/risk-register/{riskId:guid}", async (Guid riskId, UpdateRiskRecordRequest? request, HttpContext context,
                 RiskRegisterStore register, CancellationToken cancellationToken) =>
@@ -791,7 +791,7 @@ public static class CoreHost
                 return RiskRegisterResponse(await register.UpdateAsync(riskId, request.ExpectedVersion, record, actor, cancellationToken), created: false);
             })
             .RequireAuthorization()
-            .WithMetadata(new RequestSizeLimitAttribute(64 * 1024));
+            .WithMetadata(new RequestSizeLimitAttribute(RiskRegisterPolicy.MaximumRequestBytes));
 
         app.MapPost("/api/admin/risk-register/{riskId:guid}/review", async (Guid riskId, ReviewRiskRecordRequest? request, HttpContext context,
                 RiskRegisterStore register, CancellationToken cancellationToken) =>
