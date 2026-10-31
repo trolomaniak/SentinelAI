@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using SentinelAI.Localization;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -95,6 +96,52 @@ public sealed class HttpCoreClient : ICoreClient
         {
             cancellationToken.ThrowIfCancellationRequested();
             return CoreHealth.Unavailable;
+        }
+    }
+
+    private static readonly Uri LanguageUri = new("http://127.0.0.1:5000/api/language");
+
+    /// <summary>
+    /// The installation language Core reports, or null when Core does not answer exactly as expected within two
+    /// seconds. Not sensitive: it only chooses the language Desktop is shown in.
+    /// </summary>
+    public async Task<UiLanguage?> GetLanguageAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, LanguageUri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.OK ||
+                !string.Equals(response.Content.Headers.ContentType?.MediaType, "application/json", StringComparison.OrdinalIgnoreCase) ||
+                response.Content.Headers.ContentLength > MaximumResponseBytes)
+                return null;
+            using var stream = await response.Content.ReadAsStreamAsync(deadline.Token).ConfigureAwait(false);
+            var buffer = new byte[MaximumResponseBytes + 1];
+            var bytesRead = 0;
+            int count;
+            while (bytesRead < buffer.Length && (count = await stream.ReadAsync(buffer.AsMemory(bytesRead), deadline.Token).ConfigureAwait(false)) > 0)
+                bytesRead += count;
+            if (bytesRead > MaximumResponseBytes) return null;
+            using var json = JsonDocument.Parse(buffer.AsMemory(0, bytesRead), new JsonDocumentOptions { MaxDepth = 2 });
+            if (json.RootElement.ValueKind != JsonValueKind.Object) return null;
+            var properties = json.RootElement.EnumerateObject();
+            if (!properties.MoveNext() || !properties.Current.NameEquals("language") || properties.Current.Value.ValueKind != JsonValueKind.String) return null;
+            var code = properties.Current.Value.GetString();
+            return !properties.MoveNext() && UiLanguages.TryParse(code, out var language) ? language : null;
+        }
+        catch (OperationCanceledException)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return null;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException or InvalidOperationException)
+        {
+            return null;
         }
     }
 

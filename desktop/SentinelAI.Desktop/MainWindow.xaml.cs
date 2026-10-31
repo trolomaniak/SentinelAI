@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     public AlertsViewModel? Alerts { get; }
     public RiskViewModel? Risk { get; }
     public RiskRegisterViewModel? RiskRegister { get; }
+    public LanguageSettingsViewModel? LanguageSettings { get; }
     public ReportsViewModel? Reports { get; }
     public LicenseViewModel? License { get; }
     public LocalNetworkViewModel? LocalNetwork { get; }
@@ -59,7 +60,7 @@ public partial class MainWindow : Window
         LocalNetworkViewModel? localNetwork = null, ComputerEnrollmentViewModel? computerEnrollment = null,
         PilotLicenseViewModel? pilot = null, CentralUpdateViewModel? centralUpdate = null,
         VulnerabilityFeedViewModel? vulnerabilityFeed = null, DeviceVulnerabilitiesViewModel? deviceVulnerabilities = null,
-        RiskRegisterViewModel? riskRegister = null)
+        RiskRegisterViewModel? riskRegister = null, LanguageSettingsViewModel? language = null)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
@@ -69,6 +70,7 @@ public partial class MainWindow : Window
         Alerts = alerts;
         Risk = risk;
         RiskRegister = riskRegister;
+        LanguageSettings = language;
         Reports = reports;
         License = license;
         LocalNetwork = localNetwork;
@@ -85,6 +87,7 @@ public partial class MainWindow : Window
         if (alerts is not null) alerts.SessionExpired += OnWorkspaceSessionExpired;
         if (risk is not null) risk.SessionExpired += OnWorkspaceSessionExpired;
         if (riskRegister is not null) riskRegister.SessionExpired += OnWorkspaceSessionExpired;
+        if (language is not null) language.SessionExpired += OnWorkspaceSessionExpired;
         if (reports is not null) reports.SessionExpired += OnWorkspaceSessionExpired;
         if (license is not null)
         {

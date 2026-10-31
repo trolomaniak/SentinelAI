@@ -91,6 +91,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelAI.Setup.Tests", "t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelAI.PilotLicense", "tools\pilot-license\SentinelAI.PilotLicense.csproj", "{9A832FD0-8064-4A28-9871-4789E7964D2D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelAI.Localization", "shared\localization\SentinelAI.Localization.csproj", "{0DB298EF-7F0C-438E-8E08-51B2A4271F62}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -425,6 +427,18 @@ Global
 		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Release|x64.Build.0 = Release|Any CPU
 		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Release|x86.ActiveCfg = Release|Any CPU
 		{9A832FD0-8064-4A28-9871-4789E7964D2D}.Release|x86.Build.0 = Release|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Debug|x64.Build.0 = Debug|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Debug|x86.Build.0 = Debug|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Release|x64.ActiveCfg = Release|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Release|x64.Build.0 = Release|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Release|x86.ActiveCfg = Release|Any CPU
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -463,5 +477,6 @@ Global
 		{3F5323E4-DBC7-4B95-810D-0A68B0D9AC5B} = {1860D2E4-5C43-71D5-59A5-599A4DE1DF67}
 		{1028E87F-4D84-4C1D-B576-8CFD16CEDF48} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{9A832FD0-8064-4A28-9871-4789E7964D2D} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{0DB298EF-7F0C-438E-8E08-51B2A4271F62} = {4F52FD11-658E-A102-6CD3-7D7C16FFA15B}
 	EndGlobalSection
 EndGlobal

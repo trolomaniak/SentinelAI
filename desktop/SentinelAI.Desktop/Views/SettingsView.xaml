@@ -1,4 +1,4 @@
-<UserControl x:Class="SentinelAI.Desktop.Views.SettingsView"
+<UserControl xmlns:foundation="clr-namespace:SentinelAI.Desktop.Foundation;assembly=SentinelAI.Desktop.Foundation" xmlns:loc="clr-namespace:SentinelAI.Desktop.Localization" x:Class="SentinelAI.Desktop.Views.SettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              AutomationProperties.AutomationId="SettingsView" SizeChanged="OnViewSizeChanged">
@@ -7,14 +7,14 @@
         <ScrollViewer x:Name="SettingsActionsScroller" MaxHeight="100" VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,12">
             <WrapPanel>
-                <Button Content="Refresh license" Click="OnRefreshLicense" IsEnabled="{Binding CanRefresh}"
+                <Button Content="{loc:T 'Refresh license'}" Click="OnRefreshLicense" IsEnabled="{Binding CanRefresh}"
                         Margin="0,0,8,8" AutomationProperties.AutomationId="RefreshLicenseButton" />
-                <Button Content="Renew license" Click="OnRenewLicense" IsEnabled="{Binding CanRenew}"
+                <Button Content="{loc:T 'Renew license'}" Click="OnRenewLicense" IsEnabled="{Binding CanRenew}"
                         Margin="0,0,8,8" AutomationProperties.AutomationId="RenewLicenseButton" />
-                <Button Content="Refresh local network" Click="OnRefreshLocalNetwork"
+                <Button Content="{loc:T 'Refresh local network'}" Click="OnRefreshLocalNetwork"
                         IsEnabled="{Binding LocalNetwork.CanRefresh, RelativeSource={RelativeSource AncestorType=Window}}"
                         Margin="0,0,8,8" AutomationProperties.AutomationId="RefreshLocalNetworkButton" />
-                <Button Content="Check Core connection"
+                <Button Content="{loc:T 'Check Core connection'}"
                         Command="{Binding DataContext.RefreshCoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                         Margin="0,0,8,8" AutomationProperties.AutomationId="SettingsCheckCoreButton" />
             </WrapPanel>
@@ -22,9 +22,9 @@
         <ScrollViewer x:Name="SettingsPageScroller" Grid.Row="1" VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled" Padding="0,0,4,0">
             <StackPanel>
-                <TextBlock Text="Settings" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap"
-                           AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="Settings" />
-                <TextBlock Text="Review licensing, Core's local-network access for Agents, updates and the local application's connection and session settings."
+                <TextBlock Text="{loc:T 'Settings'}" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="{loc:T 'Settings'}" />
+                <TextBlock Text="{loc:T 'Review licensing, Core\'s local-network access for Agents, updates and the local application\'s connection and session settings.'}"
                            Margin="0,10,0,20" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" />
                 <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
                            AutomationProperties.AutomationId="LicenseStatus" AutomationProperties.LiveSetting="Polite" />
@@ -41,26 +41,26 @@
                         </Style.Triggers></Style>
                     </Border.Style>
                     <StackPanel>
-                        <TextBlock Text="Pilot license" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="{loc:T 'Pilot license'}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
                         <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
                                    AutomationProperties.AutomationId="PilotLicenseStatus" AutomationProperties.LiveSetting="Polite" />
                         <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,8"
                                    AutomationProperties.AutomationId="PilotLicenseError" AutomationProperties.LiveSetting="Assertive" />
-                        <TextBlock Text="Customer" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Customer'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding CustomerText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                    AutomationProperties.AutomationId="PilotLicenseCustomer" />
-                        <TextBlock Text="Expires" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Expires'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding ExpiresText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                    AutomationProperties.AutomationId="PilotLicenseExpires" />
-                        <TextBlock Text="Days left" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Days left'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding DaysLeftText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                    AutomationProperties.AutomationId="PilotLicenseDaysLeft" />
-                        <Label Content="New pilot license _key" Target="{Binding ElementName=PilotLicenseKeyBox}" Padding="0" />
+                        <Label Content="{loc:T 'New pilot license _key'}" Target="{Binding ElementName=PilotLicenseKeyBox}" Padding="0" />
                         <TextBox x:Name="PilotLicenseKeyBox" Text="{Binding KeyText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  MaxLength="2048" TextWrapping="Wrap" AcceptsReturn="False" Margin="0,4,0,8" MinHeight="48"
-                                 AutomationProperties.AutomationId="PilotLicenseKeyBox" AutomationProperties.Name="New pilot license key" />
+                                 AutomationProperties.AutomationId="PilotLicenseKeyBox" AutomationProperties.Name="{loc:T 'New pilot license key'}" />
                         <WrapPanel>
-                            <Button Content="Apply key" Click="OnApplyPilotKey" IsEnabled="{Binding CanSubmit}" Margin="0,0,8,8"
+                            <Button Content="{loc:T 'Apply key'}" Click="OnApplyPilotKey" IsEnabled="{Binding CanSubmit}" Margin="0,0,8,8"
                                     AutomationProperties.AutomationId="ApplyPilotKeyButton" />
                         </WrapPanel>
                         <TextBlock Text="{Binding SubmitStatusText}" TextWrapping="Wrap"
@@ -70,8 +70,8 @@
                 <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16">
                     <StackPanel>
-                        <TextBlock Text="License" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
-                        <TextBlock Text="Current Core state" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'License'}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="{loc:T 'Current Core state'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding ModeText}" FontSize="24" FontWeight="SemiBold" TextWrapping="Wrap"
                                    Margin="0,4,0,12" AutomationProperties.AutomationId="LicenseMode" />
                         <TextBlock Text="{Binding RenewalStatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
@@ -84,27 +84,27 @@
                                     <DataTrigger Binding="{Binding Status}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
                                 </Style.Triggers></Style>
                             </StackPanel.Style>
-                            <TextBlock Text="Permitted optional features" Foreground="{DynamicResource SecondaryTextBrush}" />
+                            <TextBlock Text="{loc:T 'Permitted optional features'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                             <TextBlock Text="{Binding FeaturesText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                        AutomationProperties.AutomationId="LicenseFeatures" />
-                            <Expander Header="Validation and renewal details" Margin="0,4,0,0"
+                            <Expander Header="{loc:T 'Validation and renewal details'}" Margin="0,4,0,0"
                                       AutomationProperties.AutomationId="LicenseValidationDetails">
                                 <StackPanel Margin="8,12,8,0">
-                                    <TextBlock Text="Last successful validation (UTC)" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <TextBlock Text="{loc:T 'Last successful validation (UTC)'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                                     <TextBlock Text="{Binding LastValidationText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                                AutomationProperties.AutomationId="LicenseLastValidation" />
-                                    <TextBlock Text="Full mode until (UTC)" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <TextBlock Text="{loc:T 'Full mode until (UTC)'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                                     <TextBlock Text="{Binding FullModeUntilText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                                AutomationProperties.AutomationId="LicenseFullModeUntil" />
-                                    <TextBlock Text="Core effective time (UTC)" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <TextBlock Text="{loc:T 'Core effective time (UTC)'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                                     <TextBlock Text="{Binding EffectiveTimeText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                                AutomationProperties.AutomationId="LicenseEffectiveTime" />
-                                    <TextBlock Text="Clock rollback" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <TextBlock Text="{loc:T 'Clock rollback'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                                     <TextBlock Text="{Binding ClockRollbackText}" TextWrapping="Wrap" Margin="0,4,0,0"
                                                AutomationProperties.AutomationId="LicenseClockRollback" />
                                 </StackPanel>
                             </Expander>
-                            <Expander Header="Core local capabilities" Margin="0,16,0,0"
+                            <Expander Header="{loc:T 'Core local capabilities'}" Margin="0,16,0,0"
                                       AutomationProperties.AutomationId="LicenseLocalCapabilities">
                                 <StackPanel Margin="8,12,8,0">
                                     <TextBlock Text="{Binding Status.Capabilities.CriticalTelemetryCollection, StringFormat='Critical telemetry collection: {0}'}"
@@ -128,27 +128,27 @@
                         BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16"
                         AutomationProperties.AutomationId="LocalNetworkSettings">
                     <StackPanel>
-                        <TextBlock Text="Local network" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="{loc:T 'Local network'}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
                         <TextBlock Text="{Binding LocalNetwork.AccessText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="LocalNetworkAccess"
                                    AutomationProperties.LiveSetting="Polite" />
                         <TextBlock Text="{Binding LocalNetwork.ErrorText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="LocalNetworkError"
                                    AutomationProperties.LiveSetting="Assertive" />
-                        <TextBlock Text="Computer name" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Computer name'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding LocalNetwork.ComputerNameText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="LocalNetworkComputerName" />
-                        <TextBlock Text="Local-network addresses" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Local-network addresses'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding LocalNetwork.AddressesText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="LocalNetworkAddresses" />
-                        <TextBlock Text="HTTPS port" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'HTTPS port'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding LocalNetwork.PortText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="LocalNetworkPort" />
-                        <TextBlock Text="Core certificate SHA-256 fingerprint" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Core certificate SHA-256 fingerprint'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding LocalNetwork.FingerprintText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" FontFamily="Consolas" Margin="0,4,0,12"
                                    AutomationProperties.AutomationId="LocalNetworkFingerprint" />
-                        <TextBlock Text="Agents on other computers connect to one of these addresses on this port. They trust Core only when its certificate's SHA-256 fingerprint matches this value exactly; no certificate authority is installed on any computer. Windows Firewall allows the port only from the local subnet on Domain and Private networks."
+                        <TextBlock Text="{loc:T 'Agents on other computers connect to one of these addresses on this port. They trust Core only when its certificate\'s SHA-256 fingerprint matches this value exactly; no certificate authority is installed on any computer. Windows Firewall allows the port only from the local subnet on Domain and Private networks.'}"
                                    TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}"
                                    AutomationProperties.AutomationId="LocalNetworkPolicy" />
                     </StackPanel>
@@ -163,39 +163,63 @@
                         </Style.Triggers></Style>
                     </Border.Style>
                     <StackPanel>
-                        <TextBlock Text="Updates" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="{loc:T 'Updates'}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
                         <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,12"
                                    AutomationProperties.AutomationId="CentralUpdateStatus" AutomationProperties.LiveSetting="Polite" />
                         <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,8"
                                    AutomationProperties.AutomationId="CentralUpdateError" AutomationProperties.LiveSetting="Assertive" />
-                        <CheckBox Content="Check the provider's update server for new versions" Margin="0,0,0,8"
+                        <CheckBox Content="{loc:T 'Check the provider\'s update server for new versions'}" Margin="0,0,0,8"
                                   IsChecked="{Binding CheckEnabled, Mode=TwoWay}" IsEnabled="{Binding CanChangeSettings}"
                                   AutomationProperties.AutomationId="CentralUpdateCheckEnabled" />
-                        <CheckBox Content="Install downloaded updates automatically at night (02:00–04:00)" Margin="0,0,0,12"
+                        <CheckBox Content="{loc:T 'Install downloaded updates automatically at night (02:00–04:00)'}" Margin="0,0,0,12"
                                   IsChecked="{Binding AutoInstall, Mode=TwoWay}" IsEnabled="{Binding CanChangeAutoInstall}"
                                   AutomationProperties.AutomationId="CentralUpdateAutoInstall" />
-                        <TextBlock Text="Update server" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Update server'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding ServerText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                    AutomationProperties.AutomationId="CentralUpdateServer" />
-                        <TextBlock Text="Installed version" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Installed version'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding InstalledVersionText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                    AutomationProperties.AutomationId="CentralUpdateInstalledVersion" />
-                        <TextBlock Text="Last check" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Last check'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding LastCheckText}" TextWrapping="Wrap" Margin="0,4,0,12"
                                    AutomationProperties.AutomationId="CentralUpdateLastCheck" />
                         <WrapPanel>
-                            <Button Content="Refresh updates" Click="OnRefreshUpdates" IsEnabled="{Binding CanRefresh}" Margin="0,0,8,8"
+                            <Button Content="{loc:T 'Refresh updates'}" Click="OnRefreshUpdates" IsEnabled="{Binding CanRefresh}" Margin="0,0,8,8"
                                     AutomationProperties.AutomationId="CentralUpdateRefresh" />
-                            <Button Content="Check now" Click="OnCheckForUpdates" IsEnabled="{Binding CanCheckNow}" Margin="0,0,8,8"
+                            <Button Content="{loc:T 'Check now'}" Click="OnCheckForUpdates" IsEnabled="{Binding CanCheckNow}" Margin="0,0,8,8"
                                     AutomationProperties.AutomationId="CentralUpdateCheckNow" />
-                            <Button Content="Install now" Click="OnInstallUpdate" IsEnabled="{Binding CanInstall}" Margin="0,0,8,8"
+                            <Button Content="{loc:T 'Install now'}" Click="OnInstallUpdate" IsEnabled="{Binding CanInstall}" Margin="0,0,8,8"
                                     AutomationProperties.AutomationId="CentralUpdateInstallNow" />
                         </WrapPanel>
                         <TextBlock Text="{Binding InstallStatusText}" TextWrapping="Wrap" Margin="0,0,0,8"
                                    AutomationProperties.AutomationId="CentralUpdateInstallStatus" AutomationProperties.LiveSetting="Polite" />
-                        <TextBlock Text="Off by default: SentinelAI then makes no internet connection for updates. An update runs only when it is signed with the provider's key that this installation trusts, and the previous version is restored if the new one does not start healthy. Agents on the other computers update from this computer."
+                        <TextBlock Text="{loc:T 'Off by default: SentinelAI then makes no internet connection for updates. An update runs only when it is signed with the provider\'s key that this installation trusts, and the previous version is restored if the new one does not start healthy. Agents on the other computers update from this computer.'}"
                                    TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}"
                                    AutomationProperties.AutomationId="CentralUpdatePolicy" />
+                    </StackPanel>
+                </Border>
+                <Border x:Name="LanguageSettings" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16"
+                        DataContext="{Binding LanguageSettings, RelativeSource={RelativeSource AncestorType=Window}}"
+                        AutomationProperties.AutomationId="LanguageSettings">
+                    <Border.Style>
+                        <Style TargetType="Border"><Style.Triggers>
+                            <DataTrigger Binding="{Binding}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                        </Style.Triggers></Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <TextBlock Text="{loc:T 'Language'}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="{loc:T 'The language of SentinelAI on this installation: Desktop for every administrator and the reports Core creates.'}"
+                                   TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <StackPanel Orientation="Horizontal">
+                            <ComboBox Width="180" ItemsSource="{x:Static foundation:LanguageSettingsViewModel.Options}" DisplayMemberPath="Text"
+                                      SelectedValuePath="Language" SelectedValue="{Binding Selected}" AutomationProperties.Name="{loc:T 'Language'}"
+                                      AutomationProperties.AutomationId="LanguageChoice" />
+                            <Button Content="{loc:T 'Save language'}" Click="OnSaveLanguage" IsEnabled="{Binding CanSave, Mode=OneWay}" Margin="8,0,0,0" Padding="12,4"
+                                    AutomationProperties.AutomationId="LanguageSave" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding StatusText, Mode=OneWay}" TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.AutomationId="LanguageStatus"
+                                   AutomationProperties.LiveSetting="Polite" />
                     </StackPanel>
                 </Border>
                 <Border x:Name="VulnerabilityFeedSettings" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
@@ -208,7 +232,7 @@
                         </Style.Triggers></Style>
                     </Border.Style>
                     <StackPanel>
-                        <TextBlock Text="Vulnerability data" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="{loc:T 'Vulnerability data'}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
                         <TextBlock Text="{Binding FeedText}" TextWrapping="Wrap" Margin="0,0,0,8"
                                    AutomationProperties.AutomationId="VulnerabilityFeedVersion" AutomationProperties.LiveSetting="Polite" />
                         <TextBlock Text="{Binding FreshnessText}" TextWrapping="Wrap" Margin="0,0,0,8" FontWeight="SemiBold"
@@ -222,14 +246,14 @@
                         <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,8"
                                    AutomationProperties.AutomationId="VulnerabilityFeedError" AutomationProperties.LiveSetting="Assertive" />
                         <WrapPanel>
-                            <Button Content="Refresh vulnerability data" Click="OnRefreshVulnerabilityFeed" IsEnabled="{Binding CanRefresh}" Margin="0,0,8,8"
+                            <Button Content="{loc:T 'Refresh vulnerability data'}" Click="OnRefreshVulnerabilityFeed" IsEnabled="{Binding CanRefresh}" Margin="0,0,8,8"
                                     AutomationProperties.AutomationId="VulnerabilityFeedRefresh" />
-                            <Button Content="Import vulnerability data…" Click="OnImportVulnerabilityFeed" IsEnabled="{Binding CanImport}" Margin="0,0,8,8"
+                            <Button Content="{loc:T 'Import vulnerability data…'}" Click="OnImportVulnerabilityFeed" IsEnabled="{Binding CanImport}" Margin="0,0,8,8"
                                     AutomationProperties.AutomationId="VulnerabilityFeedImport" />
                         </WrapPanel>
                         <TextBlock Text="{Binding ImportStatusText}" TextWrapping="Wrap" Margin="0,0,0,8"
                                    AutomationProperties.AutomationId="VulnerabilityFeedImportStatus" AutomationProperties.LiveSetting="Polite" />
-                        <TextBlock Text="Vulnerability data comes from your provider, signed with the key this installation trusts, and is evaluated on this computer without an internet connection. A program counts only when its name, publisher and version match the data exactly; anything else is listed as not assessed. With checking for updates on, newer data is downloaded from the update server."
+                        <TextBlock Text="{loc:T 'Vulnerability data comes from your provider, signed with the key this installation trusts, and is evaluated on this computer without an internet connection. A program counts only when its name, publisher and version match the data exactly; anything else is listed as not assessed. With checking for updates on, newer data is downloaded from the update server.'}"
                                    TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}"
                                    AutomationProperties.AutomationId="VulnerabilityFeedPolicy" />
                     </StackPanel>
@@ -237,28 +261,28 @@
                 <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="16">
                     <StackPanel>
-                        <TextBlock Text="Local application" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,16" />
-                        <CheckBox Content="Allow cloud AI requests for this session" Margin="0,0,0,8"
+                        <TextBlock Text="{loc:T 'Local application'}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,16" />
+                        <CheckBox Content="{loc:T 'Allow cloud AI requests for this session'}" Margin="0,0,0,8"
                                   IsChecked="{Binding AiExplanation.CloudRequestsEnabled, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
                                   AutomationProperties.AutomationId="CloudAiRequestsEnabled" />
-                        <TextBlock Text="Off by default. Each explanation still requires an explicit request and Core permission. Signing out resets this setting."
+                        <TextBlock Text="{loc:T 'Off by default. Each explanation still requires an explicit request and Core permission. Signing out resets this setting.'}"
                                    TextWrapping="Wrap" Margin="0,0,0,16" Foreground="{DynamicResource SecondaryTextBrush}" />
-                        <Expander Header="Desktop startup and notifications" Margin="0,0,0,16"
+                        <Expander Header="{loc:T 'Desktop startup and notifications'}" Margin="0,0,0,16"
                                   AutomationProperties.AutomationId="DesktopIntegrationSettings">
                             <StackPanel Margin="0,12,0,0">
-                                <CheckBox Content="Show SentinelAI in the notification area" Margin="0,0,0,8"
+                                <CheckBox Content="{loc:T 'Show SentinelAI in the notification area'}" Margin="0,0,0,8"
                                           IsChecked="{Binding DesktopIntegration.TrayEnabled, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
                                           IsEnabled="{Binding DesktopIntegration.PreferencesAvailable, RelativeSource={RelativeSource AncestorType=Window}}"
                                           AutomationProperties.AutomationId="DesktopTrayEnabled" />
-                                <CheckBox Content="Notify when a local protection service stops" Margin="0,0,0,8"
+                                <CheckBox Content="{loc:T 'Notify when a local protection service stops'}" Margin="0,0,0,8"
                                           IsChecked="{Binding DesktopIntegration.NotificationsEnabled, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
                                           IsEnabled="{Binding DesktopIntegration.CanConfigureNotifications, RelativeSource={RelativeSource AncestorType=Window}}"
                                           AutomationProperties.AutomationId="DesktopNotificationsEnabled" />
-                                <CheckBox Content="Open SentinelAI when I sign in to Windows" Margin="0,0,0,8"
+                                <CheckBox Content="{loc:T 'Open SentinelAI when I sign in to Windows'}" Margin="0,0,0,8"
                                           IsChecked="{Binding DesktopIntegration.AutoStartEnabled, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
                                           IsEnabled="{Binding DesktopIntegration.PreferencesAvailable, RelativeSource={RelativeSource AncestorType=Window}}"
                                           AutomationProperties.AutomationId="DesktopAutoStartEnabled" />
-                                <TextBlock Text="These settings apply to your Windows user. Closing Desktop ends its session; Core and Agent continue independently."
+                                <TextBlock Text="{loc:T 'These settings apply to your Windows user. Closing Desktop ends its session; Core and Agent continue independently.'}"
                                            TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource SecondaryTextBrush}" />
                                 <TextBlock Text="{Binding DesktopIntegration.ErrorText, RelativeSource={RelativeSource AncestorType=Window}}"
                                            TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource PrimaryTextBrush}"
@@ -266,15 +290,15 @@
                                 <TextBlock Text="{Binding DesktopTray.StatusText, RelativeSource={RelativeSource AncestorType=Window}}"
                                            TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}"
                                            AutomationProperties.AutomationId="DesktopTrayStatus" />
-                                <Button Content="Refresh Desktop settings" Click="OnRefreshDesktopSettings" Margin="0,12,0,0"
+                                <Button Content="{loc:T 'Refresh Desktop settings'}" Click="OnRefreshDesktopSettings" Margin="0,12,0,0"
                                         HorizontalAlignment="Left" AutomationProperties.AutomationId="RefreshDesktopSettings" />
                             </StackPanel>
                         </Expander>
-                        <TextBlock Text="Desktop version" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Desktop version'}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding DataContext.Version, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="SettingsDesktopVersion" />
-                        <TextBlock Text="Core connection" Foreground="{DynamicResource SecondaryTextBrush}" />
-                        <TextBlock Text="http://127.0.0.1:5000" TextWrapping="Wrap" Margin="0,4,0,8"
+                        <TextBlock Text="{loc:T 'Core connection'}" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'http://127.0.0.1:5000'}" TextWrapping="Wrap" Margin="0,4,0,8"
                                    AutomationProperties.AutomationId="SettingsCoreAddress" />
                         <TextBlock Text="{Binding DataContext.CoreStatusText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="SettingsCoreStatus"
@@ -283,11 +307,11 @@
                                    TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="SettingsCoreServiceStatus" />
                         <TextBlock Text="{Binding ServiceStatus.AgentStatusText, RelativeSource={RelativeSource AncestorType=Window}, StringFormat='Agent service: {0}'}"
                                    TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="SettingsAgentServiceStatus" />
-                        <TextBlock Text="Session" Foreground="{DynamicResource SecondaryTextBrush}" />
-                        <TextBlock Text="Sign-in is kept in memory for this Desktop session. Desktop validates its Core session every five seconds."
+                        <TextBlock Text="{loc:T 'Session'}" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Sign-in is kept in memory for this Desktop session. Desktop validates its Core session every five seconds.'}"
                                    TextWrapping="Wrap" Margin="0,4,0,12" AutomationProperties.AutomationId="SettingsSessionPolicy" />
-                        <TextBlock Text="AI and licensing configuration" Foreground="{DynamicResource SecondaryTextBrush}" />
-                        <TextBlock Text="Core uses its administrator-protected configuration for AI and license services."
+                        <TextBlock Text="{loc:T 'AI and licensing configuration'}" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{loc:T 'Core uses its administrator-protected configuration for AI and license services.'}"
                                    TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.AutomationId="SettingsServiceConfiguration" />
                     </StackPanel>
                 </Border>

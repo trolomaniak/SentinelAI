@@ -10,4 +10,7 @@
     <Compile Include="../../shared/enrollment/EnrollmentCode.cs" Link="EnrollmentCode.cs" />
     <InternalsVisibleTo Include="SentinelAI.Desktop.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\localization\SentinelAI.Localization.csproj" />
+  </ItemGroup>
 </Project>

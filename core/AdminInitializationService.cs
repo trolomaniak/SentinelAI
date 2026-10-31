@@ -14,6 +14,7 @@ internal sealed class AdminInitializationService(
     CentralUpdateStore centralUpdates,
     VulnerabilityService vulnerabilities,
     RiskRegisterStore riskRegister,
+    InstallationLanguageStore language,
     CoreHostingMode hostingMode) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -30,6 +31,7 @@ internal sealed class AdminInitializationService(
         await centralUpdates.InitializeAsync(cancellationToken);
         await vulnerabilities.InitializeAsync(cancellationToken);
         await riskRegister.InitializeAsync(cancellationToken);
+        await language.InitializeAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

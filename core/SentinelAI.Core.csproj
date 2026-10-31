@@ -15,6 +15,10 @@
     <InternalsVisibleTo Include="SentinelAI.Agent.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\shared\localization\SentinelAI.Localization.csproj" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
