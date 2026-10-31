@@ -95,9 +95,13 @@ version. Each Windows entry has the release name, display version and build.
    ```
 
    The builder leaves out what it cannot map reliably and counts it, together with the reasons:
-   - configurations combining other products, negated nodes, or anything but a Windows platform;
+   - configurations that also need another vulnerable product, and negated or nested conditions;
    - CPEs for another update, edition or target platform;
    - affected versions without bounds.
+
+   A program combined with a platform condition applies when that condition names Windows, alone or among other
+   platforms ("on Windows or macOS"). A configuration limited to other platforms (for example macOS only) does not apply
+   to Windows and is left out without being counted.
 3. **Sign** it with the update key, the version the file states and the server address:
 
    ```text

@@ -301,7 +301,19 @@ public sealed class VulnerabilityService(
     /// </summary>
     internal async Task<string> CheckServerAsync(CentralUpdateServer server, HttpClient http, CancellationToken cancellationToken)
     {
-        var result = await FetchAsync(server, http, cancellationToken);
+        string result;
+        try
+        {
+            result = await FetchAsync(server, http, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // A failure here (the network, a timeout or the database) never ends the update check it runs with; it is
+            // recorded and retried with the next check. Only turning checking off cancels it.
+            logger.LogWarning("Checking for a vulnerability feed failed with {ExceptionType}", exception.GetType().Name);
+            result = "failed";
+        }
+
         lock (_gate) { _lastServerCheck = result; _lastServerCheckUtc = time.GetUtcNow(); }
         return result;
     }
@@ -309,41 +321,32 @@ public sealed class VulnerabilityService(
     private async Task<string> FetchAsync(CentralUpdateServer server, HttpClient http, CancellationToken cancellationToken)
     {
         if (!Trusted) return "failed";
-        try
+        byte[] manifest;
+        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
-            byte[] manifest;
-            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-            {
-                timeout.CancelAfter(TimeSpan.FromSeconds(30));
-                using var response = await http.GetAsync(new Uri(server.Url + "/" + ManifestFileName), HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-                if (response.StatusCode == HttpStatusCode.NotFound) return "current";
-                if (response.StatusCode != HttpStatusCode.OK) return "failed";
-                manifest = await ReadBoundedAsync(response, UpdateManifestFormat.MaximumDocumentBytes, timeout.Token);
-            }
-
-            if (UpdateManifestFormat.ReadUnauthenticated(manifest) is not { ArtifactId: VulnerabilityFeedFormat.ArtifactId } offered ||
-                offered.Channel != server.Channel || offered.ArtifactUrl != server.Url + "/vulnerability-feed/" + offered.Version + "/" + FeedFileName ||
-                offered.SizeBytes is <= 0 or > VulnerabilityFeedFormat.MaximumBytes) return "failed";
-            if (cache.Current is { } current && UpdateManifestFormat.TryParseVersion(current.Info.Version, out var installed) &&
-                UpdateManifestFormat.TryParseVersion(offered.Version, out var version) && version <= installed) return "current";
-            byte[] feed;
-            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-            {
-                timeout.CancelAfter(TimeSpan.FromMinutes(5));
-                using var response = await http.GetAsync(new Uri(offered.ArtifactUrl), HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-                if (response.StatusCode != HttpStatusCode.OK) return "failed";
-                feed = await ReadBoundedAsync(response, (int)offered.SizeBytes, timeout.Token);
-            }
-
-            var (imported, _) = await ImportAsync(manifest, feed, "server", cancellationToken);
-            return imported switch { VulnerabilityImportResult.Imported => "imported", VulnerabilityImportResult.NotNewer => "current", _ => "failed" };
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            using var response = await http.GetAsync(new Uri(server.Url + "/" + ManifestFileName), HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            if (response.StatusCode == HttpStatusCode.NotFound) return "current";
+            if (response.StatusCode != HttpStatusCode.OK) return "failed";
+            manifest = await ReadBoundedAsync(response, UpdateManifestFormat.MaximumDocumentBytes, timeout.Token);
         }
-        catch (Exception exception) when (exception is HttpRequestException or IOException or InvalidDataException ||
-                                          exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+
+        if (UpdateManifestFormat.ReadUnauthenticated(manifest) is not { ArtifactId: VulnerabilityFeedFormat.ArtifactId } offered ||
+            offered.Channel != server.Channel || offered.ArtifactUrl != server.Url + "/vulnerability-feed/" + offered.Version + "/" + FeedFileName ||
+            offered.SizeBytes is <= 0 or > VulnerabilityFeedFormat.MaximumBytes) return "failed";
+        if (cache.Current is { } current && UpdateManifestFormat.TryParseVersion(current.Info.Version, out var installed) &&
+            UpdateManifestFormat.TryParseVersion(offered.Version, out var version) && version <= installed) return "current";
+        byte[] feed;
+        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
-            logger.LogWarning("Checking for a vulnerability feed failed with {ExceptionType}", exception.GetType().Name);
-            return "failed";
+            timeout.CancelAfter(TimeSpan.FromMinutes(5));
+            using var response = await http.GetAsync(new Uri(offered.ArtifactUrl), HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            if (response.StatusCode != HttpStatusCode.OK) return "failed";
+            feed = await ReadBoundedAsync(response, (int)offered.SizeBytes, timeout.Token);
         }
+
+        var (imported, _) = await ImportAsync(manifest, feed, "server", cancellationToken);
+        return imported switch { VulnerabilityImportResult.Imported => "imported", VulnerabilityImportResult.NotNewer => "current", _ => "failed" };
     }
 
     /// <summary>The ingest-time assessment: the latest inventory supplies the Windows release, the report the programs.</summary>
