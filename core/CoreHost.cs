@@ -117,6 +117,8 @@ public static class CoreHost
         builder.Services.AddSingleton<VulnerabilityFeedCache>();
         builder.Services.AddSingleton<VulnerabilityFeedStore>();
         builder.Services.AddSingleton<VulnerabilityService>();
+        // TASK-032: the operational Risk Register, kept apart from technical scoring.
+        builder.Services.AddSingleton<RiskRegisterStore>();
         builder.Services.AddSingleton(services => new CentralUpdateService(
             services.GetRequiredService<CentralUpdateOptions>(),
             Path.Combine(Path.GetDirectoryName(services.GetRequiredService<AdminStore>().DatabasePath)!, "central-update"),
@@ -744,6 +746,67 @@ public static class CoreHost
             })
             .RequireAuthorization();
 
+        // TASK-032: the Risk Register. Business records only: saving, accepting or closing one never changes an alert,
+        // a detection rule or a technical score. Writes name the version the administrator reviewed.
+        app.MapGet("/api/admin/risk-register", async (HttpContext context, RiskRegisterStore register, CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (!RiskRegisterRequests.TryReadQuery(context.Request.Query, out var query)) return Results.BadRequest();
+                return Results.Ok(await register.ListAsync(query, cancellationToken));
+            })
+            .RequireAuthorization();
+
+        app.MapGet("/api/admin/risk-register/{riskId:guid}", async (Guid riskId, HttpContext context, RiskRegisterStore register,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (context.Request.Query.Count != 0) return Results.BadRequest();
+                return await register.FindAsync(riskId, cancellationToken) is { } record ? Results.Ok(record) : Results.NotFound();
+            })
+            .RequireAuthorization();
+
+        app.MapPost("/api/admin/risk-register", async (RiskRecordInput? request, HttpContext context, RiskRegisterStore register,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (request is null) return Results.BadRequest();
+                if (context.User.FindFirstValue(ClaimTypes.NameIdentifier) is not { Length: > 0 } actor || string.IsNullOrWhiteSpace(actor))
+                    return Results.Unauthorized();
+                return RiskRegisterResponse(await register.CreateAsync(request, actor, cancellationToken), created: true);
+            })
+            .RequireAuthorization()
+            .WithMetadata(new RequestSizeLimitAttribute(64 * 1024));
+
+        app.MapPut("/api/admin/risk-register/{riskId:guid}", async (Guid riskId, UpdateRiskRecordRequest? request, HttpContext context,
+                RiskRegisterStore register, CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (request is not { ExpectedVersion: >= 1, Record: { } record }) return Results.BadRequest();
+                if (context.User.FindFirstValue(ClaimTypes.NameIdentifier) is not { Length: > 0 } actor || string.IsNullOrWhiteSpace(actor))
+                    return Results.Unauthorized();
+                return RiskRegisterResponse(await register.UpdateAsync(riskId, request.ExpectedVersion, record, actor, cancellationToken), created: false);
+            })
+            .RequireAuthorization()
+            .WithMetadata(new RequestSizeLimitAttribute(64 * 1024));
+
+        app.MapPost("/api/admin/risk-register/{riskId:guid}/review", async (Guid riskId, ReviewRiskRecordRequest? request, HttpContext context,
+                RiskRegisterStore register, CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (request is not { ExpectedVersion: >= 1 }) return Results.BadRequest();
+                if (context.User.FindFirstValue(ClaimTypes.NameIdentifier) is not { Length: > 0 } actor || string.IsNullOrWhiteSpace(actor))
+                    return Results.Unauthorized();
+                return RiskRegisterResponse(await register.ReviewAsync(riskId, request.ExpectedVersion, request.NextReviewDate, request.Note, actor,
+                    cancellationToken), created: false);
+            })
+            .RequireAuthorization()
+            .WithMetadata(new RequestSizeLimitAttribute(8 * 1024));
+
         // MVP-2 "Add computers": addresses a code may carry, batches of one-use codes, unused codes and revocation.
         app.MapGet("/api/admin/enrollment-options", async (HttpContext context, LocalNetworkState localNetwork, CancellationToken cancellationToken) =>
             {
@@ -1270,6 +1333,16 @@ public static class CoreHost
         !string.IsNullOrWhiteSpace(value) &&
         value.Length <= maxLength &&
         !value.Any(char.IsControl);
+
+    // 201/200 with the record, 404, 409 when it changed since the administrator read it, 422 with field error codes.
+    private static IResult RiskRegisterResponse(RiskRegisterResult result, bool created) => result.Outcome switch
+    {
+        RiskRegisterOutcome.Saved when created => Results.Created($"/api/admin/risk-register/{result.Record!.RiskId:D}", result.Record),
+        RiskRegisterOutcome.Saved => Results.Ok(result.Record),
+        RiskRegisterOutcome.NotFound => Results.NotFound(),
+        RiskRegisterOutcome.Conflict => Results.Conflict(),
+        _ => Results.UnprocessableEntity(new RiskValidationResponse(result.Errors ?? []))
+    };
 
     private static bool IsLocalOrHttps(HttpContext context) =>
         context.Request.IsHttps || IsLoopback(context.Connection.RemoteIpAddress);

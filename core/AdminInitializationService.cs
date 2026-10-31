@@ -13,6 +13,7 @@ internal sealed class AdminInitializationService(
     LicenseStateStore licenses,
     CentralUpdateStore centralUpdates,
     VulnerabilityService vulnerabilities,
+    RiskRegisterStore riskRegister,
     CoreHostingMode hostingMode) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -28,6 +29,7 @@ internal sealed class AdminInitializationService(
         await licenses.InitializeAsync(cancellationToken);
         await centralUpdates.InitializeAsync(cancellationToken);
         await vulnerabilities.InitializeAsync(cancellationToken);
+        await riskRegister.InitializeAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
