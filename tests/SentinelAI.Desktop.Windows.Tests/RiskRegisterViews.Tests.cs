@@ -36,6 +36,9 @@ internal static partial class Program
             await FlushAsync();
             var view = Descendants<RiskRegisterView>(window).Single();
             var grid = Descendants<DataGrid>(view).Single(control => AutomationProperties.GetAutomationId(control) == "RiskRegisterGrid");
+            Ensure(RegisterText(view, "PageHeading") == "Risk Register" &&
+                   AutomationProperties.GetName(Descendants<TextBlock>(view).Single(text => AutomationProperties.GetAutomationId(text) == "PageHeading")) == "Risk Register",
+                "The page heading is not exposed to assistive technology and the navigation checks.");
             Ensure(grid.Items.Count == 1 && grid.Items[0] is RiskRegisterRow { Reference: "R-0001", Attention: "Review overdue" } &&
                    RegisterText(view, "RiskRegisterDistinction").Contains("never change alerts, detection or the technical risk score", StringComparison.Ordinal) &&
                    RegisterText(view, "RiskRegisterCounts").Contains("Needing attention: 1", StringComparison.Ordinal),

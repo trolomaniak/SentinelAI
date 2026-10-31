@@ -28,7 +28,8 @@
     </UserControl.Resources>
     <ScrollViewer x:Name="PageScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
         <StackPanel Margin="0,0,12,24">
-            <TextBlock Text="Risk Register" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock Text="Risk Register" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="Risk Register" />
             <TextBlock Text="{Binding DistinctionText, Mode=OneWay}" Style="{StaticResource Hint}" Margin="0,4,0,12"
                        AutomationProperties.AutomationId="RiskRegisterDistinction" />
 
