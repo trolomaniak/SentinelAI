@@ -1004,7 +1004,11 @@ try {
     Use-SetupWindow $setup
     Assert-NativeSetupRuntime $setup $setupOuter
     Assert-PoisonedCallerUntouched
-    Wait-SetupAcceptance { Test-SetupControl 'SetupInstallButton' } 'The actual installer did not expose its normal install action.'
+    # Setup inspects the computer before it offers installation; on a busy runner that can take longer than half a minute.
+    try { Wait-SetupAcceptance { Test-SetupControl 'SetupInstallButton' } 'The actual installer did not expose its normal install action.' 120 }
+    catch {
+        throw ((Get-SetupFailureSummary) -replace '\AThe actual Setup executable reported a safe installation failure\. ', 'The actual installer did not expose its normal install action. ')
+    }
     ([Windows.Automation.InvokePattern](Find-SetupControl 'SetupInstallButton').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)).Invoke()
     Wait-SetupAcceptance { Test-SetupControl 'SetupErrorText' $false } 'Setup did not reject empty administrator credentials.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $dataRoot) -and

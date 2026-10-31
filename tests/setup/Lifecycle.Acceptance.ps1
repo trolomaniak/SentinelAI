@@ -522,8 +522,12 @@ try {
     }
     $apps = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI'
     try {
-        Wait-SetupAcceptance { [string](Get-ItemProperty -LiteralPath $apps -ErrorAction SilentlyContinue).DisplayVersion -ceq '1.3.0' } 'The quiet upgrade did not complete.' $script:TimeoutSeconds
+        # The upgrade rewrites its uninstall entry; a read that meets the entry mid-rewrite is not yet, not a failure.
+        Wait-SetupAcceptance {
+            try { [string](Get-ItemProperty -LiteralPath $apps -ErrorAction Stop).DisplayVersion -ceq '1.3.0' } catch { $false }
+        } 'The quiet upgrade did not complete.' $script:TimeoutSeconds
     } catch {
+        $cause = [string]$_.Exception.GetType().Name
         # Fixed flags and versions only, as in every Setup diagnostic.
         $programData = [Environment]::GetFolderPath('CommonApplicationData')
         $setupProcesses = @(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 15 | Where-Object {
@@ -547,11 +551,12 @@ try {
             } catch { $quietExit = 'probe-failed' }
             finally { Unregister-ScheduledTask -TaskPath '\SentinelAI-Acceptance\' -TaskName 'Quiet upgrade probe' -Confirm:$false -ErrorAction SilentlyContinue }
         }
-        throw ('The quiet upgrade did not complete. SetupProcessesRunning={0}; RunDirectories={1}; CoreServiceRunning={2}; AgentServiceRunning={3}; CoreReceiptVersion={4}; AppsVersion={5}; SystemTaskQuietUpgradeExit={6}.' -f
+        throw ('The quiet upgrade did not complete. SetupProcessesRunning={0}; RunDirectories={1}; CoreServiceRunning={2}; AgentServiceRunning={3}; CoreReceiptVersion={4}; AppsVersion={5}; SystemTaskQuietUpgradeExit={6}; Cause={7}.' -f
             $setupProcesses, $runs, ([string](Get-SetupService 'SentinelAICore').State -ceq 'Running'), ([string](Get-SetupService 'SentinelAIAgent').State -ceq 'Running'),
             $(if ($receipt -cmatch '\A[0-9]{1,5}(\.[0-9]{1,5}){2}\z') { $receipt } else { 'other' }),
             $(if ([string](Get-ItemProperty -LiteralPath $apps -ErrorAction SilentlyContinue).DisplayVersion -cmatch '\A[0-9]{1,5}(\.[0-9]{1,5}){2}\z') { (Get-ItemProperty -LiteralPath $apps).DisplayVersion } else { 'other' }),
-            $(if ($quietExit -cmatch '\A-?[0-9]{1,10}\z|\A(none|probe-failed)\z') { $quietExit } else { 'other' }))
+            $(if ($quietExit -cmatch '\A-?[0-9]{1,10}\z|\A(none|probe-failed)\z') { $quietExit } else { 'other' }),
+            $(if ($cause -cmatch '\A[A-Za-z]{1,64}\z') { $cause } else { 'other' }))
     }
     Open-LifecycleCore; Wait-ExactEndpoint $endpointId $since
     Assert-LifecycleVersion '1.3.0'; Assert-LifecyclePreserved
