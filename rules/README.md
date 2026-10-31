@@ -63,3 +63,19 @@ values never match.
 
 Sources, evidence, false-positive considerations and the observations that
 deliberately have no rule are in [docs/ENDPOINT-TELEMETRY.md](../docs/ENDPOINT-TELEMETRY.md).
+
+## Vulnerability rules (TASK-030)
+
+`rules/Vulnerabilities` matches the telemetry report's installed programs and the inventory's Windows release against
+a signed vulnerability feed. A vulnerability is claimed only for one exact product match with a comparable version
+inside an affected range. Ambiguous, unsupported-version and not-covered programs stay explicit. `VulnerabilityRules`
+turns the assessment into alerts with fixed policy:
+
+| Rule ID | Match condition | Severity |
+| --- | --- | --- |
+| SA-VULN-001 | A known exploited vulnerability (CISA KEV) | critical |
+| SA-VULN-002 | Another vulnerability with a critical CVSS base score | high |
+| SA-VULN-003 | Another vulnerability with a high CVSS base score | medium |
+
+The feed format, the deterministic builder and the coverage states are described in
+[docs/VULNERABILITIES.md](../docs/VULNERABILITIES.md).

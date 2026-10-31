@@ -198,6 +198,42 @@
                                    AutomationProperties.AutomationId="CentralUpdatePolicy" />
                     </StackPanel>
                 </Border>
+                <Border x:Name="VulnerabilityFeedSettings" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16"
+                        DataContext="{Binding VulnerabilityFeed, RelativeSource={RelativeSource AncestorType=Window}}"
+                        AutomationProperties.AutomationId="VulnerabilityFeedSettings">
+                    <Border.Style>
+                        <Style TargetType="Border"><Style.Triggers>
+                            <DataTrigger Binding="{Binding}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                        </Style.Triggers></Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <TextBlock Text="Vulnerability data" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <TextBlock Text="{Binding FeedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   AutomationProperties.AutomationId="VulnerabilityFeedVersion" AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Text="{Binding FreshnessText}" TextWrapping="Wrap" Margin="0,0,0,8" FontWeight="SemiBold"
+                                   AutomationProperties.AutomationId="VulnerabilityFeedFreshness" />
+                        <TextBlock Text="{Binding CoverageText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   AutomationProperties.AutomationId="VulnerabilityFeedCoverage" />
+                        <TextBlock Text="{Binding SourcesText}" TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource SecondaryTextBrush}"
+                                   AutomationProperties.AutomationId="VulnerabilityFeedSources" />
+                        <TextBlock Text="{Binding ServerText}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   AutomationProperties.AutomationId="VulnerabilityFeedServer" />
+                        <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   AutomationProperties.AutomationId="VulnerabilityFeedError" AutomationProperties.LiveSetting="Assertive" />
+                        <WrapPanel>
+                            <Button Content="Refresh vulnerability data" Click="OnRefreshVulnerabilityFeed" IsEnabled="{Binding CanRefresh}" Margin="0,0,8,8"
+                                    AutomationProperties.AutomationId="VulnerabilityFeedRefresh" />
+                            <Button Content="Import vulnerability data…" Click="OnImportVulnerabilityFeed" IsEnabled="{Binding CanImport}" Margin="0,0,8,8"
+                                    AutomationProperties.AutomationId="VulnerabilityFeedImport" />
+                        </WrapPanel>
+                        <TextBlock Text="{Binding ImportStatusText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   AutomationProperties.AutomationId="VulnerabilityFeedImportStatus" AutomationProperties.LiveSetting="Polite" />
+                        <TextBlock Text="Vulnerability data comes from your provider, signed with the key this installation trusts, and is evaluated on this computer without an internet connection. A program counts only when its name, publisher and version match the data exactly; anything else is listed as not assessed. With checking for updates on, newer data is downloaded from the update server."
+                                   TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}"
+                                   AutomationProperties.AutomationId="VulnerabilityFeedPolicy" />
+                    </StackPanel>
+                </Border>
                 <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="16">
                     <StackPanel>

@@ -119,7 +119,18 @@ Do it once on Windows 10 and once on Windows 11 across releases.
 - [ ] Once per release cycle, with automatic installation off and a newer build on the server: **Install now** asks for administrator approval, Desktop closes and Setup opens with **Upgrade** selected.
 - [ ] Uninstall with data removed. The task `\SentinelAI\SentinelAI Update` is gone.
 
-## 9. Record
+## 9. Vulnerability data
+
+Do it once on Windows 10 and once on Windows 11, with B reporting.
+
+- [ ] Build the vulnerability data with `update-dev feed-build` from current NVD pages and the KEV catalog, then sign it as `sentinelai-vulnerability-feed` ([vulnerabilities](../VULNERABILITIES.md)).
+- [ ] Desktop → **Settings → Vulnerability data** says no data is installed. Select **Import vulnerability data…** and pick `vulnerability-feed.manifest.json`, with the feed file next to it. The status says the data was verified, and shows its version, build time, age and both sources.
+- [ ] Import the same file again: it says the file is not newer and nothing changed. Edit one byte of the feed file and import: it is not accepted.
+- [ ] On B, install an older version of a listed program (for example 7-Zip). Within an hour of the next telemetry report, **Devices → B → Vulnerabilities** lists its CVEs with the fixed version. Alerts show SA-VULN-001, -002 or -003 for B as the findings warrant.
+- [ ] The same view lists programs that were not assessed, for example an ambiguous match, and states whether Windows was assessed.
+- [ ] With checking for updates on, upload a newer signed file to `<URL>/vulnerability-feed.manifest.json` and `<URL>/vulnerability-feed/<version>/vulnerability-feed.json`. After **Check now**, Settings shows the newer version, downloaded from the update server.
+
+## 10. Record
 
 - [ ] Note any SmartScreen, Smart App Control or antivirus behavior seen on each computer.
 - [ ] Note anything the customer documents describe differently from what you saw, and correct the documents before release.

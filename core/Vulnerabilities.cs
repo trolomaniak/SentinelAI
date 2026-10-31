@@ -148,15 +148,15 @@ public sealed class VulnerabilityFeedStore(AdminStore admins)
         await create.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    internal async Task<(byte[] Feed, DateTimeOffset ImportedUtc, string Origin)?> LoadAsync(CancellationToken cancellationToken)
+    internal async Task<(byte[] Manifest, byte[] Feed, DateTimeOffset ImportedUtc, string Origin)?> LoadAsync(CancellationToken cancellationToken)
     {
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         await using var query = connection.CreateCommand();
-        query.CommandText = "SELECT Feed, ImportedUtcTicks, Origin FROM VulnerabilityFeed WHERE Singleton = 1;";
+        query.CommandText = "SELECT Manifest, Feed, ImportedUtcTicks, Origin FROM VulnerabilityFeed WHERE Singleton = 1;";
         await using var reader = await query.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken)
-            ? ((byte[])reader.GetValue(0), new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero), reader.GetString(2))
+            ? ((byte[])reader.GetValue(0), (byte[])reader.GetValue(1), new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero), reader.GetString(3))
             : null;
     }
 
@@ -216,35 +216,19 @@ public sealed class VulnerabilityService(
     {
         await store.InitializeAsync(cancellationToken);
         if (await store.LoadAsync(cancellationToken) is not { } stored) return;
-        try { cache.Set(Load(VulnerabilityFeedFormat.Parse(stored.Feed), stored.ImportedUtc, stored.Origin)); }
-        catch (InvalidDataException)
-        {
-            // A stored feed that no longer parses is treated as absent rather than used partially.
-            logger.LogWarning("The stored vulnerability feed could not be read; import a current feed.");
-        }
+        // Verified again, as on import: the database is no substitute for the signature.
+        if (Verify(stored.Manifest, stored.Feed) is { } feed) cache.Set(Load(feed, stored.ImportedUtc, stored.Origin));
+        else logger.LogWarning("The stored vulnerability feed did not verify with this installation's update trust; import a current feed.");
     }
 
     public async Task<(VulnerabilityImportResult Result, VulnerabilityStatus Status)> ImportAsync(byte[] manifest, byte[] feed, string origin,
         CancellationToken cancellationToken)
     {
-        if (options.Trust is not { } trust) return (VulnerabilityImportResult.Untrusted, Status());
+        if (options.Trust is null) return (VulnerabilityImportResult.Untrusted, Status());
         await _import.WaitAsync(cancellationToken);
         try
         {
-            VulnerabilityFeed parsed;
-            try
-            {
-                var verified = UpdateManifestVerifier.Verify(manifest, new UpdateVerificationPolicy(UpdateTrust.Environment, trust.Channel,
-                    VulnerabilityFeedFormat.ArtifactId, "0.0.0", new Dictionary<string, string>(StringComparer.Ordinal) { [trust.KeyId] = trust.PublicKeyPem }));
-                if (feed.LongLength != verified.Manifest.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(feed)) != verified.Manifest.Sha256)
-                    return (VulnerabilityImportResult.Rejected, Status());
-                parsed = VulnerabilityFeedFormat.Parse(feed);
-                if (parsed.Version != verified.Manifest.Version) return (VulnerabilityImportResult.Rejected, Status());
-            }
-            catch (Exception exception) when (exception is UpdateValidationException or InvalidDataException or ArgumentException)
-            {
-                return (VulnerabilityImportResult.Rejected, Status());
-            }
+            if (Verify(manifest, feed) is not { } parsed) return (VulnerabilityImportResult.Rejected, Status());
 
             if (cache.Current is { } current && UpdateManifestFormat.TryParseVersion(current.Info.Version, out var installed) &&
                 UpdateManifestFormat.TryParseVersion(parsed.Version, out var offered) && offered <= installed)
@@ -258,6 +242,24 @@ public sealed class VulnerabilityService(
         finally
         {
             _import.Release();
+        }
+    }
+
+    /// <summary>The parsed feed when the manifest verifies with the update trust and describes exactly these bytes.</summary>
+    private VulnerabilityFeed? Verify(byte[] manifest, byte[] feed)
+    {
+        if (options.Trust is not { } trust) return null;
+        try
+        {
+            var verified = UpdateManifestVerifier.Verify(manifest, new UpdateVerificationPolicy(UpdateTrust.Environment, trust.Channel,
+                VulnerabilityFeedFormat.ArtifactId, "0.0.0", new Dictionary<string, string>(StringComparer.Ordinal) { [trust.KeyId] = trust.PublicKeyPem }));
+            if (feed.LongLength != verified.Manifest.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(feed)) != verified.Manifest.Sha256) return null;
+            var parsed = VulnerabilityFeedFormat.Parse(feed);
+            return parsed.Version == verified.Manifest.Version ? parsed : null;
+        }
+        catch (Exception exception) when (exception is UpdateValidationException or InvalidDataException or ArgumentException)
+        {
+            return null;
         }
     }
 

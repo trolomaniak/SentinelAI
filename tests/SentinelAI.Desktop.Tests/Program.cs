@@ -27,6 +27,7 @@ assertions += await OptionalWorkflowsViewModelTests.RunAsync();
 assertions += await DesktopIntegrationTests.RunAsync();
 assertions += await PilotLicenseTests.RunAsync();
 assertions += await CentralUpdateSettingsTests.RunAsync();
+assertions += await VulnerabilityTests.RunAsync();
 Console.WriteLine($"Desktop foundation: {assertions} assertions passed.");
 
 void Ensure(bool condition, string message)
