@@ -65,6 +65,9 @@ try {
             [IO.File]::WriteAllText((Join-Path $publish 'update-server.json'), $server, (New-Object Text.UTF8Encoding($false)))
         }
         if ($component -eq 'core') {
+            # TASK-030: the update signing key's public half, key ID and channel, with which Core verifies vulnerability feeds.
+            Invoke-PilotDotnet -Arguments @('run', '--project', (Join-Path $repo 'tools/update-dev/SentinelAI.UpdateDev.csproj'), '--configuration', 'Release', '--', 'trust',
+                '--private-key', [IO.Path]::GetFullPath($DevelopmentPrivateKey), '--key-id', $KeyId, '--channel', $Channel, '--output', (Join-Path $publish 'update-trust.json'))
             $agentUpdate = Join-Path $publish 'agent-update'
             New-Item -ItemType Directory -Path $agentUpdate | Out-Null
             Copy-Item -LiteralPath (Join-Path $OutputDirectory 'agent.zip') -Destination (Join-Path $agentUpdate 'agent.zip')

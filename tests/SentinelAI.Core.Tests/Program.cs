@@ -175,6 +175,7 @@ try
     await EndpointTelemetryApiTests.VerifyAsync(username, password);
     await AgentUpdateApiTests.VerifyAsync();
     await CentralUpdateTests.VerifyAsync();
+    await VulnerabilityApiTests.VerifyAsync(username, password);
 
     // Existing installations must work without retaining the bootstrap secret in configuration.
     Environment.SetEnvironmentVariable("SENTINELAI_BOOTSTRAP_USERNAME", null);

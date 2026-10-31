@@ -56,6 +56,65 @@ internal static class CommandTests
                    (await File.ReadAllBytesAsync(publicKey)).SequenceEqual(publicBytes),
                 "Repeated key generation overwrote an existing key.");
 
+            // TASK-030: Core's update trust file (public data only) and a vulnerability feed built and signed with the same tool.
+            var trustFile = Path.Combine(directory, "update-trust.json");
+            var trust = await RunDevAsync(["trust", "--private-key", privateKey, "--key-id", KeyId, "--channel", "pilot", "--output", trustFile]);
+            Ensure(trust.ExitCode == 0 && File.Exists(trustFile), "The update trust file was not created.");
+            EnsureNoSecrets(trust, privateKey);
+            var trustText = await File.ReadAllTextAsync(trustFile);
+            using (var document = JsonDocument.Parse(trustText))
+            using (var trusted = ECDsa.Create())
+            using (var expected = ECDsa.Create())
+            {
+                var root = document.RootElement;
+                trusted.ImportFromPem(root.GetProperty("publicKey").GetString());
+                expected.ImportFromPem(await File.ReadAllTextAsync(publicKey));
+                Ensure(root.GetProperty("format").GetString() == "sentinelai-update-trust-v1" && root.GetProperty("keyId").GetString() == KeyId &&
+                       root.GetProperty("environment").GetString() == "development" && root.GetProperty("channel").GetString() == "pilot" &&
+                       trusted.ExportSubjectPublicKeyInfo().AsSpan().SequenceEqual(expected.ExportSubjectPublicKeyInfo()) &&
+                       !trustText.Contains("PRIVATE", StringComparison.Ordinal), "The update trust file does not hold exactly the public key.");
+            }
+
+            EnsureRejected(await RunDevAsync(["trust", "--private-key", privateKey, "--key-id", KeyId, "--channel", "nightly", "--output",
+                Path.Combine(directory, "trust-nightly.json")]), privateKey);
+            EnsureRejected(await RunDevAsync(["trust", "--private-key", privateKey, "--key-id", KeyId, "--channel", "pilot", "--output", trustFile]), privateKey);
+
+            var feedInputs = Path.Combine(directory, "feed-inputs");
+            Directory.CreateDirectory(Path.Combine(feedInputs, "nvd"));
+            await File.WriteAllTextAsync(Path.Combine(feedInputs, "products.json"), """
+                {"format":"sentinelai-vulnerability-products-v1","products":[{"id":"example-viewer","name":"Example Viewer","kind":"application",
+                 "cpe":"cpe:2.3:a:example:viewer","displayName":"^Example Viewer$","publishers":["Example Corp"],"version":"^([0-9]+\\.[0-9]+\\.[0-9]+)$"}]}
+                """);
+            await File.WriteAllTextAsync(Path.Combine(feedInputs, "nvd", "page-1.json"), """
+                {"vulnerabilities":[{"cve":{"id":"CVE-2099-3001","published":"2099-01-02T00:00:00.000","vulnStatus":"Analyzed","metrics":{},
+                 "configurations":[{"nodes":[{"operator":"OR","negate":false,"cpeMatch":[{"vulnerable":true,"criteria":"cpe:2.3:a:example:viewer:*:*:*:*:*:*:*:*","versionEndExcluding":"2.0.0"}]}]}]}}]}
+                """);
+            await File.WriteAllTextAsync(Path.Combine(feedInputs, "kev.json"), """{"vulnerabilities":[]}""");
+            string[] FeedArguments(string output) => ["feed-build", "--products", Path.Combine(feedInputs, "products.json"), "--nvd", Path.Combine(feedInputs, "nvd"),
+                "--kev", Path.Combine(feedInputs, "kev.json"), "--nvd-retrieved", "2099-01-05T10:00:00Z", "--kev-retrieved", "2099-01-05T10:00:00Z",
+                "--generated", "2099-01-05T10:30:00Z", "--output", output];
+            var feedPath = Path.Combine(directory, "vulnerability-feed.json");
+            Ensure((await RunDevAsync(FeedArguments(feedPath))).ExitCode == 0 && (await RunDevAsync(FeedArguments(Path.Combine(directory, "again.json")))).ExitCode == 0,
+                "The vulnerability feed was not built.");
+            var feedBytes = await File.ReadAllBytesAsync(feedPath);
+            var builtFeed = SentinelAI.Rules.Vulnerabilities.VulnerabilityFeedFormat.Parse(feedBytes);
+            var againBytes = await File.ReadAllBytesAsync(Path.Combine(directory, "again.json"));
+            Ensure(builtFeed.Version == "2099.105.1030" && builtFeed.Vulnerabilities.Single().Cve == "CVE-2099-3001" &&
+                   feedBytes.SequenceEqual(againBytes), "The feed build is not deterministic.");
+            EnsureRejected(await RunDevAsync(FeedArguments(feedPath)), privateKey);
+            var feedManifest = Path.Combine(directory, "vulnerability-feed.manifest.json");
+            Ensure((await RunDevAsync(["sign", "--private-key", privateKey, "--key-id", KeyId, "--package", feedPath, "--version", builtFeed.Version,
+                       "--artifact-id", SentinelAI.Rules.Vulnerabilities.VulnerabilityFeedFormat.ArtifactId, "--artifact-url",
+                       "https://updates.example.invalid/vulnerability-feed/" + builtFeed.Version + "/vulnerability-feed.json", "--channel", "pilot", "--output", feedManifest])).ExitCode == 0,
+                "The vulnerability feed could not be signed as its artifact.");
+            var feedManifestBytes = await File.ReadAllBytesAsync(feedManifest);
+            var publicPem = await File.ReadAllTextAsync(publicKey);
+            var verifiedFeed = UpdateManifestVerifier.Verify(feedManifestBytes, new UpdateVerificationPolicy("development", "pilot",
+                SentinelAI.Rules.Vulnerabilities.VulnerabilityFeedFormat.ArtifactId, "0.0.0",
+                new Dictionary<string, string>(StringComparer.Ordinal) { [KeyId] = publicPem }));
+            Ensure(verifiedFeed.Manifest.SizeBytes == feedBytes.Length && verifiedFeed.Manifest.Sha256 == Convert.ToHexStringLower(SHA256.HashData(feedBytes)),
+                "The signed feed manifest does not describe the feed.");
+
             var signingArguments = SignArguments(privateKey, package, manifest);
             var signed = await RunDevAsync(signingArguments);
             Ensure(signed.ExitCode == 0 && File.Exists(manifest), "Development signing did not create a manifest.");

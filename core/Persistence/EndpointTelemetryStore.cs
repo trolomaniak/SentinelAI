@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SentinelAI.Contracts.EndpointTelemetry;
+using SentinelAI.Contracts.Inventory;
 using SentinelAI.Rules;
+using SentinelAI.Rules.Vulnerabilities;
 
 namespace SentinelAI.Core.Persistence;
 
@@ -38,7 +40,8 @@ internal sealed record TelemetryState(DateTimeOffset CollectedUtc, IReadOnlyDict
 /// Keeps the newest accepted endpoint telemetry report per enrolled endpoint (by the Agent's collection time) and
 /// raises telemetry rule findings in the same transaction, through the existing tracked-alert lifecycle.
 /// </summary>
-public sealed class EndpointTelemetryStore(AdminStore admins, AlertStore alerts, TelemetryRuleEngine rules, TimeProvider time)
+public sealed class EndpointTelemetryStore(AdminStore admins, AlertStore alerts, TelemetryRuleEngine rules, VulnerabilityFeedCache vulnerabilities,
+    TimeProvider time)
 {
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -90,7 +93,15 @@ public sealed class EndpointTelemetryStore(AdminStore admins, AlertStore alerts,
         var stored = await upsert.ExecuteNonQueryAsync(cancellationToken) == 1;
         if (stored)
         {
-            var findings = rules.Evaluate(report);
+            var findings = rules.Evaluate(report).ToList();
+            // TASK-030: the report's programs and the latest inventory's Windows release against the feed in use.
+            if (vulnerabilities.Current is { } feed)
+            {
+                var inventory = await ReadInventoryAsync(connection, transaction, report.EndpointId, cancellationToken);
+                findings.AddRange(VulnerabilityRules.Evaluate(VulnerabilityService.Assess(feed.Matcher, report.Software, inventory),
+                    report.EndpointId, report.CollectedUtc, feed.Info.GeneratedUtc));
+            }
+
             if (findings.Count > 0)
             {
                 var name = await SecurityEventStore.ReadEndpointNameAsync(connection, transaction, report.EndpointId,
@@ -104,6 +115,18 @@ public sealed class EndpointTelemetryStore(AdminStore admins, AlertStore alerts,
 
         transaction.Commit();
         return stored;
+    }
+
+    private static async Task<InventoryReport?> ReadInventoryAsync(SqliteConnection connection, SqliteTransaction transaction, Guid endpointId,
+        CancellationToken cancellationToken)
+    {
+        await using var query = connection.CreateCommand();
+        query.Transaction = transaction;
+        query.CommandText = "SELECT ReportJson FROM EndpointInventories WHERE EndpointId = $endpointId LIMIT 1;";
+        query.Parameters.AddWithValue("$endpointId", endpointId.ToString("D"));
+        if (await query.ExecuteScalarAsync(cancellationToken) is not string json) return null;
+        try { return JsonSerializer.Deserialize<InventoryReport>(json); }
+        catch (JsonException) { return null; }
     }
 
     public async Task<StoredEndpointTelemetry?> FindLatestAsync(Guid endpointId, CancellationToken cancellationToken = default)
