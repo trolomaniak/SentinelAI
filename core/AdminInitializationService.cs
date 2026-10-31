@@ -12,6 +12,7 @@ internal sealed class AdminInitializationService(
     EndpointTelemetryStore telemetry,
     LicenseStateStore licenses,
     CentralUpdateStore centralUpdates,
+    VulnerabilityService vulnerabilities,
     CoreHostingMode hostingMode) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -26,6 +27,7 @@ internal sealed class AdminInitializationService(
         await inventories.BackfillAlertsAsync(cancellationToken);
         await licenses.InitializeAsync(cancellationToken);
         await centralUpdates.InitializeAsync(cancellationToken);
+        await vulnerabilities.InitializeAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

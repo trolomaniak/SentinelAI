@@ -112,13 +112,19 @@ public static class CoreHost
         // MVP-7: the optional central update from the owner's server, off until an administrator enables it.
         builder.Services.AddSingleton(CentralUpdateOptions.Load(builder.Configuration));
         builder.Services.AddSingleton<CentralUpdateStore>();
+        // TASK-030: signed vulnerability feeds, verified with the update trust built into Core.
+        builder.Services.AddSingleton(VulnerabilityOptions.Load(builder.Configuration));
+        builder.Services.AddSingleton<VulnerabilityFeedCache>();
+        builder.Services.AddSingleton<VulnerabilityFeedStore>();
+        builder.Services.AddSingleton<VulnerabilityService>();
         builder.Services.AddSingleton(services => new CentralUpdateService(
             services.GetRequiredService<CentralUpdateOptions>(),
             Path.Combine(Path.GetDirectoryName(services.GetRequiredService<AdminStore>().DatabasePath)!, "central-update"),
             services.GetRequiredService<CentralUpdateStore>(),
             new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = Timeout.InfiniteTimeSpan },
             services.GetRequiredService<TimeProvider>(),
-            services.GetRequiredService<ILogger<CentralUpdateService>>()));
+            services.GetRequiredService<ILogger<CentralUpdateService>>(),
+            services.GetRequiredService<VulnerabilityService>()));
         builder.Services.AddSingleton<LicenseClock>();
         builder.Services.AddSingleton<ILicenseLeaseClient, LicenseLeaseClient>();
         builder.Services.AddSingleton<LicenseStateService>();
@@ -1008,6 +1014,40 @@ public static class CoreHost
                 var status = await updates.CheckNowAsync(cancellationToken);
                 return status is null ? Results.Conflict() : Results.Ok(status);
             }).RequireAuthorization().WithMetadata(new RequestSizeLimitAttribute(1024));
+
+        // TASK-030: vulnerability feed status (freshness and source attribution), import and one endpoint's assessment.
+        app.MapGet("/api/admin/vulnerabilities", (HttpContext context, VulnerabilityService vulnerabilities) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Ok(vulnerabilities.Status());
+            }).RequireAuthorization();
+
+        app.MapPost("/api/admin/vulnerabilities/feed", async (VulnerabilityFeedImportRequest? request, HttpContext context,
+                VulnerabilityService vulnerabilities, CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (!VulnerabilityRequests.TryDecode(request, out var manifest, out var feed)) return Results.BadRequest();
+                var (result, status) = await vulnerabilities.ImportAsync(manifest, feed, "import", cancellationToken);
+                // 422: not signed for this installation or not intact; 409: not newer than the feed in use; 503: no trust built in.
+                return result switch
+                {
+                    VulnerabilityImportResult.Imported => Results.Ok(status),
+                    VulnerabilityImportResult.NotNewer => Results.Conflict(status),
+                    VulnerabilityImportResult.Untrusted => Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
+                    _ => Results.UnprocessableEntity(status)
+                };
+            }).RequireAuthorization().WithMetadata(new RequestSizeLimitAttribute(VulnerabilityRequests.MaximumImportRequestBytes));
+
+        app.MapGet("/api/admin/devices/{endpointId:guid}/vulnerabilities", async (Guid endpointId, HttpContext context,
+                VulnerabilityService vulnerabilities, DeviceReadStore devices, CancellationToken cancellationToken) =>
+            {
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (context.Request.Query.Count != 0) return Results.BadRequest();
+                if (await devices.FindAsync(endpointId, cancellationToken) is null) return Results.NotFound();
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Ok(await vulnerabilities.AssessAsync(endpointId, cancellationToken));
+            }).RequireAuthorization();
 
         app.MapPost("/api/admin/license/renew", async (HttpContext context, LicenseStateService licensing,
                 CancellationToken cancellationToken) =>

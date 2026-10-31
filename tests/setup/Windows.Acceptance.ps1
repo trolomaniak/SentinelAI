@@ -976,6 +976,10 @@ function Assert-SetupCentralUpdate {
         Assert-SetupAcceptance (-not (Test-Path -LiteralPath $writerRecord)) 'Setup recorded a Start Menu account that cannot write there.'
     }
     Write-Output ('StartMenuAccountRecorded: ' + $operatorWrites)
+    # TASK-030: every build carries the update trust with which Core verifies vulnerability feeds; none is installed yet.
+    $vulnerabilities = Invoke-SetupCoreRequest '/api/admin/vulnerabilities' 'GET' $null $script:accessToken | ConvertFrom-Json
+    Assert-SetupAcceptance ((Test-Path -LiteralPath (Join-Path $script:coreCode 'update-trust.json') -PathType Leaf) -and $vulnerabilities.trusted -eq $true -and
+        $null -eq $vulnerabilities.feed -and $vulnerabilities.stale -eq $true) 'Core did not report its update trust without a vulnerability feed.'
 }
 
 function Get-SetupAgentAlerts([Guid]$EndpointId, [string]$RuleId) {

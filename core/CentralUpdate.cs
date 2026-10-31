@@ -153,7 +153,8 @@ public sealed class CentralUpdateService(
     CentralUpdateStore store,
     HttpClient httpClient,
     TimeProvider time,
-    ILogger<CentralUpdateService> logger) : BackgroundService
+    ILogger<CentralUpdateService> logger,
+    VulnerabilityService? vulnerabilities = null) : BackgroundService
 {
     public const string ManifestFileName = "SentinelAI-Setup.manifest.json";
     public const string PackageFileName = "SentinelAI-Setup.exe";
@@ -240,6 +241,8 @@ public sealed class CentralUpdateService(
                             // Turned off after the settings above were read: the cancellation may have missed this check.
                             if (!(await store.LoadAsync(checking.Token)).CheckEnabled) await checking.CancelAsync();
                             result = await CheckAsync(options.Server, checking.Token);
+                            // TASK-030: the same switch fetches a newer signed vulnerability feed from the same server.
+                            if (vulnerabilities is not null) await vulnerabilities.CheckServerAsync(options.Server, httpClient, checking.Token);
                         }
                         catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
                         {

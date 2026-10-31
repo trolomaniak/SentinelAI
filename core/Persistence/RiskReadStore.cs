@@ -4,6 +4,7 @@ using SentinelAI.Contracts.EndpointTelemetry;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Rules;
+using SentinelAI.Rules.Vulnerabilities;
 using SentinelAI.Scoring;
 
 namespace SentinelAI.Core.Persistence;
@@ -80,7 +81,7 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         options.Scorer.ScoreEndpoint(endpointId,
             alerts.Select(alert => new ScoringAlert(alert.AlertId, alert.RuleId, alert.Severity,
                 alert.Status, alert.LastObservedUtc, EventRuleEngine.DefaultRuleIds.Contains(alert.RuleId),
-                TelemetryRuleEngine.DefaultRuleIds.Contains(alert.RuleId), telemetry?.CollectedUtc)),
+                TelemetryRuleEngine.DefaultRuleIds.Contains(alert.RuleId) || VulnerabilityRules.RuleIds.Contains(alert.RuleId), telemetry?.CollectedUtc)),
             options.ContextFor(endpointId, inventoryCollectedUtc), now),
         AssessCoverage(inventory, eventChannels, telemetry, now),
         alerts,

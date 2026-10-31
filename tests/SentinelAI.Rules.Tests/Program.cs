@@ -106,6 +106,8 @@ var eventChecks = EventRuleTests.Run();
 Console.WriteLine($"Event rule tests passed ({EventRuleEngine.DefaultRuleIds.Count} rules, {eventChecks} checks: positives, thresholds, windows, unknown values, clamping, determinism).");
 var telemetryChecks = TelemetryRuleTests.Run();
 Console.WriteLine($"Telemetry rule tests passed ({TelemetryRuleEngine.DefaultRuleIds.Count} rules, {telemetryChecks} checks: positives, benign, Unknown and uncollected sections, determinism).");
+var vulnerabilityChecks = VulnerabilityTests.Run();
+Console.WriteLine($"Vulnerability tests passed ({vulnerabilityChecks} checks: versions, deterministic feed build, skipped mappings, strict format, matching, Windows builds, alerts).");
 
 void VerifyPrerequisites()
 {

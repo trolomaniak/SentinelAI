@@ -293,6 +293,43 @@
                         </StackPanel>
                     </Border>
                     <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,16,0,0"
+                            DataContext="{Binding DeviceVulnerabilities, RelativeSource={RelativeSource AncestorType=Window}}"
+                            AutomationProperties.AutomationId="DeviceVulnerabilities">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="Vulnerabilities" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       AutomationProperties.AutomationId="DeviceVulnerabilityStatus" AutomationProperties.LiveSetting="Polite" />
+                            <TextBlock Text="{Binding SummaryText}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       AutomationProperties.AutomationId="DeviceVulnerabilitySummary" />
+                            <ItemsControl ItemsSource="{Binding Findings}" AutomationProperties.AutomationId="DeviceVulnerabilityFindings">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,0,0,12">
+                                            <TextBlock Text="{Binding Cve}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding SeverityText}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding ProgramText}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding FixText}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Remediation}" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="{Binding CoverageText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       AutomationProperties.AutomationId="DeviceVulnerabilityCoverage" />
+                            <TextBlock Text="{Binding UnassessedText}" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
+                                       AutomationProperties.AutomationId="DeviceVulnerabilityUnassessed" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,16,0,0"
                             DataContext="{Binding ComputerEnrollment, RelativeSource={RelativeSource AncestorType=Window}}">
                         <Border.Style>
                             <Style TargetType="Border">

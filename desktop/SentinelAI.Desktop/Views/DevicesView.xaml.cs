@@ -34,6 +34,12 @@ public partial class DevicesView : UserControl
         {
             _shownDetail = shown;
             Enrollment?.DismissError();
+            // TASK-030: the vulnerabilities of exactly the computer shown.
+            if (Vulnerabilities is { } vulnerabilities)
+            {
+                if (shown is { } endpointId) _ = vulnerabilities.LoadAsync(endpointId);
+                else vulnerabilities.Clear();
+            }
         }
     }
 
@@ -45,6 +51,7 @@ public partial class DevicesView : UserControl
 
     private DevicesViewModel? Model => DataContext as DevicesViewModel;
     private ComputerEnrollmentViewModel? Enrollment => (Window.GetWindow(this) as MainWindow)?.ComputerEnrollment;
+    private DeviceVulnerabilitiesViewModel? Vulnerabilities => (Window.GetWindow(this) as MainWindow)?.DeviceVulnerabilities;
 
     private async void OnAddComputersExpanded(object sender, RoutedEventArgs e)
     {

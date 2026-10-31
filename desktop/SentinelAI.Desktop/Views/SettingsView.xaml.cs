@@ -45,6 +45,16 @@ public partial class SettingsView : UserControl
         if (Window.GetWindow(this) is MainWindow { CentralUpdate: { CanInstall: true } model }) await model.InstallAsync();
     }
 
+    private async void OnRefreshVulnerabilityFeed(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this) is MainWindow { VulnerabilityFeed: { CanRefresh: true } model }) await model.RefreshAsync();
+    }
+
+    private async void OnImportVulnerabilityFeed(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this) is MainWindow { VulnerabilityFeed: { CanImport: true } model }) await model.ImportAsync();
+    }
+
     private async void OnRefreshDesktopSettings(object sender, RoutedEventArgs e)
     {
         if (Window.GetWindow(this) is not MainWindow window) return;

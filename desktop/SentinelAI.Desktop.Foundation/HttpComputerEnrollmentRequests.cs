@@ -52,7 +52,7 @@ public sealed partial class HttpAuthenticationClient : IComputerEnrollmentClient
 
     // One administrator request on the trusted loopback session: no body is expected when parse is null (204).
     private async Task<ComputerEnrollmentResult<T>> SendEnrollmentAsync<T>(HttpMethod method, string path, byte[]? body, int maximumBytes,
-        Func<JsonElement, T>? parse, CancellationToken cancellationToken) where T : class
+        Func<JsonElement, T>? parse, CancellationToken cancellationToken, int maximumDepth = 4) where T : class
     {
         cancellationToken.ThrowIfCancellationRequested();
         Operation operation;
@@ -86,7 +86,7 @@ public sealed partial class HttpAuthenticationClient : IComputerEnrollmentClient
                     {
                         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, operation.Token).ConfigureAwait(false);
                         operation.Token.ThrowIfCancellationRequested();
-                        result = await ReadEnrollmentResponseAsync(response, maximumBytes, parse, operation.Token).ConfigureAwait(false);
+                        result = await ReadEnrollmentResponseAsync(response, maximumBytes, parse, maximumDepth, operation.Token).ConfigureAwait(false);
                     }
                     finally { request.Headers.Authorization = null; }
                 }
@@ -127,7 +127,7 @@ public sealed partial class HttpAuthenticationClient : IComputerEnrollmentClient
     }
 
     private static async Task<ComputerEnrollmentResult<T>> ReadEnrollmentResponseAsync<T>(HttpResponseMessage response, int maximumBytes,
-        Func<JsonElement, T>? parse, CancellationToken cancellationToken) where T : class
+        Func<JsonElement, T>? parse, int maximumDepth, CancellationToken cancellationToken) where T : class
     {
         switch (response.StatusCode)
         {
@@ -135,6 +135,7 @@ public sealed partial class HttpAuthenticationClient : IComputerEnrollmentClient
             case HttpStatusCode.NotFound: return new(ComputerEnrollmentOutcome.NotFound);
             case HttpStatusCode.Conflict: return new(ComputerEnrollmentOutcome.Conflict);
             case HttpStatusCode.BadRequest: return new(ComputerEnrollmentOutcome.Rejected);
+            case HttpStatusCode.UnprocessableEntity: return new(ComputerEnrollmentOutcome.Rejected);
         }
         if (parse is null) return response.StatusCode == HttpStatusCode.NoContent ? new(ComputerEnrollmentOutcome.Success) : new(ComputerEnrollmentOutcome.Unavailable);
         if (response.StatusCode != HttpStatusCode.OK) return new(ComputerEnrollmentOutcome.Unavailable);
@@ -154,7 +155,7 @@ public sealed partial class HttpAuthenticationClient : IComputerEnrollmentClient
             }
             cancellationToken.ThrowIfCancellationRequested();
             if (length > maximumBytes) throw new EnrollmentResponseTooLargeException();
-            using var json = JsonDocument.Parse(buffer.AsMemory(0, length), new JsonDocumentOptions { MaxDepth = 4 });
+            using var json = JsonDocument.Parse(buffer.AsMemory(0, length), new JsonDocumentOptions { MaxDepth = maximumDepth });
             return new(ComputerEnrollmentOutcome.Success, parse(json.RootElement));
         }
         finally { CryptographicOperations.ZeroMemory(buffer); }
