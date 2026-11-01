@@ -52,7 +52,7 @@ internal static class LocalizationTests
         }
     }
 
-    /// <summary>Every text Desktop, Setup and Agent Setup translate, in code and in views, has a Polish translation.</summary>
+    /// <summary>Every text Desktop, Setup, Agent Setup and the HTML report translate, in code and in views, has a Polish translation.</summary>
     private static void Coverage()
     {
         var root = AppContext.BaseDirectory;
@@ -61,7 +61,7 @@ internal static class LocalizationTests
         var call = new Regex(@"\b(?:T|F)\(\s*""((?:[^""\\]|\\.)*)""");
         var view = new Regex(@"\{loc:T '((?:[^'\\]|\\.)*)'\}");
         var found = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var folder in new[] { "desktop", "installer" })
+        foreach (var folder in new[] { "desktop", "installer", Path.Combine("core", "Reports") })
         {
             var before = keys.Count;
             foreach (var file in Sources(Path.Combine(root, folder), "*.cs"))
@@ -72,8 +72,8 @@ internal static class LocalizationTests
             found[folder] = keys.Count - before;
         }
         var missing = keys.Where(key => !TextCatalog.Polish.Entries.ContainsKey(key)).ToArray();
-        Ensure(found["desktop"] > 800 && found["installer"] > 90 && missing.Length == 0,
-            "Desktop or Setup texts without a Polish translation:" + Environment.NewLine + string.Join(Environment.NewLine, missing));
+        Ensure(found["desktop"] > 800 && found["installer"] > 90 && found[Path.Combine("core", "Reports")] > 60 && missing.Length == 0,
+            "Desktop, Setup or report texts without a Polish translation:" + Environment.NewLine + string.Join(Environment.NewLine, missing));
     }
 
     private static IEnumerable<string> Sources(string folder, string pattern) =>

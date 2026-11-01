@@ -27,7 +27,7 @@ Management summary and prioritized actions are followed by technical incident ev
 
 ## Consistency, privacy and limits
 
-Generation uses one consistent SQLite read transaction and one UTC evaluation time. Stable sorting and invariant formatting make the HTML deterministic for the same stored data, scoring policy and evaluation time, without AI.
+Generation uses one consistent SQLite read transaction and one UTC evaluation time. Stable sorting and invariant formatting make the HTML deterministic for the same stored data, scoring policy, evaluation time and installation language, without AI. The report is written in the installation language (English or Polish, see [languages](LOCALIZATION.md)); identifiers, numbers and UTC times stay the same in both.
 
 The report projects selected endpoint identifiers and configuration evidence. It does not export raw inventory, passwords, hashes, enrollment or gateway credentials, license material, model-provider configuration, or status-history administrator identities. Security evidence is restricted to known Boolean and bounded integer fields. All dynamic HTML is encoded, and the document has no scripts or external resources; restrictive CSP is included in both the response and saved document.
 

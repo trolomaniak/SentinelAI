@@ -58,4 +58,16 @@ public sealed record SecurityReport(ReportPeriod Period, DateTimeOffset Generate
         "Activity counts are distinct retained alerts, not detection-event totals or proof of historical posture. " +
         "Risk, health, status and technical evidence below are current stored state evaluated at report generation, not the selected period's historical state.";
     public const string UnavailableTrend = "Unavailable: historical risk scores are not stored. No score trend or historical security posture can be reconstructed.";
+
+    // Fixed texts Core stores in the report; the renderer translates them by their exact English text.
+    public const string UnsupportedRuleTitle = "Unsupported stored rule";
+    public const string UnsupportedRuleReason = "Technical details are unavailable for this stored rule.";
+    public const string UnsupportedRuleAction = "Review this stored incident locally; no supported deterministic recommendation is available.";
+    public const string EventFindingsReason = "Tracked unresolved runtime event detections; confirm the recorded activity on the endpoint before approved changes.";
+    public const string TelemetryFindingsReason = "Tracked unresolved endpoint telemetry findings; verify the current state on the endpoint before approved changes.";
+    public const string ConfigurationFindingsReason = "Tracked unresolved configuration findings; verify current configuration before approved changes.";
+    public const string CoverageAction = "Refresh missing, stale or future-dated inventories and investigate unknown supported configuration signals.";
+    public const string CoverageReason = "Unknown observations can conceal risks and do not contribute a score.";
+    public const string HealthAction = "Check Agent connectivity and heartbeat freshness on endpoints that are warning, offline or unknown.";
+    public const string HealthReason = "Heartbeat health describes reporting freshness, not endpoint safety.";
 }

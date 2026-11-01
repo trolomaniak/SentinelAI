@@ -174,11 +174,11 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
             var first = ReadUtc(reader, 5);
             var last = ReadUtc(reader, 6);
             var incident = new ReportIncident(alertId, endpointId, endpoints[endpointId].EndpointName,
-                metadata?.RuleId ?? "unsupported", metadata?.Title ?? "Unsupported stored rule",
+                metadata?.RuleId ?? "unsupported", metadata?.Title ?? SecurityReport.UnsupportedRuleTitle,
                 reader.GetString(3), reader.GetString(4), first, last,
-                metadata?.Reason ?? "Technical details are unavailable for this stored rule.",
+                metadata?.Reason ?? SecurityReport.UnsupportedRuleReason,
                 ReadEvidence(ruleId, reader.IsDBNull(7) ? null : reader.GetString(7)),
-                metadata?.RecommendedAction ?? "Review this stored incident locally; no supported deterministic recommendation is available.",
+                metadata?.RecommendedAction ?? SecurityReport.UnsupportedRuleAction,
                 InPeriod(first, period), InPeriod(last, period), reader.GetInt64(8), reader.GetInt64(9),
                 reader.IsDBNull(10) ? null : ReadUtc(reader, 10), reader.GetInt64(11) != 0, 0m);
             incidents.Add(incident);
@@ -247,22 +247,20 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
             .Select(group => new ReportPriorityAction(group.OrderByDescending(incident => SeverityRank(incident.Severity)).First().Severity,
                 group.Key, group.First().RecommendedAction, group.Select(incident => incident.EndpointId).Distinct().Count(),
                 EventRuleEngine.DefaultRuleIds.Contains(group.Key)
-                    ? "Tracked unresolved runtime event detections; confirm the recorded activity on the endpoint before approved changes."
+                    ? SecurityReport.EventFindingsReason
                     : TelemetryRuleEngine.DefaultRuleIds.Contains(group.Key)
-                        ? "Tracked unresolved endpoint telemetry findings; verify the current state on the endpoint before approved changes."
-                        : "Tracked unresolved configuration findings; verify current configuration before approved changes.",
+                        ? SecurityReport.TelemetryFindingsReason
+                        : SecurityReport.ConfigurationFindingsReason,
                 group.Sum(incident => incident.CurrentRiskContribution)))
             .OrderByDescending(action => SeverityRank(action.Priority)).ThenByDescending(action => action.CurrentRiskContribution)
             .ThenBy(action => action.RuleId, StringComparer.Ordinal).ToList();
         var unavailable = endpoints.Count(endpoint => endpoint.CurrentRisk.Coverage.InventoryState != "current" ||
             endpoint.CurrentRisk.Coverage.SignalCoverage != "complete");
         if (unavailable > 0) recommendations.Add(new ReportPriorityAction("coverage", "coverage",
-            "Refresh missing, stale or future-dated inventories and investigate unknown supported configuration signals.",
-            unavailable, "Unknown observations can conceal risks and do not contribute a score.", 0m));
+            SecurityReport.CoverageAction, unavailable, SecurityReport.CoverageReason, 0m));
         var disconnected = endpoints.Count(endpoint => endpoint.Health != "healthy");
         if (disconnected > 0) recommendations.Add(new ReportPriorityAction("health", "health",
-            "Check Agent connectivity and heartbeat freshness on endpoints that are warning, offline or unknown.",
-            disconnected, "Heartbeat health describes reporting freshness, not endpoint safety.", 0m));
+            SecurityReport.HealthAction, disconnected, SecurityReport.HealthReason, 0m));
         return recommendations;
     }
 

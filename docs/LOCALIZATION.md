@@ -34,21 +34,28 @@ translation.
 - Texts Core produces and Desktop shows (alert titles, reasons and recommended actions, Risk explanations, remediation
   from the vulnerability data) are translated by their exact English text. Texts Core composes with values, such as
   the coverage caution, are written by Core in the installation language.
+- Core writes the HTML security report in the installation language at the moment it is generated (`<html lang>`
+  follows it). Fixed report texts, including the rule texts and the texts Core stores in the report
+  (`SecurityReport` constants), are translated by their exact English text; severities, statuses, health and yes/no are
+  shown with the same words as in Desktop. Identifiers stay as Core stores them, as in Desktop: rule IDs, inventory and
+  coverage states, criticality and exposure labels and their sources, evidence fields and typed values. Numbers, dates
+  and times keep the invariant format and UTC. The English report is unchanged byte for byte.
 - The catalog loader refuses duplicate keys, empty translations and translations that change a `{0}` placeholder.
-- Tests fail when a Desktop, Setup or Agent Setup text, a view text or a rule's title, reason or recommended action has
-  no Polish translation.
+- Tests fail when a Desktop, Setup, Agent Setup or report text, a view text or a rule's title, reason or recommended
+  action has no Polish translation.
 
 ## Adding or changing a text
 
 1. Write the English text in code with `T`/`F`, or in a view with `{loc:T '…'}`.
 2. Add the exact English text and its Polish translation to `shared/localization/pl.json` (keys sorted).
-3. Run the Desktop and Rules tests: they list any text still without a translation (the Desktop tests also read the
-   Setup and Agent Setup sources).
+3. Run the Desktop, Rules and Core tests: they list any text still without a translation (the Desktop tests also read
+   the Setup, Agent Setup and report sources; the Core report test checks every text a report can carry).
 
 ## Coverage
 
 Desktop (every page, notifications and tray texts), Setup and Agent Setup (window texts, progress, results and errors),
-alert texts of every rule, Risk explanations and Core's coverage caution are translated. The HTML report follows in the
-next part of the Polish version. Names of products and Windows components (including SentinelAI Setup, Agent Setup,
+alert texts of every rule, Risk explanations, Core's coverage caution and the HTML security report are translated. A
+report keeps the language it was generated in: a report saved before a language change stays in its language. Names of
+products and Windows components (including SentinelAI Setup, Agent Setup,
 Core, Desktop and Updater), rule IDs, CVE numbers, support codes, command-line options and other identifiers are not
 translated. The word `DELETE` that confirms data removal in Setup stays as it is in both languages.

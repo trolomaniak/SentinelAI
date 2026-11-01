@@ -1166,7 +1166,7 @@ public static class CoreHost
             }).RequireAuthorization();
 
         app.MapGet("/api/admin/reports/security", async (HttpContext context, SecurityReportReadStore reports,
-                CancellationToken cancellationToken) =>
+                InstallationLanguageStore language, CancellationToken cancellationToken) =>
             {
                 if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
                 var query = context.Request.Query;
@@ -1179,7 +1179,7 @@ public static class CoreHost
                 {
                     // Local reporting is independent of cloud AI and optional licensing permissions.
                     var report = await reports.GenerateAsync(period!, cancellationToken);
-                    var html = SecurityReportRenderer.Render(report);
+                    var html = SecurityReportRenderer.Render(report, language.Current);
                     const int maximumBytes = 8 * 1024 * 1024;
                     if (System.Text.Encoding.UTF8.GetByteCount(html) > maximumBytes)
                         return Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity,
