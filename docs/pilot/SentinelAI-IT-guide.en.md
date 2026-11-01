@@ -6,8 +6,8 @@
 
 | Component | Where it runs | What it does |
 | --- | --- | --- |
-| **Core** | Central computer, Windows service `SentinelAICore` ("SentinelAI Local Core"), account `NT SERVICE\SentinelAICore`, delayed automatic start | Receives Agent data, evaluates the rules, keeps alerts, risk and the pilot license, serves Desktop. |
-| **Desktop** | Central computer only, runs as the signed-in Windows user | The administration application: Devices, Alerts, Risk, Reports, Settings. You sign in with the SentinelAI administrator account created during setup. |
+| **Core** | Central computer, Windows service `SentinelAICore` ("SentinelAI Local Core"), account `NT SERVICE\SentinelAICore`, delayed automatic start | Receives Agent data, evaluates the rules and vulnerabilities, keeps alerts, risk, the risk register and the pilot license, serves Desktop. |
+| **Desktop** | Central computer only, runs as the signed-in Windows user | The administration application: Overview, Devices, Alerts, Risk, Risk Register, Reports, Settings. You sign in with the SentinelAI administrator account created during setup. |
 | **Agent** | Every computer, including the central one; Windows service `SentinelAIAgent` ("SentinelAI Endpoint Agent"), account `NT AUTHORITY\LocalService`, automatic start | Reads the computer's inventory, security settings, security status and selected Windows events and sends them to Core. It writes only its own state files and never changes Windows settings or your files. |
 | **Updater** | Installed with Core and with each Agent | Public-only package verification client. During installation, upgrade and repair, Setup verifies the signed packages with its own embedded copy. On the other computers the scheduled task `\SentinelAI\SentinelAI Agent Update` runs it as SYSTEM to install a newer Agent (section 8). It does not download anything. |
 
@@ -43,7 +43,7 @@ Uninstalling the Agent or the central installation removes the Security log acce
   - Windows does not apply the rule while the network is classified as **Public**, which is the default for a new network. Set the company network to **Private** in Windows Settings on the central computer.
 - **TLS.** TLS 1.3 is used whenever both sides support it. TLS 1.2 is used only when one side is Windows 10, which has no TLS 1.3. Core accepts only AES-GCM cipher suites (with ECDHE key exchange for TLS 1.2) and drops any other connection before any data is exchanged. TLS 1.1 and older are never enabled.
 - **Certificate pinning.** Setup creates Core's own certificate (ECDSA P-256, self-signed, valid for 10 years). No certificate authority is installed anywhere. Each Agent trusts Core only if the SHA-256 fingerprint of its certificate exactly matches the pin from the enrollment code. A wrong certificate ends the connection during the TLS handshake, before any token or credential is sent. Desktop → **Settings → Local network** shows the addresses, the port and the fingerprint.
-- **Updates (optional).** Only while an administrator has turned on checking for updates, the central computer connects over HTTPS (port 443) to the vendor's update server named in Desktop → **Settings → Updates**. Off by default.
+- **Updates (optional).** Only while an administrator has turned on checking for updates, the central computer connects over HTTPS (port 443) to the vendor's update server named in Desktop → **Settings → Updates**, to download new versions and vulnerability data. Off by default.
 - **Agent traffic.** Every 30 seconds the Agent sends a short heartbeat. It sends the inventory every six hours and within seconds after a monitored setting changes (at most every 30 seconds), the security status every hour, and new events in batches.
 
 ## 3. Requirements
@@ -64,12 +64,13 @@ Uninstalling the Agent or the central installation removes the Security log acce
    ```
    The hash must match; letter case does not matter. If it differs, do not run the file.
 2. **Run `SentinelAI-Setup.exe`.** The installer is not code-signed, so Windows SmartScreen shows **Windows protected your PC**. Select **More info**, check the file name, then select **Run anyway**. Approve the administrator (UAC) prompt.
-3. **Wait** while Setup verifies its embedded packages and checks the computer. On a computer that already has this SentinelAI installation, Setup offers Repair, Upgrade or Uninstall instead. Partial or unrecognized installation state is refused (support code `SETUP-OWNERSHIP`).
-4. **Enter the pilot key** you received. Setup checks it on the computer, offline, before installing anything. A malformed, foreign or expired key is refused with support code `SETUP-PILOT-KEY` or `SETUP-PILOT-EXPIRED`.
-5. **Create the SentinelAI administrator:** a username and a password of 12–1024 characters. This account signs in to Desktop; it is not a Windows account.
-6. **Keep "Allow Agents on other computers in this local network to connect" selected.** Clearing it makes a local-only installation that monitors only the central computer.
-7. **Select Install SentinelAI.** Setup creates Core's certificate, installs Core, creates the administrator, starts Core and adds the firewall rule, stores the pilot key, installs and enrolls the central computer's own Agent, then installs Desktop, the Updater and the Start menu shortcut. If a step fails, Setup reports the failure and does not report success. The only exception is the pilot key: if Core cannot store it, installation completes and Setup asks you to enter the key in Desktop.
-8. **Open Desktop** from Setup or **Start → SentinelAI** and sign in. **Devices** shows the central computer.
+3. **Choose the language** under **Język / Language** at the top of the window; Windows' language is the default. Desktop, reports and the texts Core writes use it. An administrator can change it later in Desktop → **Settings → Language** (it applies when Desktop next starts).
+4. **Wait** while Setup verifies its embedded packages and checks the computer. On a computer that already has this SentinelAI installation, Setup offers Repair, Upgrade or Uninstall instead. Partial or unrecognized installation state is refused (support code `SETUP-OWNERSHIP`).
+5. **Enter the pilot key** you received. Setup checks it on the computer, offline, before installing anything. A malformed, foreign or expired key is refused with support code `SETUP-PILOT-KEY` or `SETUP-PILOT-EXPIRED`.
+6. **Create the SentinelAI administrator:** a username and a password of 12–1024 characters. This account signs in to Desktop; it is not a Windows account.
+7. **Keep "Allow Agents on other computers in this local network to connect" selected.** Clearing it makes a local-only installation that monitors only the central computer.
+8. **Select Install SentinelAI.** Setup creates Core's certificate, installs Core, creates the administrator, starts Core and adds the firewall rule, stores the pilot key, installs and enrolls the central computer's own Agent, then installs Desktop, the Updater and the Start menu shortcut. If a step fails, Setup reports the failure and does not report success. The exceptions are the pilot key and the language: if Core cannot store them, installation completes and Setup asks you to set them in Desktop.
+9. **Open Desktop** from Setup or **Start → SentinelAI** and sign in. **Devices** shows the central computer.
 
 ## 5. Adding computers
 
@@ -81,7 +82,7 @@ Uninstalling the Agent or the central installation removes the Security log acce
 
 **Copy codes** puts the codes on the clipboard, excluded from clipboard history. **Save codes as files** writes one `.sentinelai-enroll` file per code, named `SentinelAI-computer-NN-….sentinelai-enroll`. Each code is a secret that enrolls exactly one computer; pass it only to the person installing that computer. Unused codes are listed with their expiry and can be revoked.
 
-**Interactive installation.** On the computer to add, check `SentinelAI-Agent-Setup.exe` against `SHA256SUMS.txt`, run it (SmartScreen: **More info → Run anyway**), approve UAC, paste the code or select **Open code file...**, then **Install SentinelAI Agent**. Before changing anything, Setup connects to Core at the address in the code, checks the certificate pin, and asks Core whether the code is still valid. On success the computer appears in Desktop → **Devices**.
+**Interactive installation.** On the computer to add, check `SentinelAI-Agent-Setup.exe` against `SHA256SUMS.txt`, run it (SmartScreen: **More info → Run anyway**), approve UAC, optionally choose **Język / Language** at the top (for that window only), paste the code or select **Open code file...**, then **Install SentinelAI Agent**. Before changing anything, Setup connects to Core at the address in the code, checks the certificate pin, and asks Core whether the code is still valid. On success the computer appears in Desktop → **Devices**.
 
 **Silent installation.** Run elevated or as SYSTEM:
 
@@ -171,7 +172,7 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
 
 - **Updates of the central computer from the vendor's server (optional, off by default).** If your release includes an update server, Desktop → **Settings → Updates** shows it:
   - While **Check the provider's update server for new versions** is off, SentinelAI makes no internet connection.
-  - When it is on, Core checks the server every six hours (and on **Check now**) and downloads a newer version into `%ProgramData%\SentinelAI\Core\central-update`.
+  - When it is on, Core checks the server every six hours (and on **Check now**) and downloads a newer version into `%ProgramData%\SentinelAI\Core\central-update`, and newer vulnerability data.
   - **Install downloaded updates automatically at night** is on by default: between 02:00 and 04:00 the task `\SentinelAI\SentinelAI Update` (SYSTEM) verifies the download with the key pinned at installation, closes Desktop and upgrades. If the new version does not start healthy, the previous one is restored. A version that does not install in three nights is not tried again automatically.
   - With it off, or at any time, select **Install now**: Windows asks for administrator approval, Desktop closes and Setup opens with **Upgrade** selected.
   - Silent upgrade for deployment tools: `SentinelAI-Setup.exe /upgrade /quiet` (exit code 0 upgraded, 13 nothing to upgrade, 14 Desktop is running, 15 failed and the previous version restored, 16 run Setup interactively to recover).
@@ -180,6 +181,10 @@ Codes are valid for at most 7 days, so issue them shortly before deployment, and
 - To **repair**, run the same version of Setup and choose **Repair**. This also recreates the firewall rule if it was removed or changed.
 - An older Setup can only uninstall; it cannot downgrade.
 - An installation made by an earlier Setup also gave the Windows account that installed it full control of Core's folders. The first upgrade, repair or uninstall, run by any administrator, removes that access.
+- **Vulnerability data.** Core assesses vulnerabilities in installed programs and in the Windows release with signed data from the vendor (built from the NVD and the CISA KEV catalog); without that data it shows no vulnerabilities.
+  - While update checking is on, Core downloads newer data together with the updates.
+  - Otherwise the vendor sends two files, `vulnerability-feed.json` and `vulnerability-feed.manifest.json`. Put them in one folder, and in Desktop → **Settings → Vulnerability data** select **Import vulnerability data…**, then the `.manifest.json` file.
+  - Core accepts only data signed with the key pinned at installation and newer than its current data. Desktop → **Devices** → a computer → **Vulnerabilities** shows the results; known exploited vulnerabilities and those with a critical or high CVSS score become alerts. SentinelAI never installs or updates anything in the programs itself.
 - **Agents on other computers update automatically** from the central computer after its upgrade:
   - Each Agent checks Core one minute after it starts and then hourly, and downloads the newer signed Agent into `%ProgramData%\SentinelAI Agent\Agent\update`.
   - The scheduled task `\SentinelAI\SentinelAI Agent Update` (SYSTEM, hourly and 5 minutes after startup) verifies it with the key pinned at installation, replaces the Agent and restores the previous one if the new one does not keep running. A release restored three times is not tried again.
