@@ -6,6 +6,7 @@ using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Text.Json;
 using SentinelAI.Enrollment;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Setup.Foundation;
 
@@ -81,12 +82,12 @@ internal static class AgentSetupWorkflow
     public static async Task<AgentSetupExitCode> InstallAsync(EnrollmentCode code, IAgentSetupWorker worker, IAgentCodeProbe probe,
         IProgress<string> progress, CancellationToken token)
     {
-        progress.Report("Checking this computer...");
+        progress.Report(T("Checking this computer..."));
         AgentSetupInstallation state;
         try { state = await worker.InspectAsync(token).ConfigureAwait(false); }
         catch (Exception) when (!token.IsCancellationRequested) { return AgentSetupExitCode.InstallFailed; }
         if (state.Kind != AgentSetupInstallationKind.Fresh) return AgentSetupExitCode.AlreadyInstalled;
-        progress.Report("Checking SentinelAI Core at the address in the code...");
+        progress.Report(T("Checking SentinelAI Core at the address in the code..."));
         var check = await probe.CheckAsync(code, token).ConfigureAwait(false);
         if (check != AgentCodeCheck.Usable)
             return check switch
@@ -96,7 +97,7 @@ internal static class AgentSetupWorkflow
                 _ => AgentSetupExitCode.CoreUnreachable
             };
         token.ThrowIfCancellationRequested();
-        progress.Report("Installing SentinelAI Agent...");
+        progress.Report(T("Installing SentinelAI Agent..."));
         return await worker.InstallAsync(code, token).ConfigureAwait(false) switch
         {
             AgentInstallOutcome.Installed => AgentSetupExitCode.Success,
@@ -108,11 +109,11 @@ internal static class AgentSetupWorkflow
 
     public static async Task<AgentSetupExitCode> UninstallAsync(IAgentSetupWorker worker, IProgress<string> progress, CancellationToken token)
     {
-        progress.Report("Checking this computer...");
+        progress.Report(T("Checking this computer..."));
         try
         {
             if ((await worker.InspectAsync(token).ConfigureAwait(false)).Kind != AgentSetupInstallationKind.Installed) return AgentSetupExitCode.NotInstalled;
-            progress.Report("Removing SentinelAI Agent...");
+            progress.Report(T("Removing SentinelAI Agent..."));
             await worker.UninstallAsync(token).ConfigureAwait(false);
             return AgentSetupExitCode.Success;
         }
@@ -141,20 +142,20 @@ internal static class AgentSetupWorkflow
 
     public static string Describe(AgentSetupExitCode code, bool uninstall) => code switch
     {
-        AgentSetupExitCode.Success when uninstall => "SentinelAI Agent was removed from this computer, with its enrollment and data.",
-        AgentSetupExitCode.Success => "SentinelAI Agent is installed and enrolled with SentinelAI Core.",
-        AgentSetupExitCode.InvalidArguments => "Run Agent Setup without options, with /quiet /codefile <path>, /uninstall or /uninstall /quiet.",
-        AgentSetupExitCode.InvalidCode => "This is not a valid SentinelAI enrollment code. Check that the whole code was copied, or open the code file again. Nothing was changed.",
-        AgentSetupExitCode.CoreUnreachable => "SentinelAI Core could not be reached at the address in the code. Check that this computer is on the same network as the central SentinelAI computer and that it is running, then try again. Nothing was changed.",
-        AgentSetupExitCode.PinMismatch => "The computer at the address in the code is not the SentinelAI Core that created the code: its certificate does not match. Nothing was changed. Ask your administrator for a new code.",
-        AgentSetupExitCode.CodeRefused => "SentinelAI Core refused the code: it expired, was already used or was revoked. Nothing was changed. Ask your administrator for a new code.",
-        AgentSetupExitCode.AlreadyInstalled => "A SentinelAI Agent is already installed on this computer, by Agent Setup or as part of the central SentinelAI installation. Nothing was changed.",
-        AgentSetupExitCode.EnrollmentNotAcknowledged => "SentinelAI Core did not confirm the enrollment in time, so Setup removed the Agent again. Ask your administrator for a new code if this one now shows as used.",
-        AgentSetupExitCode.UninstallFailed => "SentinelAI Agent could not be removed completely. Run the uninstall again.",
-        AgentSetupExitCode.NotInstalled => "SentinelAI Agent is not installed on this computer by Agent Setup. Nothing was changed.",
-        AgentSetupExitCode.RollbackFailed => "Installation failed and Setup could not remove everything it had installed. Run SentinelAI-Agent-Setup.exe /uninstall to finish removing it, then try again.",
-        _ when uninstall => "SentinelAI Agent could not be removed completely. Run the uninstall again.",
-        _ => "Installation failed. Setup removed what it had installed."
+        AgentSetupExitCode.Success when uninstall => T("SentinelAI Agent was removed from this computer, with its enrollment and data."),
+        AgentSetupExitCode.Success => T("SentinelAI Agent is installed and enrolled with SentinelAI Core."),
+        AgentSetupExitCode.InvalidArguments => T("Run Agent Setup without options, with /quiet /codefile <path>, /uninstall or /uninstall /quiet."),
+        AgentSetupExitCode.InvalidCode => T("This is not a valid SentinelAI enrollment code. Check that the whole code was copied, or open the code file again. Nothing was changed."),
+        AgentSetupExitCode.CoreUnreachable => T("SentinelAI Core could not be reached at the address in the code. Check that this computer is on the same network as the central SentinelAI computer and that it is running, then try again. Nothing was changed."),
+        AgentSetupExitCode.PinMismatch => T("The computer at the address in the code is not the SentinelAI Core that created the code: its certificate does not match. Nothing was changed. Ask your administrator for a new code."),
+        AgentSetupExitCode.CodeRefused => T("SentinelAI Core refused the code: it expired, was already used or was revoked. Nothing was changed. Ask your administrator for a new code."),
+        AgentSetupExitCode.AlreadyInstalled => T("A SentinelAI Agent is already installed on this computer, by Agent Setup or as part of the central SentinelAI installation. Nothing was changed."),
+        AgentSetupExitCode.EnrollmentNotAcknowledged => T("SentinelAI Core did not confirm the enrollment in time, so Setup removed the Agent again. Ask your administrator for a new code if this one now shows as used."),
+        AgentSetupExitCode.UninstallFailed => T("SentinelAI Agent could not be removed completely. Run the uninstall again."),
+        AgentSetupExitCode.NotInstalled => T("SentinelAI Agent is not installed on this computer by Agent Setup. Nothing was changed."),
+        AgentSetupExitCode.RollbackFailed => T("Installation failed and Setup could not remove everything it had installed. Run SentinelAI-Agent-Setup.exe /uninstall to finish removing it, then try again."),
+        _ when uninstall => T("SentinelAI Agent could not be removed completely. Run the uninstall again."),
+        _ => T("Installation failed. Setup removed what it had installed.")
     };
 
     /// <summary>The worker's private stdin request. Only the install request carries the code's Core, pin and token.</summary>

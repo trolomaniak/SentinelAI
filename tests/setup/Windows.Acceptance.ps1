@@ -334,6 +334,18 @@ function Submit-NativeAction([string]$Id) {
     # the same keyboard queue, as the existing native authentication fixture.
     [SentinelAI.Setup.Acceptance.Native]::PressKey(13, $script:activeProcess.MainWindowHandle)
 }
+function Select-SetupLanguage([string]$Name) {
+    Wait-SetupAcceptance { Test-SetupControl 'SetupLanguage' } 'Setup did not offer its language choice.'
+    $control = Find-SetupControl 'SetupLanguage'
+    $expand = [Windows.Automation.ExpandCollapsePattern]$control.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern)
+    $expand.Expand()
+    $nameCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, $Name)
+    $itemCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::ListItem)
+    $option = $control.FindFirst([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.AndCondition]::new($nameCondition, $itemCondition))
+    Assert-SetupAcceptance ($null -ne $option) 'A Setup language was missing from its choice.'
+    ([Windows.Automation.SelectionItemPattern]$option.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern)).Select()
+    $expand.Collapse()
+}
 function Assert-NoSecretText([string]$Text) {
     Assert-SetupAcceptance (-not $Text.Contains($script:password) -and
         ([string]::IsNullOrEmpty($script:accessToken) -or -not $Text.Contains($script:accessToken))) 'A synthetic password or bearer appeared in public installation data.'
@@ -1009,6 +1021,15 @@ try {
     catch {
         throw ((Get-SetupFailureSummary) -replace '\AThe actual Setup executable reported a safe installation failure\. ', 'The actual installer did not expose its normal install action. ')
     }
+    # The Polish version: the window redraws itself in the chosen language and back. This installation itself stays English.
+    # Windows PowerShell reads this file as ANSI, so the Polish letter is written by its code point.
+    $polishUsername = 'Nazwa u' + [char]0x017C + 'ytkownika administratora'
+    Select-SetupLanguage 'Polski'
+    Wait-SetupAcceptance { (Find-SetupControl 'SetupInstallButton').Current.Name -ceq 'Zainstaluj SentinelAI' -and
+        (Find-SetupControl 'SetupAdministratorUsername').Current.Name -ceq $polishUsername } 'Setup did not show its window in Polish.'
+    Select-SetupLanguage 'English'
+    Wait-SetupAcceptance { (Find-SetupControl 'SetupInstallButton').Current.Name -ceq 'Install SentinelAI' -and
+        (Find-SetupControl 'SetupAdministratorUsername').Current.Name -ceq 'Administrator username' } 'Setup did not return its window to English.'
     ([Windows.Automation.InvokePattern](Find-SetupControl 'SetupInstallButton').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)).Invoke()
     Wait-SetupAcceptance { Test-SetupControl 'SetupErrorText' $false } 'Setup did not reject empty administrator credentials.'
     Assert-SetupAcceptance (-not (Test-Path -LiteralPath $programRoot) -and -not (Test-Path -LiteralPath $dataRoot) -and

@@ -149,7 +149,12 @@ Do it once on Windows 10 and once on Windows 11.
 - [ ] Desktop → **Settings → Language**: choose **Polski** and **Save language**. The message asks to close and reopen SentinelAI.
 - [ ] Close Desktop (Exit Desktop if the tray is on) and open it again: sign-in, navigation and every page are in Polish, including alert titles, reasons and recommended actions, Risk explanations and the coverage caution.
 - [ ] Stop the Core service, open Desktop: it still starts in Polish (last language of this Windows user). Start Core again.
-- [ ] Switch back to **English**, reopen Desktop: everything is in English again.
+- [ ] With **Polski** chosen, Desktop → **Raporty**: generate and save a report, then open the file: headings, explanations, alert texts and recommended actions are in Polish; rule IDs, inventory states, numbers and UTC times stay as they are.
+- [ ] Switch back to **English**, reopen Desktop: everything is in English again, and a newly generated report is in English.
+- [ ] On a computer without SentinelAI (a clean virtual machine is enough), open **SentinelAI-Setup.exe** and choose **Polski** under **Język / Language**: the whole window changes at once. Click Install with empty fields: the error is in Polish. Install: the progress and the final message are in Polish. Open Desktop: the sign-in screen and every page are in Polish without choosing the language again.
+- [ ] Open **SentinelAI-Setup.exe** again on that computer: the repair, upgrade and uninstall view opens in Polish, including the list of operations.
+- [ ] On a computer with Windows shown in Polish, Setup and Agent Setup open in Polish without a choice; elsewhere they open in English.
+- [ ] Open **SentinelAI-Agent-Setup.exe** and choose **Polski**: the window, the **Otwórz plik z kodem...** dialog's file type and the result after installing or uninstalling are in Polish.
 
 ## 12. Record
 

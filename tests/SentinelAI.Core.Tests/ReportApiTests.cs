@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Data.Sqlite;
@@ -13,6 +14,7 @@ using SentinelAI.Contracts.Inventory;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Reports;
+using SentinelAI.Localization;
 
 internal static class ReportApiTests
 {
@@ -116,6 +118,7 @@ internal static class ReportApiTests
                     CultureInfo.CurrentUICulture = uiCulture;
                 }
                 Check(await DownloadAsync(client, token) == persistedHtml, "Repeated report generation changed fixed-state output.");
+                await VerifyPolishAsync(client, token, report, persistedHtml);
                 Check(offline.Requests == 0, "Local reporting called cloud AI.");
                 await app.StopAsync();
             }
@@ -271,6 +274,40 @@ internal static class ReportApiTests
         Check(!html.Contains("<script", StringComparison.OrdinalIgnoreCase) &&
               !html.Contains("https://", StringComparison.OrdinalIgnoreCase) && !html.Contains("http://", StringComparison.OrdinalIgnoreCase),
             "The offline report included executable code or an external resource dependency.");
+    }
+
+    /// <summary>The report in Polish: the same data and safety, every fixed text translated, and English unchanged afterwards.</summary>
+    private static async Task VerifyPolishAsync(HttpClient client, string token, SecurityReport report, string english)
+    {
+        var polish = SecurityReportRenderer.Render(report, UiLanguage.Polish);
+        foreach (var text in new[] { "<html lang=\"pl\">", "<title>Lokalny raport bezpieczeństwa SentinelAI</title>", "Podsumowanie dla kierownictwa",
+                     "Zalecane działania priorytetowe", "Bieżące deterministyczne zasady oceny", "najwyższy wynik komputera", "&lt;img" })
+            Check(polish.Contains(text, StringComparison.Ordinal), "The Polish report omitted: " + text);
+        foreach (var text in new[] { "<html lang=\"en\">", "Management summary", "Recommended priority actions", "Recommended action:", "<img",
+                     SecurityReport.ChronologyCaution, SecurityReport.UnavailableTrend, report.OrganizationRisk.Explanation })
+            Check(!polish.Contains(text, StringComparison.Ordinal), "The Polish report kept English or unsafe text: " + text);
+        // Every fixed text a report can carry, from Core and from the rules, has a Polish translation.
+        var texts = typeof(SecurityReport).GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(field => field.IsLiteral && field.FieldType == typeof(string)).Select(field => (string)field.GetRawConstantValue()!)
+            .Concat(report.PeriodIncidents.Concat(report.MajorPostureFindings).SelectMany(incident => new[] { incident.Title, incident.Reason, incident.RecommendedAction }))
+            .Concat(report.PriorityActions.SelectMany(action => new[] { action.Action, action.Reason }))
+            .Append(report.OrganizationRisk.Method).Append(report.OrganizationRisk.Explanation).Distinct(StringComparer.Ordinal).ToArray();
+        var untranslated = texts.Where(text => !TextCatalog.Polish.Entries.ContainsKey(text)).ToArray();
+        Check(texts.Length > 15 && untranslated.Length == 0, "Report texts without a Polish translation: " + string.Join(" | ", untranslated));
+        // The route writes the report in the installation language, and English returns byte for byte.
+        Check(await SetLanguageAsync(client, token, "pl") && await DownloadAsync(client, token) == polish, "The report did not follow the installation language.");
+        Check(await SetLanguageAsync(client, token, "en") && await DownloadAsync(client, token) == english, "The English report changed after the Polish one.");
+    }
+
+    private static async Task<bool> SetLanguageAsync(HttpClient client, string token, string language)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/api/admin/settings/language")
+        {
+            Content = new StringContent("{\"language\":\"" + language + "\"}", System.Text.Encoding.UTF8, "application/json")
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await client.SendAsync(request);
+        return response.StatusCode == HttpStatusCode.OK;
     }
 
     private static async Task<string> DownloadAsync(HttpClient client, string token)
