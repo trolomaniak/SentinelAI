@@ -13,7 +13,7 @@ public enum CentralUpdateState { NotLoaded, Loading, Ready, Saving, Unavailable 
 /// </summary>
 public sealed class CentralUpdateViewModel : INotifyPropertyChanged, IDisposable
 {
-    private const string NotLoaded = "Not loaded";
+    private static string NotLoaded => T("Not loaded");
     private readonly object _gate = new();
     private readonly ICentralUpdateClient _client;
     private readonly ICentralUpdateInstaller? _installer;
@@ -97,7 +97,7 @@ public sealed class CentralUpdateViewModel : INotifyPropertyChanged, IDisposable
                 }
                 return info.LastCheck switch
                 {
-                    "checking" => "Checking " + info.Server + T(" for a newer version…"),
+                    "checking" => F("Checking {0} for a newer version…", info.Server),
                     "current" => "SentinelAI " + info.InstalledVersion + T(" is up to date."),
                     "failed" => T("The last check did not succeed. SentinelAI tries again within an hour."),
                     _ => T("Not checked yet. SentinelAI checks a few minutes after start and every six hours.")

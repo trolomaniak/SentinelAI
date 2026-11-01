@@ -8,7 +8,7 @@ public enum LocalNetworkState { NotLoaded, Loading, Ready, Unavailable }
 /// <summary>Core's local-network role for Settings: whether Agents can connect, where and with which fingerprint.</summary>
 public sealed class LocalNetworkViewModel : INotifyPropertyChanged, IDisposable
 {
-    private const string NotLoaded = "Not loaded";
+    private static string NotLoaded => T("Not loaded");
     private readonly object _gate = new();
     private readonly ILocalNetworkClient _client;
     private LocalNetworkStatus? _status;

@@ -51,7 +51,7 @@ public sealed class OrganizationRiskPresentation
             new(T("Accepted alerts"), RiskText.Number(organization.AlertStatusCounts.Accepted)),
             new(T("Resolved alerts"), RiskText.Number(organization.AlertStatusCounts.Resolved)),
             new(T("Highest-risk endpoint count"), RiskText.Number(organization.HighestRiskEndpointCount)),
-            new("Highest-risk endpoint IDs", RiskText.Join(organization.HighestRiskEndpointIds.Select(id => id.ToString("D")))),
+            new(T("Highest-risk endpoint IDs"), RiskText.Join(organization.HighestRiskEndpointIds.Select(id => id.ToString("D")))),
             new(T("Highest-risk IDs truncated"), organization.HighestRiskEndpointIdsTruncated.ToString()),
             new(T("Method"), T(organization.Method)),
             new(T("Evaluated"), RiskText.Timestamp(organization.EvaluatedUtc)),
@@ -172,10 +172,10 @@ public sealed class EndpointRiskPresentation
 
 internal static class RiskText
 {
-    internal const string Interpretation = "Scores prioritize reported findings. A zero score does not establish effective protection or telemetry completeness.";
+    internal static string Interpretation => T("Scores prioritize reported findings. A zero score does not establish effective protection or telemetry completeness.");
     internal static string Number(decimal value) => value.ToString(CultureInfo.InvariantCulture);
     internal static string Timestamp(DateTimeOffset? value) => value?.ToUniversalTime()
-        .ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "Unknown / not reported";
+        .ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? T("Unknown / not reported");
     internal static string Join(IEnumerable<string> values)
     {
         var text = string.Join(", ", values);

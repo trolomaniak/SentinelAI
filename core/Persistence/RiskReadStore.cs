@@ -6,11 +6,12 @@ using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Rules;
 using SentinelAI.Rules.Vulnerabilities;
 using SentinelAI.Scoring;
+using SentinelAI.Localization;
 
 namespace SentinelAI.Core.Persistence;
 
 /// <summary>Scores enrollment, inventory and lifecycle state from one SQLite read snapshot.</summary>
-public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options, TimeProvider timeProvider)
+public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options, TimeProvider timeProvider, InstallationLanguageStore language)
 {
     // The Agent reports channel status at least hourly; an older report no longer describes collection.
     private static readonly TimeSpan EventStatusFreshFor = TimeSpan.FromHours(2);
@@ -104,9 +105,11 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
     private RiskCoverage AssessCoverage(InventoryReport? inventory, IReadOnlyList<EventChannelState>? eventChannels,
         TelemetryState? telemetry, DateTimeOffset now)
     {
-        var caution = "Coverage counts only the 13 supported Windows configuration rules. " +
-            "Missing or unknown observations have no score; a zero score is not a security assurance. " +
-            EventCaution(eventChannels, now) + " " + TelemetryCaution(telemetry, now);
+        // Written in the installation language, like the rest of what administrators read.
+        var lang = language.Current;
+        var caution = Localizer.Translate("Coverage counts only the 13 supported Windows configuration rules.", lang) + " " +
+            Localizer.Translate("Missing or unknown observations have no score; a zero score is not a security assurance.", lang) + " " +
+            EventCaution(eventChannels, now, lang) + " " + TelemetryCaution(telemetry, now, lang);
         if (inventory is null)
         {
             return new RiskCoverage("missing", "unknown", 0, 13, caution);
@@ -123,38 +126,40 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
     /// Event rules fire only on collected events. A channel counts as collecting only while its latest status is
     /// collecting and was reported within the Agent's liveness bound; anything else leaves its rules unable to fire.
     /// </summary>
-    private static string EventCaution(IReadOnlyList<EventChannelState>? channels, DateTimeOffset now)
+    private static string EventCaution(IReadOnlyList<EventChannelState>? channels, DateTimeOffset now, UiLanguage lang)
     {
-        const string unknown = "Events that were not collected are unknown, not absent.";
+        var unknown = Localizer.Translate("Events that were not collected are unknown, not absent.", lang);
         var rules = EventRules.Rules;
-        if (channels is null) return $"Event rules ({rules.Count}) fire only on collected events. {unknown}";
+        if (channels is null) return Localizer.Format("Event rules ({0}) fire only on collected events.", lang, rules.Count) + " " + unknown;
         var byChannel = channels.ToDictionary(channel => channel.Channel, StringComparer.Ordinal);
         string StateOf(string channel) => !byChannel.TryGetValue(channel, out var status) ? "not reported"
             : now - status.ReportedUtc > EventStatusFreshFor ? status.State + ", stale" : status.State;
+        string Shown(string state) => state == "not reported" ? Localizer.Translate(state, lang)
+            : state.EndsWith(", stale", StringComparison.Ordinal) ? state[..^7] + Localizer.Translate(", stale", lang) : state;
         var collecting = SecurityEventChannels.All.Where(channel => StateOf(channel) == SecurityEventSourceStates.Collecting)
             .ToHashSet(StringComparer.Ordinal);
         var able = rules.Count(rule => rule.Channels.Any(collecting.Contains));
-        if (able == rules.Count) return $"All {rules.Count} event rules have a collecting channel. {unknown}";
+        if (able == rules.Count) return Localizer.Format("All {0} event rules have a collecting channel.", lang, rules.Count) + " " + unknown;
         var missing = SecurityEventChannels.All.Where(channel => !collecting.Contains(channel))
-            .Select(channel => $"{channel} ({StateOf(channel)})");
-        return $"{able} of {rules.Count} event rules can fire; channels not collecting: {string.Join(", ", missing)}. {unknown}";
+            .Select(channel => $"{channel} ({Shown(StateOf(channel))})");
+        return Localizer.Format("{0} of {1} event rules can fire; channels not collecting: {2}.", lang, able, rules.Count, string.Join(", ", missing)) + " " + unknown;
     }
 
     /// <summary>
     /// Telemetry rules fire only on collected report sections. A section that is not collected, or a report older
     /// than the Agent's reporting bound, leaves its rules unable to fire; that is stated, never scored as safe.
     /// </summary>
-    private static string TelemetryCaution(TelemetryState? telemetry, DateTimeOffset now)
+    private static string TelemetryCaution(TelemetryState? telemetry, DateTimeOffset now, UiLanguage lang)
     {
         var rules = TelemetryRules.Rules;
-        if (telemetry is null) return $"No endpoint telemetry is reported, so its {rules.Count} rules cannot fire.";
-        var stale = now - telemetry.CollectedUtc > TelemetryFreshFor ? " (latest report is stale)" : string.Empty;
+        if (telemetry is null) return Localizer.Format("No endpoint telemetry is reported, so its {0} rules cannot fire.", lang, rules.Count);
+        var stale = now - telemetry.CollectedUtc > TelemetryFreshFor ? Localizer.Translate(" (latest report is stale)", lang) : string.Empty;
         string StateOf(string section) => telemetry.Sections.GetValueOrDefault(section) ?? "not reported";
         var able = rules.Count(rule => rule.Sections.All(section => StateOf(section) == TelemetryAvailability.Collected));
-        if (able == rules.Count) return $"All {rules.Count} endpoint telemetry rules have collected inputs{stale}.";
+        if (able == rules.Count) return Localizer.Format("All {0} endpoint telemetry rules have collected inputs{1}.", lang, rules.Count, stale);
         var missing = TelemetryState.SectionNames.Where(section => StateOf(section) != TelemetryAvailability.Collected)
-            .Select(section => $"{section} ({StateOf(section)})");
-        return $"{able} of {rules.Count} endpoint telemetry rules can fire{stale}; not collected: {string.Join(", ", missing)}.";
+            .Select(section => $"{section} ({(StateOf(section) == "not reported" ? Localizer.Translate("not reported", lang) : StateOf(section))})");
+        return Localizer.Format("{0} of {1} endpoint telemetry rules can fire{2}; not collected: {3}.", lang, able, rules.Count, stale, string.Join(", ", missing));
     }
 
     private static int CountKnownSignals(SecurityPostureInventory posture)

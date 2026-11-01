@@ -191,7 +191,7 @@ public sealed class ReportsViewModel : INotifyPropertyChanged, IDisposable
                 switch (result.Outcome)
                 {
                     case ReportSaveOutcome.Saved:
-                        _saveStatusText = string.IsNullOrEmpty(result.FileName) ? "Report saved." : "Report saved as " + result.FileName + ".";
+                        _saveStatusText = string.IsNullOrEmpty(result.FileName) ? T("Report saved.") : F("Report saved as {0}.", result.FileName);
                         break;
                     case ReportSaveOutcome.Cancelled:
                         _saveStatusText = T("Save cancelled. The generated report remains available.");

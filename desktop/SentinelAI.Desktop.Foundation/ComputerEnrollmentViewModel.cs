@@ -16,9 +16,9 @@ public sealed record UnusedCodeRow(Guid Id, string ExpiresText);
 // next batch, sign-out or session expiry; Desktop never logs or persists them except where the administrator saves them.
 public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDisposable
 {
-    public const string SecretNotice = "Each code enrolls one computer and is a secret. Give it only to the person installing SentinelAI Agent on that computer.";
-    public const string CentralComputerNotice = "This is the central computer's own Agent, which is part of the SentinelAI installation. It cannot be removed here.";
-    public const string AddressAdvice = "Agents keep using the address in their code. Prefer the computer name, or give this computer a fixed IP address.";
+    public static string SecretNotice => T("Each code enrolls one computer and is a secret. Give it only to the person installing SentinelAI Agent on that computer.");
+    public static string CentralComputerNotice => T("This is the central computer's own Agent, which is part of the SentinelAI installation. It cannot be removed here.");
+    public static string AddressAdvice => T("Agents keep using the address in their code. Prefer the computer name, or give this computer a fixed IP address.");
     public static readonly IReadOnlyList<int> CountChoices = Enumerable.Range(1, 50).ToArray();
     public static readonly IReadOnlyList<ValidityChoice> ValidityChoices =
     [
@@ -280,8 +280,9 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
     }
 
     private string ExpiryText(DateTimeOffset expiresUtc) =>
-        "Expires " + expiresUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) +
-        (expiresUtc - _time.GetUtcNow() < TimeSpan.FromHours(1) ? " (soon)" : "");
+        expiresUtc - _time.GetUtcNow() < TimeSpan.FromHours(1)
+            ? F("Expires {0} (soon)", expiresUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture))
+            : F("Expires {0}", expiresUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture));
 
     private static EnrollmentAddressChoice Describe(EnrollmentAddressOption option) => new(option.Value,
         option.IsName ? option.Value + (option.Resolves ? T(" (computer name, recommended)") : T(" (computer name, does not resolve yet)"))

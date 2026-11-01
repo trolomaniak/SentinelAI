@@ -137,15 +137,15 @@ public static class TelemetryPresentation
 {
     private static readonly IReadOnlyDictionary<string, string> ServiceNames = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["WinDefend"] = "Microsoft Defender Antivirus (WinDefend)",
-        ["WdNisSvc"] = "Defender network inspection (WdNisSvc)",
-        ["Sense"] = "Defender for Endpoint (Sense)",
-        ["MpsSvc"] = "Windows Defender Firewall (MpsSvc)",
-        ["BFE"] = "Base Filtering Engine (BFE)",
-        ["EventLog"] = "Windows Event Log (EventLog)",
-        ["wscsvc"] = "Security Center (wscsvc)",
-        ["SecurityHealthService"] = "Windows Security service (SecurityHealthService)",
-        ["wuauserv"] = "Windows Update (wuauserv)"
+        ["WinDefend"] = T("Microsoft Defender Antivirus (WinDefend)"),
+        ["WdNisSvc"] = T("Defender network inspection (WdNisSvc)"),
+        ["Sense"] = T("Defender for Endpoint (Sense)"),
+        ["MpsSvc"] = T("Windows Defender Firewall (MpsSvc)"),
+        ["BFE"] = T("Base Filtering Engine (BFE)"),
+        ["EventLog"] = T("Windows Event Log (EventLog)"),
+        ["wscsvc"] = T("Security Center (wscsvc)"),
+        ["SecurityHealthService"] = T("Windows Security service (SecurityHealthService)"),
+        ["wuauserv"] = T("Windows Update (wuauserv)")
     };
 
     public static IEnumerable<DisplayFact> Facts(EndpointTelemetryDetail? telemetry)

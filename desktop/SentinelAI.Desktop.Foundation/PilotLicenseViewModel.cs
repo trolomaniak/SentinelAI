@@ -13,7 +13,7 @@ public enum PilotLicenseState { NotLoaded, Loading, Ready, Submitting, Unavailab
 /// </summary>
 public sealed class PilotLicenseViewModel : INotifyPropertyChanged, IDisposable
 {
-    private const string NotApplicable = "Not applicable";
+    private static string NotApplicable => T("Not applicable");
     private readonly object _gate = new();
     private readonly IPilotLicenseClient _client;
     private readonly ISetupUninstallLauncher? _uninstall;

@@ -9,8 +9,8 @@ public enum LicenseState { NotLoaded, Loading, Ready, Renewing, Unavailable }
 /// <summary>Public Core licensing state with one explicit, non-retried manual renewal.</summary>
 public sealed class LicenseViewModel : INotifyPropertyChanged, IDisposable
 {
-    private const string InitialStatus = "Refresh to read the current Core licensing state.";
-    private const string InitialRenewal = "No manual renewal requested in this session.";
+    private static string InitialStatus => T("Refresh to read the current Core licensing state.");
+    private static string InitialRenewal => T("No manual renewal requested in this session.");
     private readonly object _gate = new();
     private readonly ILicenseClient _client;
     private LicenseStatus? _status;
@@ -106,7 +106,7 @@ public sealed class LicenseViewModel : INotifyPropertyChanged, IDisposable
                         "RECOVERING" => T("Core reports renewal in progress. Refresh for its current status."),
                         _ => T("Renewal completed without restoring FULL. Core reports ") + _status.Mode + "."
                     };
-                    else if (_renewalStatusText != InitialRenewal) _renewalStatusText = "Status refreshed. Core's current mode is " + _status.Mode + ".";
+                    else if (_renewalStatusText != InitialRenewal) _renewalStatusText = F("Status refreshed. Core's current mode is {0}.", _status.Mode);
                 }
                 else SetFailureLocked(result.Outcome, pending.Renew);
                 NotifyAll();

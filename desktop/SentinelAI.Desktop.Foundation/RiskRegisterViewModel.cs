@@ -86,7 +86,7 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
         [new("any", T("Any residual level")), new("low", T("Low")), new("medium", T("Medium")), new("high", T("High")), new("critical", T("Critical"))];
     public static IReadOnlyList<RiskRegisterOption> Statuses { get; } = [new("open", T("Open")), new("monitoring", T("Monitoring")), new("closed", T("Closed"))];
     public static IReadOnlyList<RiskRegisterOption> Treatments { get; } =
-        [new(string.Empty, "Not decided"), new("avoid", T("Avoid")), new("mitigate", T("Mitigate")), new("transfer", T("Transfer")), new("accept", T("Accept"))];
+        [new(string.Empty, T("Not decided")), new("avoid", T("Avoid")), new("mitigate", T("Mitigate")), new("transfer", T("Transfer")), new("accept", T("Accept"))];
     public static IReadOnlyList<int> Scale { get; } = [1, 2, 3, 4, 5];
 
     public string DistinctionText =>
@@ -110,9 +110,8 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
         RiskRegisterListState.Loading => T("Reading the Risk Register…"),
         RiskRegisterListState.Unavailable => T("Local Core is unavailable. Restore Core, then select Refresh."),
         RiskRegisterListState.Ready when _page is { Total: 0 } => T("No risk matches these filters. Select New risk to record one."),
-        RiskRegisterListState.Ready when _page is { } page => "Showing " + (_offset + 1).ToString(CultureInfo.InvariantCulture) + "–" +
-                                                              (_offset + page.Records.Count).ToString(CultureInfo.InvariantCulture) + " of " +
-                                                              page.Total.ToString(CultureInfo.InvariantCulture) + T(". Records needing attention come first."),
+        RiskRegisterListState.Ready when _page is { } page =>
+            F("Showing {0}–{1} of {2}. Records needing attention come first.", _offset + 1, _offset + page.Records.Count, page.Total),
         _ => string.Empty
     };
 
@@ -187,9 +186,9 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public string RecordText => _mode != RiskRegisterEditorMode.Edit || _detail is not { } detail ? string.Empty :
-        "Created " + Format(detail.CreatedUtc) + " by " + detail.CreatedBy + ". Last changed " + Format(detail.UpdatedUtc) + " by " + detail.UpdatedBy + "." +
-        (detail.LastReviewedUtc is { } reviewed ? " Last reviewed " + Format(reviewed) + " by " + detail.LastReviewedBy + "." : " Not reviewed yet.") +
-        " Version " + detail.Version.ToString(CultureInfo.InvariantCulture) + ".";
+        F("Created {0} by {1}. Last changed {2} by {3}.", Format(detail.CreatedUtc), detail.CreatedBy, Format(detail.UpdatedUtc), detail.UpdatedBy) + " " +
+        (detail.LastReviewedUtc is { } reviewed ? F("Last reviewed {0} by {1}.", Format(reviewed), detail.LastReviewedBy) : T("Not reviewed yet.")) + " " +
+        F("Version {0}.", detail.Version);
 
     public IReadOnlyList<string> HistoryRows { get; private set; } = [];
 
@@ -501,7 +500,7 @@ public sealed class RiskRegisterViewModel : INotifyPropertyChanged, IDisposable
     private async Task LoadChoicesAsync(long generation, IReadOnlyList<RiskRegisterLinkedEndpoint> linkedEndpoints, IReadOnlyList<RiskRegisterLinkedAlert> linkedAlerts)
     {
         var endpoints = linkedEndpoints.Select(endpoint => new RiskRegisterChoice(endpoint.EndpointId,
-            endpoint.Enrolled ? endpoint.Name! : "Computer no longer enrolled (" + endpoint.EndpointId.ToString("D") + ")", true)).ToList();
+            endpoint.Enrolled ? endpoint.Name! : F("Computer no longer enrolled ({0})", endpoint.EndpointId.ToString("D")), true)).ToList();
         Replace(AlertChoices, linkedAlerts.Select(alert => new RiskRegisterChoice(alert.AlertId,
             alert.Exists ? alert.EndpointName + " · " + T(alert.Title!) + " (" + AlertRow.Label(alert.Severity) + ", " + AlertRow.Label(alert.Status) + ")" : T("Alert no longer recorded"), true)));
         Replace(EndpointChoices, endpoints);

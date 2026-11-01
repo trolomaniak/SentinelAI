@@ -106,6 +106,8 @@ public abstract class EndpointRule(
     public string Id { get; } = id;
     public string Title { get; } = title;
     public string Severity { get; } = severity;
+    public string Reason { get; } = reason;
+    public string RecommendedAction { get; } = recommendedAction;
 
     public SecurityAlert? Evaluate(EndpointState state)
     {
@@ -113,8 +115,8 @@ public abstract class EndpointRule(
         if (!state.IsWindows)
             return null;
         var evidence = Match(state.SecurityPosture);
-        return evidence is null ? null : new SecurityAlert(Id, Title, Severity, reason,
-            evidence, state.EndpointId, state.Timestamp, recommendedAction);
+        return evidence is null ? null : new SecurityAlert(Id, Title, Severity, Reason,
+            evidence, state.EndpointId, state.Timestamp, RecommendedAction);
     }
 
     protected abstract IReadOnlyList<RuleEvidence>? Match(SecurityPostureInventory posture);

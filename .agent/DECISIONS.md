@@ -335,3 +335,10 @@ Implements the owner decisions above (TLS policy, pin-only trust, Domain/Private
 - **Accepted risks.** Treatment Accept needs a named owner, a rationale and an expiry at most 366 days after it is set; a date that is set or changed may not already lie in the past. Overdue reviews, expired acceptances and passed target dates of open risks are flagged and listed first.
 - **Auditable history.** Every create, change and review appends an entry (version, UTC time, administrator, field old and new values, note); entries are never edited. Writes name the version that was read and are refused on a conflict; Desktop never repeats a save whose answer was lost.
 - **Bounds.** 2,000 records, 200 history entries per record, 32 computers, 64 alerts and 16 tickets per record; links are added only to enrolled computers and tracked alerts and may outlive them. Status is Open, Monitoring (needs a treatment) or Closed; there is no deletion.
+
+## 2026-10-31 — Polish language version (owner decisions)
+
+- **Scope (owner decision).** Everything the customer sees: Desktop, Setup and Agent Setup, alert texts, Risk explanations and the HTML report. Detection rules and code are unchanged; only texts are translated. Delivered in parts: Desktop with Core's language and texts first, then the installers, then the report.
+- **Choosing the language (owner decision).** Chosen in Setup, with an option to change it in the application. One language per installation, kept by Core (Setup writes `SentinelAI:Language`; an administrator's change in Desktop Settings is stored in Core's database). Desktop starts in it (Core's answer, else the last one seen by the Windows user, else Windows' language) and applies a change at its next start.
+- **Translation model.** English is the source text; `shared/localization/pl.json` maps exact English texts to Polish, so a text without a translation stays English instead of showing an outdated one. Placeholders must match. Texts Core composes with values are written by Core in the installation language; fixed texts from Core are translated by Desktop.
+
