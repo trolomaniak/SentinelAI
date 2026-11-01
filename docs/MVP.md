@@ -1,6 +1,6 @@
 # Pilot MVP
 
-The pilot MVP lets small companies try SentinelAI for free and give feedback. It is distributed directly by the owner, for example after a first contact by e-mail. The owner defined this scope on 2026-10-19. It is delivered by tasks MVP-1 to MVP-4 in `.agent/tasks/`, before TASK-030.
+The pilot MVP lets small companies try SentinelAI for free and give feedback. It is distributed directly by the owner, for example after a first contact by e-mail. The owner defined this scope on 2026-10-19. It was delivered by tasks MVP-1 to MVP-7 in `.agent/tasks/`; vulnerability management (TASK-030), the Risk Register (TASK-032) and the Polish version followed before the first pilots.
 
 ## Deployment model
 
@@ -22,6 +22,10 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 | Documentation | For the business and for IT, in Polish and English, plus a release script with checksums and a two-computer test checklist | MVP-4 |
 | Single delivery | The two installers are the only packages; no browser dashboard or manual installation | MVP-5 |
 | Detection | Works on Windows in any display language; Setup lets the Agent read the Security log and enables the auditing of new scheduled tasks | MVP-6 |
+| Updates | Agents update automatically from Core; the central installation updates with a newer Setup, or at night from the owner's update server when an administrator turns checking on (off by default) | MVP-7 |
+| Vulnerabilities | Known vulnerabilities in common business programs and the Windows release from signed owner data (NVD, CISA KEV), downloaded with updates or imported; findings, alerts and Risk; nothing is patched | TASK-030 |
+| Risk register | The company's business risks with likelihood × impact, treatment, owner, reviews and history | TASK-032 |
+| Languages | English and Polish, one per installation: chosen in Setup and changeable in Desktop; Desktop, both installers, Core's texts and the HTML report | Polish version ([languages](LOCALIZATION.md)) |
 
 ## Central Core (MVP-1)
 
@@ -61,6 +65,7 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
   - inputs: the owner's update signing key (outside every repository, used only to sign and never copied), the update public key, the pilot public keys and the contact details. The pilot license private key is never an input;
   - output: `SentinelAI-Setup.exe`, `SentinelAI-Agent-Setup.exe`, the four documents and `SHA256SUMS.txt` (sha256sum format), and nothing else.
   - Windows CI runs it with development keys, and the native Setup and Agent Setup acceptance test its installers.
+- [Pierwsze maile do firm](pilot/PILOT-OUTREACH.pl.md) (internal, Polish): consent-first outreach templates for the first pilot companies; never part of a release.
 - [Pilot test checklist](pilot/PILOT-TEST-CHECKLIST.md) (internal): central installation, adding a second computer, an alert, a pilot key near and after its end, removing a computer, and both uninstalls, on one Windows 10 and one Windows 11 computer in one network.
 
 ## Detection on every Windows (MVP-6)
@@ -72,7 +77,7 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 ## Decisions and known limitations
 
 - The installers are not code-signed for the pilot because of the cost. Windows SmartScreen warns on first run. Smart App Control or a company antivirus/EDR may block unsigned programs. Do not attach the installer to e-mails: link to a download page over HTTPS that publishes SHA-256 checksums, or install together with the company.
-- Vulnerability and patch management (TASK-030) waits for pilot feedback.
+- Vulnerability data covers a curated list of common business programs and Windows client releases, and comes only from the owner (downloaded with updates or imported in Desktop). Without it no vulnerabilities are shown. SentinelAI patches nothing (TASK-030).
 - Desktop runs only on the central computer. The local-network listener serves Agent routes only.
 - The existing seven-day lease licensing and `cloud/license-api` remain for later commercial licensing (TASK-041).
 - The pilot is not independently security-audited (TASK-043) and makes no compliance claims (TASK-044).
@@ -81,4 +86,5 @@ The pilot MVP lets small companies try SentinelAI for free and give feedback. It
 - A domain Group Policy for audit policy or the Security log's access takes precedence over what Setup sets (MVP-6).
 - Agents on other computers update automatically from Core (MVP-7): after the central installation is upgraded, each Agent downloads the newer signed Agent within about an hour, and Agent Setup's SYSTEM task verifies and installs it with rollback. The Updater and the installed Agent Setup copy on those computers are not updated.
 - Maintenance of the central installation (repair, upgrade, uninstall) can be run by any Windows administrator. Core's program and data folders, like every other folder Setup installs, are writable only by Administrators and SYSTEM (and Core's service where it writes its own state), never by the installing account's non-elevated programs. An installation made by an earlier Setup granted the installing account full control; the first maintenance by any administrator removes it (see `.agent/DECISIONS.md`).
-- The central installation is upgraded by running a newer Setup or, when the release was built with the owner's update server and an administrator turned checking on in Desktop, by the nightly SYSTEM task with the signed Setup from that server (MVP-7). Checking is off by default, so the pilot makes no internet connection unless an administrator enables it. The user interface is in English only.
+- The central installation is upgraded by running a newer Setup or, when the release was built with the owner's update server and an administrator turned checking on in Desktop, by the nightly SYSTEM task with the signed Setup from that server (MVP-7). Checking is off by default, so the pilot makes no internet connection unless an administrator enables it.
+- Desktop, Setup, Agent Setup, Core's texts and the HTML report are in English and Polish; the customer documents exist in both. Product and component names, rule IDs and other identifiers are not translated.

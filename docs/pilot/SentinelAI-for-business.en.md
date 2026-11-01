@@ -20,16 +20,19 @@ Only what is listed here is implemented today:
 - **Pending restarts:** whether Windows is waiting for a restart to finish updates.
 - **Risky settings:** for example User Account Control switched off, Remote Desktop without network-level authentication, the old SMB1 file sharing protocol, automatic sign-in, and local administrator accounts.
 - **Security event detections:** for example Microsoft Defender finding malware or being switched off, an event log being cleared, a service or driver installed from an unusual place, or PowerShell flagging a suspicious script. This includes detections from the Windows Security log (repeated failed sign-ins, risky Remote Desktop sign-ins, new scheduled tasks and clearing of the Security log): Setup gives the Agent read-only access to that log and turns on the Windows auditing of new scheduled tasks, and uninstalling undoes both. Detections work on Windows in any language, including Polish.
+- **Software vulnerabilities:** known vulnerabilities (CVE) in installed programs from our list of common business applications and in the Windows release, including those known to be exploited in attacks (CISA catalog), with the version that fixes them. We sign and provide the vulnerability data: the central computer downloads it from our server when you turn on updates, or you import the file we send. SentinelAI never installs anything itself.
 - **Risk score:** each computer gets a score from 0 to 100 with an explanation, and the company's score is that of its riskiest computer.
 - **Alerts and incidents:** each finding becomes an alert with evidence and a recommended action. You mark it as investigating, accepted or resolved.
-- **Reports:** a security report for a chosen period, saved as an HTML file.
+- **Risk register:** your company's own list of business risks, with likelihood and impact, treatment, owner, review dates and a history of changes, linked to computers and alerts.
+- **Reports:** a security report for a chosen period, saved as an HTML file in the installation's language.
 
-Alerts are raised for risky settings and detections. The other values, such as pending restarts, Defender details and local administrators, are shown in Desktop for you to review.
+Alerts are raised for risky settings, detections and serious vulnerabilities. The other values, such as pending restarts, Defender details and local administrators, are shown in Desktop for you to review.
 
 ## How it works
 
 - **One central computer** in the company runs SentinelAI: the central service (Core), the Desktop application where you see everything, and its own Agent.
 - **Every other computer** runs only the small SentinelAI Agent, which reports to the central computer over your local network.
+- **In English or Polish.** You choose the language in the installer, and an administrator can change it later in Desktop (**Settings → Language**). Desktop, the installers and the reports use it.
 - **Your data stays in your company.** Everything is stored on the central computer. SentinelAI does not send your data to us or to any cloud service. It connects to the internet only if you turn on updates from our server, and then only to download new versions.
 
 ## What is collected and what is not
@@ -54,7 +57,7 @@ Alerts are raised for risky settings and detections. The other values, such as p
 
 ## How to start in three steps
 
-1. **Install on the central computer.** Download the files, check them as described in the IT guide, run `SentinelAI-Setup.exe`, enter your pilot key and create the SentinelAI administrator account.
+1. **Install on the central computer.** Download the files, check them as described in the IT guide, run `SentinelAI-Setup.exe`, choose the language, enter your pilot key and create the SentinelAI administrator account.
 2. **Add the other computers.** In Desktop, open **Devices → Add computers** to create one code per computer. On each computer, run `SentinelAI-Agent-Setup.exe` and paste its code.
 3. **Review the results.** In Desktop, look at **Devices**, **Alerts** and **Risk**, and generate a report in **Reports**.
 
@@ -65,7 +68,6 @@ Alerts are raised for risky settings and detections. The other values, such as p
 - **Windows only.** There is no Linux or macOS version yet.
 - **Desktop only on the central computer.** Alerts and reports are viewed there; there is no web or mobile access.
 - **Updates are your choice.** Updates from our server are off until you turn them on in Desktop; then the central computer installs new versions at night, or when you select Install now. Otherwise you run the new version we provide. The Agents on the other computers update from the central computer automatically, usually within two hours.
-- **English interface.** The program itself is in English.
 
 ## Contact
 

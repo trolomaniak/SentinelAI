@@ -20,16 +20,19 @@ Działa dziś tylko to, co jest wymienione poniżej:
 - **Oczekujące ponowne uruchomienie:** czy Windows czeka na restart, aby dokończyć aktualizacje.
 - **Ryzykowne ustawienia:** na przykład wyłączona Kontrola konta użytkownika (UAC), Pulpit zdalny bez uwierzytelniania na poziomie sieci, stary protokół udostępniania plików SMB1, automatyczne logowanie oraz konta lokalnych administratorów.
 - **Wykrywanie zdarzeń bezpieczeństwa:** na przykład znalezienie złośliwego oprogramowania przez Microsoft Defender albo jego wyłączenie, wyczyszczenie dziennika zdarzeń, instalacja usługi lub sterownika z nietypowego miejsca, podejrzany skrypt oznaczony przez PowerShell. Obejmuje to wykrycia z dziennika Zabezpieczenia Windows (powtarzające się nieudane logowania, ryzykowne logowania przez Pulpit zdalny, nowe zaplanowane zadania i wyczyszczenie dziennika Zabezpieczenia): instalator daje Agentowi prawo tylko do odczytu tego dziennika i włącza w Windows inspekcję tworzenia zaplanowanych zadań, a odinstalowanie cofa obie zmiany. Wykrycia działają w Windows w każdym języku, także polskim.
+- **Podatności w oprogramowaniu:** znane podatności (CVE) w zainstalowanych programach z naszej listy popularnych aplikacji firmowych i w wydaniu Windows, w tym podatności wykorzystywane w atakach (według katalogu CISA), z wersją, która je usuwa. Dane o podatnościach podpisujemy i dostarczamy my: komputer centralny pobiera je z naszego serwera, gdy włączycie aktualizacje, albo importujecie przesłany przez nas plik. SentinelAI sam niczego nie instaluje.
 - **Ocena ryzyka:** każdy komputer dostaje ocenę od 0 do 100 z wyjaśnieniem, a ocena firmy to ocena jej najbardziej zagrożonego komputera.
 - **Alerty i incydenty:** każde ustalenie staje się alertem z dowodami i zalecanym działaniem. Oznaczacie go jako badany, zaakceptowany lub rozwiązany.
-- **Raporty:** raport bezpieczeństwa za wybrany okres, zapisywany jako plik HTML.
+- **Rejestr ryzyk:** własna lista ryzyk biznesowych firmy z oceną prawdopodobieństwa i skutków, sposobem postępowania, właścicielem, terminami przeglądów i historią zmian, powiązana z komputerami i alertami.
+- **Raporty:** raport bezpieczeństwa za wybrany okres, zapisywany jako plik HTML w języku instalacji.
 
-Alerty powstają dla ryzykownych ustawień i wykryć. Pozostałe wartości, takie jak oczekujące ponowne uruchomienie, szczegóły Defendera i lokalni administratorzy, Desktop pokazuje do przejrzenia.
+Alerty powstają dla ryzykownych ustawień, wykryć i poważnych podatności. Pozostałe wartości, takie jak oczekujące ponowne uruchomienie, szczegóły Defendera i lokalni administratorzy, Desktop pokazuje do przejrzenia.
 
 ## Jak to działa
 
 - **Jeden komputer centralny** w firmie uruchamia SentinelAI: usługę centralną (Core), aplikację Desktop, w której widać wszystko, oraz własnego Agenta.
 - **Każdy pozostały komputer** ma tylko małego Agenta SentinelAI, który przekazuje dane do komputera centralnego przez sieć lokalną.
+- **Po polsku albo po angielsku.** Język wybieracie w instalatorze, a administrator może go później zmienić w Desktopie (**Ustawienia → Język**). W tym języku są Desktop, instalatory i raporty.
 - **Dane zostają w Twojej firmie.** Wszystko jest przechowywane na komputerze centralnym. SentinelAI nie wysyła danych do nas ani do żadnej usługi w chmurze. Łączy się z internetem tylko wtedy, gdy włączycie aktualizacje z naszego serwera, i wyłącznie po to, by pobrać nowe wersje.
 
 ## Co jest zbierane, a co nie
@@ -43,7 +46,7 @@ Alerty powstają dla ryzykownych ustawień i wykryć. Pozostałe wartości, taki
 - **Bezpłatnie** w okresie pilotażu.
 - **Na czas określony:** klucz pilotażowy jest ważny przez uzgodniony okres, zwykle od 30 do 90 dni. Desktop pokazuje, ile dni zostało, i przypomina o końcu na siedem dni wcześniej.
 - **Bez limitu** liczby komputerów.
-- **Po zakończeniu pilotażu:** całe monitorowanie działa dalej. Desktop wyświetla komunikat z prośbą o kontakt i naszymi danymi kontaktowymi oraz przycisk **Uninstall SentinelAI**. Odinstalowanie zachowuje dane, chyba że wyraźnie wybierzecie ich usunięcie. Nowy klucz w każdej chwili przedłuża pilotaż.
+- **Po zakończeniu pilotażu:** całe monitorowanie działa dalej. Desktop wyświetla komunikat z prośbą o kontakt i naszymi danymi kontaktowymi oraz przycisk **Odinstaluj SentinelAI**. Odinstalowanie zachowuje dane, chyba że wyraźnie wybierzecie ich usunięcie. Nowy klucz w każdej chwili przedłuża pilotaż.
 
 ## Wymagania
 
@@ -54,9 +57,9 @@ Alerty powstają dla ryzykownych ustawień i wykryć. Pozostałe wartości, taki
 
 ## Jak zacząć w trzech krokach
 
-1. **Zainstaluj na komputerze centralnym.** Pobierz pliki, sprawdź je zgodnie z przewodnikiem IT, uruchom `SentinelAI-Setup.exe`, wpisz klucz pilotażowy i utwórz konto administratora SentinelAI.
-2. **Dodaj pozostałe komputery.** W Desktopie otwórz **Devices → Add computers** i utwórz po jednym kodzie na komputer. Na każdym komputerze uruchom `SentinelAI-Agent-Setup.exe` i wklej jego kod.
-3. **Przejrzyj wyniki.** W Desktopie zobacz **Devices**, **Alerts** i **Risk**, a w **Reports** wygeneruj raport.
+1. **Zainstaluj na komputerze centralnym.** Pobierz pliki, sprawdź je zgodnie z przewodnikiem IT, uruchom `SentinelAI-Setup.exe`, wybierz język, wpisz klucz pilotażowy i utwórz konto administratora SentinelAI.
+2. **Dodaj pozostałe komputery.** W Desktopie otwórz **Urządzenia → Dodaj komputery** i utwórz po jednym kodzie na komputer. Na każdym komputerze uruchom `SentinelAI-Agent-Setup.exe` i wklej jego kod.
+3. **Przejrzyj wyniki.** W Desktopie zobacz **Urządzenia**, **Alerty** i **Ryzyko**, a w sekcji **Raporty** wygeneruj raport.
 
 ## Uczciwie o ograniczeniach
 
@@ -64,8 +67,7 @@ Alerty powstają dla ryzykownych ustawień i wykryć. Pozostałe wartości, taki
 - **Instalatory nie są podpisane cyfrowo.** Windows SmartScreen ostrzeże, że wydawca jest nieznany. Przed uruchomieniem zawsze sprawdzaj pobrane pliki z opublikowanymi sumami kontrolnymi SHA-256. Inteligentna kontrola aplikacji (Smart App Control) lub niektóre programy antywirusowe i EDR mogą blokować niepodpisane programy.
 - **Tylko Windows.** Nie ma jeszcze wersji dla Linuksa ani macOS.
 - **Desktop tylko na komputerze centralnym.** Alerty i raporty ogląda się tam; nie ma dostępu przez przeglądarkę ani telefon.
-- **O aktualizacjach decydujecie Wy.** Aktualizacje z naszego serwera są wyłączone, dopóki nie włączycie ich w Desktopie; wtedy komputer centralny instaluje nowe wersje w nocy albo po wybraniu Install now. W przeciwnym razie uruchamiacie nową wersję, którą dostarczamy. Agenci na pozostałych komputerach aktualizują się z komputera centralnego automatycznie, zwykle w ciągu dwóch godzin.
-- **Interfejs po angielsku.** Sam program jest w języku angielskim.
+- **O aktualizacjach decydujecie Wy.** Aktualizacje z naszego serwera są wyłączone, dopóki nie włączycie ich w Desktopie; wtedy komputer centralny instaluje nowe wersje w nocy albo po wybraniu **Zainstaluj teraz**. W przeciwnym razie uruchamiacie nową wersję, którą dostarczamy. Agenci na pozostałych komputerach aktualizują się z komputera centralnego automatycznie, zwykle w ciągu dwóch godzin.
 
 ## Kontakt
 

@@ -1,13 +1,13 @@
 # Przewodnik IT SentinelAI
 
-*Wersja pilotażowa. Wersja angielska: [IT guide](SentinelAI-IT-guide.en.md). Opis prostym językiem: [SentinelAI dla firm](SentinelAI-dla-firm.pl.md). Program ma interfejs w języku angielskim, dlatego nazwy przycisków i ekranów podajemy po angielsku.*
+*Wersja pilotażowa. Wersja angielska: [IT guide](SentinelAI-IT-guide.en.md). Opis prostym językiem: [SentinelAI dla firm](SentinelAI-dla-firm.pl.md). Nazwy przycisków i ekranów podajemy tak, jak wyświetla je polska wersja programu; wersja angielska używa nazw z angielskiego przewodnika.*
 
 ## 1. Architektura
 
 | Składnik | Gdzie działa | Co robi |
 | --- | --- | --- |
-| **Core** | Komputer centralny, usługa Windows `SentinelAICore` („SentinelAI Local Core”), konto `NT SERVICE\SentinelAICore`, start automatyczny opóźniony | Odbiera dane od Agentów, ocenia reguły, przechowuje alerty, ryzyko i licencję pilotażową, obsługuje Desktop. |
-| **Desktop** | Tylko komputer centralny, działa jako zalogowany użytkownik Windows | Aplikacja administracyjna: Devices, Alerts, Risk, Reports, Settings. Logujesz się kontem administratora SentinelAI utworzonym podczas instalacji. |
+| **Core** | Komputer centralny, usługa Windows `SentinelAICore` („SentinelAI Local Core”), konto `NT SERVICE\SentinelAICore`, start automatyczny opóźniony | Odbiera dane od Agentów, ocenia reguły i podatności, przechowuje alerty, ryzyko, rejestr ryzyk i licencję pilotażową, obsługuje Desktop. |
+| **Desktop** | Tylko komputer centralny, działa jako zalogowany użytkownik Windows | Aplikacja administracyjna: Przegląd, Urządzenia, Alerty, Ryzyko, Rejestr ryzyk, Raporty, Ustawienia. Logujesz się kontem administratora SentinelAI utworzonym podczas instalacji. |
 | **Agent** | Każdy komputer, także centralny; usługa Windows `SentinelAIAgent` („SentinelAI Endpoint Agent”), konto `NT AUTHORITY\LocalService`, start automatyczny | Odczytuje inwentarz komputera, ustawienia i stan zabezpieczeń oraz wybrane zdarzenia Windows i wysyła je do Core. Zapisuje tylko własne pliki stanu i nigdy nie zmienia ustawień Windows ani Waszych plików. |
 | **Updater** | Instalowany razem z Core i z każdym Agentem | Klient weryfikacji paczek używający tylko kluczy publicznych. Podczas instalacji, aktualizacji i naprawy instalator weryfikuje podpisane paczki własną wbudowaną kopią. Na pozostałych komputerach zadanie harmonogramu `\SentinelAI\SentinelAI Agent Update` uruchamia go jako SYSTEM, aby zainstalować nowszego Agenta (punkt 8). Niczego nie pobiera. |
 
@@ -17,7 +17,7 @@
 | --- | --- |
 | `%ProgramFiles%\SentinelAI\{Core,Agent,Desktop,Updater}` | Kod programu instalacji centralnej, zapisywalny tylko dla Administratorów i SYSTEM (zob. punkt 10). `Core\pilot-license` zawiera klucze publiczne pilotażu i dane kontaktowe. |
 | `%ProgramData%\SentinelAI\Core` | Baza SQLite Core `sentinelai.db`, konfiguracja i potwierdzenia własności. Baza zawiera konto administratora (skrót hasła), urządzenia, alerty i klucz pilotażowy. |
-| `%ProgramData%\SentinelAI\Agent` | Agent komputera centralnego: stan rejestracji i jego dane uwierzytelniające, chronione przez DPAPI konta LocalService. |
+| `%ProgramData%\SentinelAI\Agent` | Agent komputera centralnego: stan dołączenia i jego dane uwierzytelniające, chronione przez DPAPI konta LocalService. |
 | `%ProgramData%\SentinelAI\Setup` | Przypięty publiczny klucz zaufania instalatora i potwierdzenie własności. Bez haseł i tokenów. |
 | `%ProgramFiles%\SentinelAI Setup\SentinelAI-Setup.exe` | Zainstalowana kopia instalatora, uruchamiana przez **Odinstaluj** przy **SentinelAI** w **Ustawienia → Aplikacje → Zainstalowane aplikacje** (Windows 10: **Aplikacje i funkcje**). |
 | `%ProgramFiles%\SentinelAI Agent\…`, `%ProgramData%\SentinelAI Agent\…` | Na pozostałych komputerach: Agent, Updater, zainstalowana kopia instalatora Agenta, konfiguracja Agenta i jego dane uwierzytelniające chronione przez DPAPI. |
@@ -42,8 +42,8 @@ Odinstalowanie Agenta albo instalacji centralnej usuwa dostęp do dziennika Zabe
   - Agenci muszą być w tej samej podsieci co komputer centralny. Komputery w innym VLAN-ie lub łączące się przez VPN nie są obsługiwane przez domyślną regułę.
   - Windows nie stosuje tej reguły, gdy sieć jest sklasyfikowana jako **publiczna**, a tak jest domyślnie dla nowej sieci. Na komputerze centralnym ustaw w Ustawieniach Windows sieć firmową jako **prywatną**.
 - **TLS.** TLS 1.3 jest używany zawsze, gdy obie strony go obsługują. TLS 1.2 jest używany tylko wtedy, gdy jedną ze stron jest Windows 10, który nie ma TLS 1.3. Core akceptuje wyłącznie zestawy szyfrów AES-GCM (dla TLS 1.2 z wymianą kluczy ECDHE) i zrywa każde inne połączenie, zanim zostaną wymienione jakiekolwiek dane. TLS 1.1 i starsze nigdy nie są włączone.
-- **Przypinanie certyfikatu.** Instalator tworzy własny certyfikat Core (ECDSA P-256, z podpisem własnym, ważny 10 lat). Nigdzie nie jest instalowany żaden urząd certyfikacji. Każdy Agent ufa Core tylko wtedy, gdy odcisk SHA-256 jego certyfikatu dokładnie zgadza się z przypięciem z kodu rejestracyjnego. Niewłaściwy certyfikat kończy połączenie podczas uzgadniania TLS, zanim zostanie wysłany jakikolwiek token czy dane uwierzytelniające. Desktop → **Settings → Local network** pokazuje adresy, port i odcisk.
-- **Aktualizacje (opcjonalnie).** Tylko gdy administrator włączył sprawdzanie aktualizacji, komputer centralny łączy się przez HTTPS (port 443) z serwerem aktualizacji dostawcy podanym w Desktop → **Settings → Updates**. Domyślnie wyłączone.
+- **Przypinanie certyfikatu.** Instalator tworzy własny certyfikat Core (ECDSA P-256, z podpisem własnym, ważny 10 lat). Nigdzie nie jest instalowany żaden urząd certyfikacji. Każdy Agent ufa Core tylko wtedy, gdy odcisk SHA-256 jego certyfikatu dokładnie zgadza się z przypięciem z kodu dołączania. Niewłaściwy certyfikat kończy połączenie podczas uzgadniania TLS, zanim zostanie wysłany jakikolwiek token czy dane uwierzytelniające. Desktop → **Ustawienia → Sieć lokalna** pokazuje adresy, port i odcisk.
+- **Aktualizacje (opcjonalnie).** Tylko gdy administrator włączył sprawdzanie aktualizacji, komputer centralny łączy się przez HTTPS (port 443) z serwerem aktualizacji dostawcy podanym w Desktop → **Ustawienia → Aktualizacje**, aby pobrać nowe wersje i dane o podatnościach. Domyślnie wyłączone.
 - **Ruch Agenta.** Co 30 sekund Agent wysyła krótki sygnał życia. Inwentarz wysyła co sześć godzin i w ciągu kilku sekund po zmianie monitorowanego ustawienia (nie częściej niż co 30 sekund), stan zabezpieczeń co godzinę, a nowe zdarzenia w paczkach.
 
 ## 3. Wymagania
@@ -64,29 +64,30 @@ Odinstalowanie Agenta albo instalacji centralnej usuwa dostęp do dziennika Zabe
    ```
    Skrót musi się zgadzać; wielkość liter nie ma znaczenia. Jeśli się różni, nie uruchamiaj pliku.
 2. **Uruchom `SentinelAI-Setup.exe`.** Instalator nie jest podpisany cyfrowo, więc Windows SmartScreen pokaże **System Windows ochronił ten komputer**. Wybierz **Więcej informacji**, sprawdź nazwę pliku i wybierz **Uruchom mimo to**. Zatwierdź monit administratora (UAC).
-3. **Poczekaj**, aż instalator zweryfikuje osadzone paczki i sprawdzi komputer. Na komputerze, na którym jest już ta instalacja SentinelAI, instalator zamiast tego oferuje Repair, Upgrade albo Uninstall. Częściowy lub nierozpoznany stan instalacji zostanie odrzucony (kod `SETUP-OWNERSHIP`).
-4. **Wpisz otrzymany klucz pilotażowy.** Instalator sprawdza go na komputerze, bez połączenia z siecią, zanim cokolwiek zainstaluje. Klucz uszkodzony, obcy lub wygasły zostanie odrzucony z kodem `SETUP-PILOT-KEY` lub `SETUP-PILOT-EXPIRED`.
-5. **Utwórz administratora SentinelAI:** nazwę użytkownika i hasło o długości 12–1024 znaków. To konto służy do logowania w Desktopie; nie jest kontem Windows.
-6. **Pozostaw zaznaczone „Allow Agents on other computers in this local network to connect”.** Odznaczenie tworzy instalację tylko lokalną, która monitoruje wyłącznie komputer centralny.
-7. **Wybierz Install SentinelAI.** Instalator tworzy certyfikat Core, instaluje Core, tworzy administratora, uruchamia Core i dodaje regułę zapory, zapisuje klucz pilotażowy, instaluje i rejestruje własnego Agenta komputera centralnego, a następnie instaluje Desktop, Updater i skrót w menu Start. Jeśli krok się nie powiedzie, instalator zgłosi błąd i nie zgłosi sukcesu. Jedynym wyjątkiem jest klucz pilotażowy: jeśli Core nie może go zapisać, instalacja się kończy, a instalator prosi o wpisanie klucza w Desktopie.
-8. **Otwórz Desktop** z instalatora albo przez **Start → SentinelAI** i zaloguj się. **Devices** pokazuje komputer centralny.
+3. **Wybierz język** w polu **Język / Language** u góry okna; domyślnie jest to język Windows. W tym języku będą Desktop, raporty i teksty, które pisze Core. Administrator może go później zmienić w Desktopie → **Ustawienia → Język** (zmiana obowiązuje od następnego uruchomienia Desktopu).
+4. **Poczekaj**, aż instalator zweryfikuje osadzone paczki i sprawdzi komputer. Na komputerze, na którym jest już ta instalacja SentinelAI, instalator zamiast tego oferuje operacje **Naprawa**, **Aktualizacja** albo **Dezinstalacja**. Częściowy lub nierozpoznany stan instalacji zostanie odrzucony (kod `SETUP-OWNERSHIP`).
+5. **Wpisz otrzymany klucz pilotażowy.** Instalator sprawdza go na komputerze, bez połączenia z siecią, zanim cokolwiek zainstaluje. Klucz uszkodzony, obcy lub wygasły zostanie odrzucony z kodem `SETUP-PILOT-KEY` lub `SETUP-PILOT-EXPIRED`.
+6. **Utwórz administratora SentinelAI:** nazwę użytkownika i hasło o długości 12–1024 znaków. To konto służy do logowania w Desktopie; nie jest kontem Windows.
+7. **Pozostaw zaznaczone „Pozwól łączyć się Agentom z innych komputerów w tej sieci lokalnej”.** Odznaczenie tworzy instalację tylko lokalną, która monitoruje wyłącznie komputer centralny.
+8. **Wybierz Zainstaluj SentinelAI.** Instalator tworzy certyfikat Core, instaluje Core, tworzy administratora, uruchamia Core i dodaje regułę zapory, zapisuje klucz pilotażowy, instaluje i dołącza własnego Agenta komputera centralnego, a następnie instaluje Desktop, Updater i skrót w menu Start. Jeśli krok się nie powiedzie, instalator zgłosi błąd i nie zgłosi sukcesu. Wyjątki to klucz pilotażowy i język: jeśli Core nie może ich zapisać, instalacja się kończy, a instalator prosi o ich ustawienie w Desktopie.
+9. **Otwórz Desktop** z instalatora albo przez **Start → SentinelAI** i zaloguj się. **Urządzenia** pokazują komputer centralny.
 
 ## 5. Dodawanie komputerów
 
-**Utwórz kody.** W Desktopie → **Devices → Add computers** wybierz:
+**Utwórz kody.** W Desktopie → **Urządzenia → Dodaj komputery** wybierz:
 
 - adres, którego używają Agenci: nazwę komputera, zalecaną, gdy jest rozpoznawana, albo adres IPv4, który musi pozostać stały;
 - liczbę kodów (1–50);
 - ich ważność: 1 godzina, 8 godzin, 24 godziny (domyślnie), 3 dni lub 7 dni.
 
-**Copy codes** kopiuje kody do schowka, z pominięciem historii schowka. **Save codes as files** zapisuje po jednym pliku `.sentinelai-enroll` na kod, o nazwie `SentinelAI-computer-NN-….sentinelai-enroll`. Każdy kod jest tajny i rejestruje dokładnie jeden komputer; przekaż go tylko osobie instalującej ten komputer. Niewykorzystane kody są widoczne na liście z datą wygaśnięcia i można je unieważnić.
+**Kopiuj kody** kopiuje kody do schowka, z pominięciem historii schowka. **Zapisz kody jako pliki** zapisuje po jednym pliku `.sentinelai-enroll` na kod, o nazwie `SentinelAI-computer-NN-….sentinelai-enroll`. Każdy kod jest tajny i dołącza dokładnie jeden komputer; przekaż go tylko osobie instalującej ten komputer. Niewykorzystane kody są widoczne na liście z datą wygaśnięcia i można je unieważnić.
 
 **Instalacja interaktywna.** Na dodawanym komputerze:
 
 1. Sprawdź `SentinelAI-Agent-Setup.exe` z `SHA256SUMS.txt` i uruchom go (SmartScreen: **Więcej informacji → Uruchom mimo to**). Zatwierdź UAC.
-2. Wklej kod albo wybierz **Open code file...**, a potem **Install SentinelAI Agent**.
+2. U góry okna możesz wybrać **Język / Language** (dotyczy tylko tego okna). Wklej kod albo wybierz **Otwórz plik z kodem...**, a potem **Zainstaluj SentinelAI Agent**.
 3. Zanim cokolwiek zmieni, instalator łączy się z Core pod adresem z kodu, sprawdza przypięcie certyfikatu i pyta Core, czy kod jest nadal ważny.
-4. Po udanej instalacji komputer pojawia się w Desktopie → **Devices**.
+4. Po udanej instalacji komputer pojawia się w Desktopie → **Urządzenia**.
 
 **Instalacja cicha.** Uruchom z uprawnieniami administratora lub jako SYSTEM:
 
@@ -104,16 +105,16 @@ Wynik podaje kod wyjścia:
 
 | Kod | Znaczenie |
 | --- | --- |
-| 0 | Zainstalowano i zarejestrowano. |
+| 0 | Zainstalowano i dołączono. |
 | 1 | Nieoczekiwany błąd. |
 | 2 | Nieprawidłowy wiersz polecenia. |
-| 3 | To nie jest prawidłowy kod rejestracyjny. Nic nie zmieniono. |
+| 3 | To nie jest prawidłowy kod dołączania. Nic nie zmieniono. |
 | 4 | Core nieosiągalny pod adresem z kodu. Nic nie zmieniono. |
 | 5 | Certyfikat nie zgadza się z przypięciem w kodzie. Nic nie zmieniono. |
 | 6 | Kod wygasł, został użyty lub unieważniony. Nic nie zmieniono. |
 | 7 | Na tym komputerze jest już zainstalowany Agent. Nic nie zmieniono. |
 | 8 | Instalacja nie powiodła się; instalator usunął to, co zainstalował. |
-| 9 | Core nie potwierdził rejestracji; instalator usunął Agenta. Utwórz nowy kod. |
+| 9 | Core nie potwierdził dołączenia; instalator usunął Agenta. Utwórz nowy kod. |
 | 12 | Instalacja nie powiodła się, a sprzątanie nie zakończyło się: uruchom `/uninstall`, potem zainstaluj ponownie. |
 | 1603 | Instalator nie mógł się uruchomić, sprawdzić samego siebie ani przygotować chronionego obszaru roboczego. Nic nie zmieniono. |
 | 1460 | Instalator nadal działał po 30 minutach. |
@@ -137,7 +138,7 @@ exit $setup.ExitCode
 
 Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki kodów usuń, gdy komputery pojawią się w Desktopie. Najpierw przetestuj skrypt na jednym komputerze.
 
-**Przykład dla Microsoft Intune.** Każdy kod rejestruje jeden komputer, więc przy kilku komputerach utwórz osobną aplikację Win32 dla każdego z nich albo użyj skryptu podobnego do przykładu GPO.
+**Przykład dla Microsoft Intune.** Każdy kod dołącza jeden komputer, więc przy kilku komputerach utwórz osobną aplikację Win32 dla każdego z nich albo użyj skryptu podobnego do przykładu GPO.
 
 1. Zmień nazwę pliku kodu danego komputera na `code.sentinelai-enroll` i spakuj go razem z `SentinelAI-Agent-Setup.exe` w jednym folderze narzędziem Microsoft Win32 Content Prep Tool.
 2. Skonfiguruj aplikację:
@@ -150,7 +151,7 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
 
 ## 6. Usuwanie komputerów i dezinstalacja
 
-- **Usuń komputer.** W Desktopie otwórz komputer w **Devices**, wybierz **Remove computer** i potwierdź. Jego dane uwierzytelniające zostają unieważnione, więc Agent nie może już przekazywać danych, a komputer znika z Devices, Risk i raportów; jego historia zostaje zachowana. Własnego Agenta komputera centralnego nie można usunąć.
+- **Usuń komputer.** W Desktopie otwórz komputer w **Urządzeniach**, wybierz **Usuń komputer** i potwierdź. Jego dane uwierzytelniające zostają unieważnione, więc Agent nie może już przekazywać danych, a komputer znika z widoków Urządzenia i Ryzyko oraz z raportów; jego historia zostaje zachowana. Własnego Agenta komputera centralnego nie można usunąć.
 - **Odinstaluj Agenta** na tym komputerze:
   - interaktywnie: **Ustawienia → Aplikacje → Zainstalowane aplikacje** (Windows 10: **Aplikacje i funkcje**) **→ SentinelAI Agent → Odinstaluj**;
   - po cichu: `"%ProgramFiles%\SentinelAI Agent\Setup\SentinelAI-Agent-Setup.exe" /uninstall /quiet`. Kod wyjścia 0 oznacza zakończenie, 10 oznacza, że dezinstalacja się nie zakończyła (uruchom ją ponownie), a 11, że nie znaleziono Agenta zainstalowanego przez instalator Agenta.
@@ -158,33 +159,37 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
   Dezinstalacja usuwa usługę, pliki programu, dane i dane uwierzytelniające Agenta, wpis w Aplikacjach oraz zainstalowaną kopię instalatora. Gdy ta kopia sama wykonuje dezinstalację, zostaje przeniesiona do `%ProgramData%\SentinelAI-Setup`, a Windows usuwa ją przy następnym uruchomieniu komputera; foldery produktu znikają od razu, a nowa instalacja nie musi czekać.
 - **Odinstaluj instalację centralną.**
   1. Zamknij Desktop.
-  2. Otwórz **Ustawienia → Aplikacje → Zainstalowane aplikacje** (Windows 10: **Aplikacje i funkcje**) **→ SentinelAI → Odinstaluj**. Instalator otworzy się z zaznaczonym **Uninstall**; wybierz **Continue**, aby go wykonać.
-  3. **Keep security history and protected configuration** jest domyślnie zaznaczone. Dezinstalacja usuwa wtedy usługi, regułę zapory, pliki programu i skrót, a zachowuje bazę, konfigurację i certyfikat Core. Późniejszy instalator z tej samej linii wydań przywraca instalację z tą samą tożsamością, a dotychczasowi Agenci znowu jej ufają.
+  2. Otwórz **Ustawienia → Aplikacje → Zainstalowane aplikacje** (Windows 10: **Aplikacje i funkcje**) **→ SentinelAI → Odinstaluj**. Instalator otworzy się z wybraną operacją **Dezinstalacja**; wybierz **Kontynuuj**, aby ją wykonać.
+  3. **Zachowaj historię bezpieczeństwa i chronioną konfigurację** jest domyślnie zaznaczone. Dezinstalacja usuwa wtedy usługi, regułę zapory, pliki programu i skrót, a zachowuje bazę, konfigurację i certyfikat Core. Późniejszy instalator z tej samej linii wydań przywraca instalację z tą samą tożsamością, a dotychczasowi Agenci znowu jej ufają.
   4. Aby usunąć także dane, odznacz to pole i wpisz **DELETE**. Usuwa to również certyfikat i klucz Core; dotychczasowi Agenci nie połączą się już nigdy.
 
-  Konserwację może wykonać dowolne konto administratora Windows, nie tylko to, którym zainstalowano SentinelAI. Przycisk **Uninstall SentinelAI** w Desktopie, widoczny po zakończeniu pilotażu, otwiera ten sam proces w instalatorze i zamyka Desktop.
+  Konserwację może wykonać dowolne konto administratora Windows, nie tylko to, którym zainstalowano SentinelAI. Przycisk **Odinstaluj SentinelAI** w Desktopie, widoczny po zakończeniu pilotażu, otwiera ten sam proces w instalatorze i zamyka Desktop.
 
 ## 7. Klucz pilotażowy i jego wygaśnięcie
 
 - Klucz to podpisany tekst, który przesyła dostawca. Zawiera nazwę firmy oraz daty początku i końca i jest weryfikowany bez połączenia z siecią na podstawie kluczy publicznych wbudowanych w to wydanie. Nie ma limitu komputerów ani powiązania z konkretną instalacją.
-- Instalator prosi o niego podczas instalacji centralnej. Desktop → **Settings → Pilot license** pokazuje klienta, datę wygaśnięcia i liczbę pozostałych dni oraz przyjmuje nowy klucz, który przedłuża lub zastępuje obecny.
+- Instalator prosi o niego podczas instalacji centralnej. Desktop → **Ustawienia → Licencja pilotażowa** pokazuje klienta, datę wygaśnięcia i liczbę pozostałych dni oraz przyjmuje nowy klucz, który przedłuża lub zastępuje obecny.
 - Core sprawdza klucz przy wpisaniu i przy każdym odczycie stanu, korzystając z własnego zapisu czasu, więc cofnięcie zegara nie przedłuża pilotażu.
-- Na siedem dni przed końcem Desktop pokazuje „Pilot ends in N days — contact us”. Po zakończeniu **całe monitorowanie działa dalej**, a Desktop pokazuje komunikat z danymi kontaktowymi dostawcy i przyciskiem **Uninstall SentinelAI**. Oba komunikaty można ukryć do wylogowania.
+- Na siedem dni przed końcem Desktop pokazuje „Pilotaż kończy się za N dni — skontaktuj się z nami”. Po zakończeniu **całe monitorowanie działa dalej**, a Desktop pokazuje komunikat z danymi kontaktowymi dostawcy i przyciskiem **Odinstaluj SentinelAI**. Oba komunikaty można ukryć do wylogowania.
 - Klucz pilotażowy nigdy nie wyłącza funkcji bezpieczeństwa i nie daje dostępu do funkcji w chmurze.
 
 ## 8. Aktualizacje i naprawa
 
-- **Aktualizacje komputera centralnego z serwera dostawcy (opcjonalne, domyślnie wyłączone).** Jeśli Wasze wydanie ma serwer aktualizacji, Desktop → **Settings → Updates** go pokazuje:
-  - Gdy **Check the provider's update server for new versions** jest wyłączone, SentinelAI nie łączy się z internetem.
-  - Po włączeniu Core sprawdza serwer co sześć godzin (oraz po **Check now**) i pobiera nowszą wersję do `%ProgramData%\SentinelAI\Core\central-update`.
-  - **Install downloaded updates automatically at night** jest domyślnie włączone: między 02:00 a 04:00 zadanie `\SentinelAI\SentinelAI Update` (SYSTEM) weryfikuje pobraną wersję kluczem przypiętym podczas instalacji, zamyka Desktop i aktualizuje. Jeśli nowa wersja nie uruchomi się poprawnie, przywracana jest poprzednia. Wersja, której nie uda się zainstalować przez trzy noce, nie jest już próbowana automatycznie.
-  - Gdy ta opcja jest wyłączona, albo w dowolnej chwili, wybierz **Install now**: Windows poprosi o zgodę administratora, Desktop się zamknie, a instalator otworzy się z wybraną opcją **Upgrade**.
+- **Aktualizacje komputera centralnego z serwera dostawcy (opcjonalne, domyślnie wyłączone).** Jeśli Wasze wydanie ma serwer aktualizacji, Desktop → **Ustawienia → Aktualizacje** go pokazuje:
+  - Gdy **Sprawdzaj nowe wersje na serwerze aktualizacji dostawcy** jest wyłączone, SentinelAI nie łączy się z internetem.
+  - Po włączeniu Core sprawdza serwer co sześć godzin (oraz po **Sprawdź teraz**) i pobiera nowszą wersję do `%ProgramData%\SentinelAI\Core\central-update` oraz nowsze dane o podatnościach.
+  - **Instaluj pobrane aktualizacje automatycznie w nocy** jest domyślnie włączone: między 02:00 a 04:00 zadanie `\SentinelAI\SentinelAI Update` (SYSTEM) weryfikuje pobraną wersję kluczem przypiętym podczas instalacji, zamyka Desktop i aktualizuje. Jeśli nowa wersja nie uruchomi się poprawnie, przywracana jest poprzednia. Wersja, której nie uda się zainstalować przez trzy noce, nie jest już próbowana automatycznie.
+  - Gdy ta opcja jest wyłączona, albo w dowolnej chwili, wybierz **Zainstaluj teraz**: Windows poprosi o zgodę administratora, Desktop się zamknie, a instalator otworzy się z wybraną operacją **Aktualizacja**.
   - Cicha aktualizacja dla narzędzi wdrożeniowych: `SentinelAI-Setup.exe /upgrade /quiet` (kod wyjścia 0 zaktualizowano, 13 nie ma czego aktualizować, 14 Desktop jest uruchomiony, 15 nie powiodło się i przywrócono poprzednią wersję, 16 uruchom instalator interaktywnie, aby odzyskać instalację).
 - W przeciwnym razie dostawca dostarcza nowszy `SentinelAI-Setup.exe` z tej samej linii wydań, podpisany tym samym kluczem.
-- Aby **zaktualizować**, zamknij Desktop, uruchom nowszy instalator na komputerze centralnym i wybierz **Upgrade**. Instalator weryfikuje podpisaną paczkę, wymienia razem Core, Agenta komputera centralnego, Desktop i Updater, a jeśli nowa wersja nie uruchomi się poprawnie, automatycznie przywraca poprzednią. Dane, konto administratora, rejestracje, klucz pilotażowy i certyfikat Core zostają zachowane.
-- Aby **naprawić**, uruchom instalator tej samej wersji i wybierz **Repair**. Odtwarza to także regułę zapory, jeśli została usunięta lub zmieniona.
+- Aby **zaktualizować**, zamknij Desktop, uruchom nowszy instalator na komputerze centralnym i wybierz operację **Aktualizacja**. Instalator weryfikuje podpisaną paczkę, wymienia razem Core, Agenta komputera centralnego, Desktop i Updater, a jeśli nowa wersja nie uruchomi się poprawnie, automatycznie przywraca poprzednią. Dane, konto administratora, dołączone komputery, język, klucz pilotażowy i certyfikat Core zostają zachowane.
+- Aby **naprawić**, uruchom instalator tej samej wersji i wybierz operację **Naprawa**. Odtwarza to także regułę zapory, jeśli została usunięta lub zmieniona.
 - Starszy instalator pozwala tylko odinstalować; nie obniża wersji.
 - Instalacja wykonana wcześniejszym instalatorem dawała też kontu Windows, które ją zainstalowało, pełną kontrolę nad folderami Core. Pierwsza aktualizacja, naprawa lub dezinstalacja, uruchomiona przez dowolnego administratora, usuwa ten dostęp.
+- **Dane o podatnościach.** Podatności w zainstalowanych programach i w wydaniu Windows Core ocenia na podstawie podpisanych danych od dostawcy (z bazy NVD i katalogu CISA KEV); bez tych danych nie pokazuje żadnych podatności.
+  - Gdy sprawdzanie aktualizacji jest włączone, Core pobiera nowsze dane razem z aktualizacjami.
+  - W przeciwnym razie dostawca przesyła dwa pliki, `vulnerability-feed.json` i `vulnerability-feed.manifest.json`. Umieść je w jednym folderze i w Desktopie → **Ustawienia → Dane o podatnościach** wybierz **Importuj dane o podatnościach…**, a potem plik `.manifest.json`.
+  - Core przyjmuje tylko dane podpisane kluczem przypiętym podczas instalacji i nowsze od obecnych. Wyniki pokazuje Desktop → **Urządzenia** → komputer → **Podatności**, a podatności wykorzystywane w atakach oraz z krytyczną lub wysoką oceną CVSS stają się alertami. SentinelAI niczego sam nie instaluje ani nie aktualizuje w programach.
 - **Agenci na pozostałych komputerach aktualizują się automatycznie** z komputera centralnego po jego aktualizacji:
   - Każdy Agent sprawdza Core minutę po uruchomieniu, a potem co godzinę, i pobiera nowszego, podpisanego Agenta do `%ProgramData%\SentinelAI Agent\Agent\update`.
   - Zadanie harmonogramu `\SentinelAI\SentinelAI Agent Update` (SYSTEM, co godzinę i 5 minut po starcie komputera) weryfikuje go kluczem przypiętym podczas instalacji, wymienia Agenta i przywraca poprzedniego, jeśli nowy nie działa stabilnie. Wydanie wycofane trzy razy nie jest instalowane ponownie.
@@ -196,15 +201,15 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
 
 **Agent nie może się połączyć (kod wyjścia 4 albo komputer przestaje się zgłaszać)**
 - Na komputerze centralnym:
-  - Desktop → **Settings → Local network** musi pokazywać, że Agenci mogą się łączyć.
+  - Desktop → **Ustawienia → Sieć lokalna** musi pokazywać, że Agenci mogą się łączyć.
   - Sieć musi być **prywatna** lub domenowa, a nie publiczna.
-  - Reguła zapory `SentinelAI-Core-LocalNetwork` musi istnieć i być włączona. **Repair** ją odtwarza.
+  - Reguła zapory `SentinelAI-Core-LocalNetwork` musi istnieć i być włączona. **Naprawa** ją odtwarza.
   - Port 5443 nie może być zajęty przez inny program. `netsh interface ipv4 show excludedportrange protocol=tcp` pokazuje zakresy zarezerwowane przez Windows. Core dalej działa lokalnie i zapisuje w dzienniku, że nasłuch sieciowy jest wyłączony; zwolnij port i uruchom ponownie usługę „SentinelAI Local Core”.
 - Na komputerze z Agentem uruchom `Test-NetConnection <komputer centralny> -Port 5443`. Agent musi być w tej samej podsieci co komputer centralny.
 
 **Niezgodne przypięcie (kod wyjścia 5)**
 - Certyfikat komputera pod tym adresem nie jest tym z kodu. Albo kod należy do innej instalacji centralnej, albo instalację centralną zainstalowano ponownie z usunięciem danych, co tworzy nowy certyfikat.
-- Utwórz nowe kody w Desktopie i sprawdź odcisk w **Settings → Local network**. Agentów zarejestrowanych ze starym certyfikatem trzeba odinstalować i zainstalować ponownie z nowym kodem.
+- Utwórz nowe kody w Desktopie i sprawdź odcisk w **Ustawienia → Sieć lokalna**. Agentów dołączonych ze starym certyfikatem trzeba odinstalować i zainstalować ponownie z nowym kodem.
 
 **Zapora**
 - Dozwolone są tylko profile domenowy i prywatny oraz podsieć lokalna. Zapora innego producenta na komputerze centralnym wymaga równoważnej reguły dla przychodzącego TCP 5443 z podsieci lokalnej do `SentinelAI.Core.exe`.
@@ -222,7 +227,7 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
 - Instalator nie wyłącza kontroli aplikacji, trybu ograniczonego języka ani innych zabezpieczeń; jeśli go blokują, zgłasza niepowodzenie.
 
 **Agent zgłasza dziennik Zabezpieczenia jako „access denied” albo nowe zaplanowane zadania nie dają alertu**
-- Instalator daje Agentowi prawo odczytu dziennika Zabezpieczenia i włącza inspekcję tworzenia zaplanowanych zadań (sekcja 1). Na komputerze centralnym uruchom instalator i wybierz **Repair**; na innym komputerze zainstaluj Agenta ponownie.
+- Instalator daje Agentowi prawo odczytu dziennika Zabezpieczenia i włącza inspekcję tworzenia zaplanowanych zadań (sekcja 1). Na komputerze centralnym uruchom instalator i wybierz operację **Naprawa**; na innym komputerze zainstaluj Agenta ponownie.
 - Jeśli zasady grupy domeny ustawiają **Konfiguruj dostęp do dziennika** (Configure log access) dla dziennika Zabezpieczenia, dodaj tam odczyt dla `NT SERVICE\SentinelAIAgent`. Jeśli ustawiają zaawansowane zasady inspekcji, włącz tam inspekcję sukcesów dla **Inspekcja innych zdarzeń dostępu do obiektów**.
 - `auditpol /get /subcategory:{0CCE9227-69AE-11D9-BED3-505054503030}` pokazuje bieżące ustawienie w Windows w każdym języku.
 
@@ -230,7 +235,7 @@ Kody są ważne najwyżej 7 dni, więc twórz je tuż przed wdrożeniem, a pliki
 
 - **Tylko lokalnie.** Dane zostają na komputerze centralnym. Core otwiera jeden port sieciowy, tylko dla Agentów, ograniczony do podsieci lokalnej i profili prywatnego i domenowego. Administracja jest dostępna wyłącznie na samym komputerze centralnym.
 - **Silny, przypięty TLS.** TLS 1.3, a TLS 1.2 tylko na Windows 10, wyłącznie z AES-GCM. Agenci ufają Core tylko na podstawie dokładnego odcisku jego certyfikatu, a żaden urząd certyfikacji nie jest instalowany.
-- **Jednorazowe kody rejestracyjne.**
+- **Jednorazowe kody dołączania.**
   - Każdy kod jest ważny najwyżej 7 dni, a Core przechowuje tylko skrót jego tokenu.
   - Kody nigdy nie trafiają do dzienników, a instalator Agenta sprawdza przypięcie, zanim wyśle token.
   - Dane uwierzytelniające każdego Agenta są chronione przez DPAPI jego konta LocalService.
