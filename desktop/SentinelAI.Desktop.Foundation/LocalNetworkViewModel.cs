@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -7,7 +8,7 @@ public enum LocalNetworkState { NotLoaded, Loading, Ready, Unavailable }
 /// <summary>Core's local-network role for Settings: whether Agents can connect, where and with which fingerprint.</summary>
 public sealed class LocalNetworkViewModel : INotifyPropertyChanged, IDisposable
 {
-    private const string NotLoaded = "Not loaded";
+    private static string NotLoaded => T("Not loaded");
     private readonly object _gate = new();
     private readonly ILocalNetworkClient _client;
     private LocalNetworkStatus? _status;
@@ -35,11 +36,11 @@ public sealed class LocalNetworkViewModel : INotifyPropertyChanged, IDisposable
         {
             lock (_gate)
             {
-                if (_status is null) return _state == LocalNetworkState.Loading ? "Reading Core's local-network settings…" : NotLoaded;
-                if (!_status.Enabled) return "Off. This installation is local to this computer; Agents on other computers cannot connect.";
+                if (_status is null) return _state == LocalNetworkState.Loading ? T("Reading Core's local-network settings…") : NotLoaded;
+                if (!_status.Enabled) return T("Off. This installation is local to this computer; Agents on other computers cannot connect.");
                 return _status.Listening
-                    ? "On. Agents on other computers in this local network connect to Core over HTTPS."
-                    : "Configured, but Core is not listening on the local network: its certificate is unavailable or another program uses its port.";
+                    ? T("On. Agents on other computers in this local network connect to Core over HTTPS.")
+                    : T("Configured, but Core is not listening on the local network: its certificate is unavailable or another program uses its port.");
             }
         }
     }
@@ -50,13 +51,13 @@ public sealed class LocalNetworkViewModel : INotifyPropertyChanged, IDisposable
             lock (_gate)
             {
                 if (_status is null) return NotLoaded;
-                if (!_status.Enabled) return "Not applicable";
-                return _status.Addresses.Count == 0 ? "No active IPv4 address" : string.Join(Environment.NewLine, _status.Addresses);
+                if (!_status.Enabled) return T("Not applicable");
+                return _status.Addresses.Count == 0 ? T("No active IPv4 address") : string.Join(Environment.NewLine, _status.Addresses);
             }
         }
     }
-    public string PortText { get { lock (_gate) return _status is null ? NotLoaded : _status.Port?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "Not applicable"; } }
-    public string FingerprintText { get { lock (_gate) return _status is null ? NotLoaded : _status.CertificateSha256 ?? "Not applicable"; } }
+    public string PortText { get { lock (_gate) return _status is null ? NotLoaded : _status.Port?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? T("Not applicable"); } }
+    public string FingerprintText { get { lock (_gate) return _status is null ? NotLoaded : _status.CertificateSha256 ?? T("Not applicable"); } }
     public string ComputerNameText
     {
         get
@@ -135,10 +136,10 @@ public sealed class LocalNetworkViewModel : INotifyPropertyChanged, IDisposable
         _state = LocalNetworkState.Unavailable;
         _errorText = outcome switch
         {
-            LocalNetworkRequestOutcome.UntrustedConnection => "The local Core connection could not be trusted.",
-            LocalNetworkRequestOutcome.InvalidResponse or LocalNetworkRequestOutcome.Success => "Core returned invalid local-network settings. Refresh to try again.",
-            LocalNetworkRequestOutcome.TooLarge => "The local-network settings exceed the supported size.",
-            _ => "Local Core is unavailable. Restore Core, then refresh the local-network settings."
+            LocalNetworkRequestOutcome.UntrustedConnection => T("The local Core connection could not be trusted."),
+            LocalNetworkRequestOutcome.InvalidResponse or LocalNetworkRequestOutcome.Success => T("Core returned invalid local-network settings. Refresh to try again."),
+            LocalNetworkRequestOutcome.TooLarge => T("The local-network settings exceed the supported size."),
+            _ => T("Local Core is unavailable. Restore Core, then refresh the local-network settings.")
         };
     }
 

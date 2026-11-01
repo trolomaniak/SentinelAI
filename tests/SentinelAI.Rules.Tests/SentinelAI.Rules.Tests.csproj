@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../rules/SentinelAI.Rules.csproj" />
+    <ProjectReference Include="..\..\shared\localization\SentinelAI.Localization.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

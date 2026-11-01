@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -30,7 +31,7 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
     private AuthenticationState _state = AuthenticationState.Initializing;
     private string _username = string.Empty;
     private string _displayName = string.Empty;
-    private string _statusText = "Checking local administrator setup…";
+    private string _statusText = T("Checking local administrator setup…");
     private string _errorText = string.Empty;
 
     public AuthenticationViewModel(IAuthenticationClient authentication, IAdministratorSetupClient setup)
@@ -88,19 +89,19 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
             switch (state)
             {
                 case AdministratorSetupState.Required:
-                    SetState(AuthenticationState.SetupRequired, "Create your local administrator account.");
+                    SetState(AuthenticationState.SetupRequired, T("Create your local administrator account."));
                     break;
                 case AdministratorSetupState.Initialized:
-                    SetState(AuthenticationState.SignedOut, "Sign in to local Core.");
+                    SetState(AuthenticationState.SignedOut, T("Sign in to local Core."));
                     break;
                 case AdministratorSetupState.PermissionRequired:
-                    SetState(AuthenticationState.PermissionRequired, "Sign in to local Core, or use administrator permission for initial setup.");
+                    SetState(AuthenticationState.PermissionRequired, T("Sign in to local Core, or use administrator permission for initial setup."));
                     break;
                 case AdministratorSetupState.UntrustedInstallation:
-                    SetState(AuthenticationState.UntrustedInstallation, "Local Core installation unavailable.", "The local Core installation could not be trusted.");
+                    SetState(AuthenticationState.UntrustedInstallation, T("Local Core installation unavailable."), T("The local Core installation could not be trusted."));
                     break;
                 default:
-                    SetState(AuthenticationState.Unavailable, "Local Core unavailable.", "Local administrator setup could not be checked. Restore Core, then try again.");
+                    SetState(AuthenticationState.Unavailable, T("Local Core unavailable."), T("Local administrator setup could not be checked. Restore Core, then try again."));
                     break;
             }
         });
@@ -118,7 +119,7 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
         {
             if (password.Length is < 1 or > 1024)
             {
-                Apply(generation, () => SetState(AuthenticationState.SignedOut, "Sign in to local Core.", "The username or password is incorrect."));
+                Apply(generation, () => SetState(AuthenticationState.SignedOut, T("Sign in to local Core."), T("The username or password is incorrect.")));
                 return;
             }
             var result = await _authentication.SignInAsync(username, password, cancellationToken);
@@ -128,23 +129,23 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
                 if (result.Outcome == AuthenticationOutcome.Authenticated && ValidUsername(result.Username))
                 {
                     _displayName = result.Username!;
-                    SetState(AuthenticationState.SignedIn, $"Signed in as {_displayName}.");
+                    SetState(AuthenticationState.SignedIn, F("Signed in as {0}.", _displayName));
                     return;
                 }
                 _authentication.SignOut();
                 switch (result.Outcome)
                 {
                     case AuthenticationOutcome.InvalidCredentials:
-                        SetState(AuthenticationState.SignedOut, "Sign in to local Core.", "The username or password is incorrect.");
+                        SetState(AuthenticationState.SignedOut, T("Sign in to local Core."), T("The username or password is incorrect."));
                         break;
                     case AuthenticationOutcome.Throttled:
-                        SetState(AuthenticationState.SignedOut, "Sign in to local Core.", "Too many sign-in attempts. Try again later.");
+                        SetState(AuthenticationState.SignedOut, T("Sign in to local Core."), T("Too many sign-in attempts. Try again later."));
                         break;
                     case AuthenticationOutcome.UntrustedConnection:
-                        SetState(AuthenticationState.UntrustedInstallation, "Local Core connection unavailable.", "The local Core connection could not be trusted.");
+                        SetState(AuthenticationState.UntrustedInstallation, T("Local Core connection unavailable."), T("The local Core connection could not be trusted."));
                         break;
                     default:
-                        SetState(AuthenticationState.Unavailable, "Local Core unavailable.", "Local Core is unavailable. Start or restore Core, then try again.");
+                        SetState(AuthenticationState.Unavailable, T("Local Core unavailable."), T("Local Core is unavailable. Start or restore Core, then try again."));
                         break;
                 }
             });
@@ -163,7 +164,7 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
         {
             if (password.Length is < 12 or > 1024)
             {
-                Apply(generation, () => SetState(AuthenticationState.SetupRequired, "Create your local administrator account.", "Use a password with at least 12 characters."));
+                Apply(generation, () => SetState(AuthenticationState.SetupRequired, T("Create your local administrator account."), T("Use a password with at least 12 characters.")));
                 return;
             }
             var result = await _setup.InitializeAsync(username, password, cancellationToken);
@@ -174,23 +175,23 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
                 {
                     case AdministratorSetupResult.Created:
                         _authentication.SignOut();
-                        SetState(AuthenticationState.SignedOut, "Administrator created. Start local Core, then sign in.");
+                        SetState(AuthenticationState.SignedOut, T("Administrator created. Start local Core, then sign in."));
                         break;
                     case AdministratorSetupResult.AlreadyInitialized:
                         _authentication.SignOut();
-                        SetState(AuthenticationState.SignedOut, "Administrator already exists. Sign in to local Core.");
+                        SetState(AuthenticationState.SignedOut, T("Administrator already exists. Sign in to local Core."));
                         break;
                     case AdministratorSetupResult.InvalidInput:
-                        SetState(AuthenticationState.SetupRequired, "Create your local administrator account.", "Enter a valid username and a password of at least 12 characters.");
+                        SetState(AuthenticationState.SetupRequired, T("Create your local administrator account."), T("Enter a valid username and a password of at least 12 characters."));
                         break;
                     case AdministratorSetupResult.PermissionRequired:
-                        SetState(AuthenticationState.PermissionRequired, "Administrator permission is required for initial setup.");
+                        SetState(AuthenticationState.PermissionRequired, T("Administrator permission is required for initial setup."));
                         break;
                     case AdministratorSetupResult.UntrustedInstallation:
-                        SetState(AuthenticationState.UntrustedInstallation, "Local Core installation unavailable.", "The local Core installation could not be trusted.");
+                        SetState(AuthenticationState.UntrustedInstallation, T("Local Core installation unavailable."), T("The local Core installation could not be trusted."));
                         break;
                     default:
-                        SetState(AuthenticationState.Unavailable, "Local Core unavailable.", "Initial administrator setup could not complete. Restore Core, then try again.");
+                        SetState(AuthenticationState.Unavailable, T("Local Core unavailable."), T("Initial administrator setup could not complete. Restore Core, then try again."));
                         break;
                 }
             });
@@ -205,7 +206,7 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
             if (result.Status == SessionStatus.Authenticated && ValidUsername(result.Username))
             {
                 _displayName = result.Username!;
-                SetState(AuthenticationState.SignedIn, $"Signed in as {_displayName}.");
+                SetState(AuthenticationState.SignedIn, F("Signed in as {0}.", _displayName));
                 return;
             }
             _authentication.SignOut();
@@ -213,16 +214,16 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
             switch (result.Status)
             {
                 case SessionStatus.Expired:
-                    SetState(AuthenticationState.SignedOut, "Your session ended. Sign in again.", "Your session has expired. Sign in again.");
+                    SetState(AuthenticationState.SignedOut, T("Your session ended. Sign in again."), T("Your session has expired. Sign in again."));
                     break;
                 case SessionStatus.SignedOut:
-                    SetState(AuthenticationState.SignedOut, "Sign in to local Core.");
+                    SetState(AuthenticationState.SignedOut, T("Sign in to local Core."));
                     break;
                 case SessionStatus.UntrustedConnection:
-                    SetState(AuthenticationState.UntrustedInstallation, "Local Core connection unavailable.", "The local Core connection could not be trusted.");
+                    SetState(AuthenticationState.UntrustedInstallation, T("Local Core connection unavailable."), T("The local Core connection could not be trusted."));
                     break;
                 default:
-                    SetState(AuthenticationState.Unavailable, "Local Core unavailable.", "Local Core is unavailable. Restore Core, then sign in again.");
+                    SetState(AuthenticationState.Unavailable, T("Local Core unavailable."), T("Local Core is unavailable. Restore Core, then sign in again."));
                     break;
             }
         });
@@ -258,7 +259,7 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
             {
                 _authentication.SignOut();
                 _displayName = string.Empty;
-                SetState(AuthenticationState.Unavailable, "Local Core unavailable.", "The operation could not complete. Restore Core, then try again.");
+                SetState(AuthenticationState.Unavailable, T("Local Core unavailable."), T("The operation could not complete. Restore Core, then try again."));
             });
         }
         finally
@@ -304,7 +305,7 @@ public sealed class AuthenticationViewModel : INotifyPropertyChanged, IDisposabl
             _username = string.Empty;
             _displayName = string.Empty;
             _isBusy = false;
-            SetState(AuthenticationState.SignedOut, "Sign in to local Core.");
+            SetState(AuthenticationState.SignedOut, T("Sign in to local Core."));
             Notify(nameof(State), nameof(Username), nameof(DisplayName), nameof(StatusText), nameof(ErrorText),
                 nameof(IsBusy), nameof(IsSignedIn), nameof(CanSignIn), nameof(CanCreateAdministrator), nameof(RequiresElevation));
         }

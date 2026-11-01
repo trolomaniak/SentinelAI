@@ -142,7 +142,16 @@ Do it once on Windows 10 and once on Windows 11, with B enrolled and at least on
 - [ ] **Record a review** with a date after today and a note: the history shows the review and the reviewer.
 - [ ] Filters by status, treatment, residual level and **Needing attention only** select the expected records. Restart the central computer: records and history are still there.
 
-## 11. Record
+## 11. Polish version
+
+Do it once on Windows 10 and once on Windows 11.
+
+- [ ] Desktop → **Settings → Language**: choose **Polski** and **Save language**. The message asks to close and reopen SentinelAI.
+- [ ] Close Desktop (Exit Desktop if the tray is on) and open it again: sign-in, navigation and every page are in Polish, including alert titles, reasons and recommended actions, Risk explanations and the coverage caution.
+- [ ] Stop the Core service, open Desktop: it still starts in Polish (last language of this Windows user). Start Core again.
+- [ ] Switch back to **English**, reopen Desktop: everything is in English again.
+
+## 12. Record
 
 - [ ] Note any SmartScreen, Smart App Control or antivirus behavior seen on each computer.
 - [ ] Note anything the customer documents describe differently from what you saw, and correct the documents before release.

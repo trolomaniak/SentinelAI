@@ -9,6 +9,11 @@ public partial class SettingsView : UserControl
     public SettingsView() => InitializeComponent();
     private LicenseViewModel? Model => DataContext as LicenseViewModel;
 
+    private async void OnSaveLanguage(object sender, RoutedEventArgs e)
+    {
+        if (Window.GetWindow(this) is MainWindow { LanguageSettings: { CanSave: true } language }) await language.SaveAsync();
+    }
+
     private async void OnRefreshLicense(object sender, RoutedEventArgs e)
     {
         if (Window.GetWindow(this) is MainWindow { Pilot: { CanRefresh: true } pilot }) _ = pilot.RefreshAsync();

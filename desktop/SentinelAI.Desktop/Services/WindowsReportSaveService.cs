@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using Microsoft.Win32;
 using SentinelAI.Desktop.Foundation;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Services;
 
@@ -14,10 +15,10 @@ public sealed class WindowsReportSaveService(Func<Window?> owner) : IReportSaveS
         if (window is null || !window.Dispatcher.CheckAccess()) return new(ReportSaveOutcome.Failed);
         var dialog = new SaveFileDialog
         {
-            Title = "Save security report",
+            Title = T("Save security report"),
             FileName = document.SuggestedFileName,
             DefaultExt = ".html",
-            Filter = "HTML security report (*.html)|*.html",
+            Filter = T("HTML security report (*.html)|*.html"),
             AddExtension = true,
             OverwritePrompt = true,
             CheckPathExists = true,

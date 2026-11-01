@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using SentinelAI.Contracts.Ai;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -20,7 +21,7 @@ public sealed class AiExplanationViewModel : INotifyPropertyChanged, IDisposable
     private bool _cloudRequestsEnabled;
     private AiExplanation? _analysis;
     private AiExplanationState _state;
-    private string _statusText = "Select a supported local alert to request AI assistive analysis.";
+    private string _statusText = T("Select a supported local alert to request AI assistive analysis.");
     private string _errorText = string.Empty;
     private long _generation;
     private Pending? _pending;
@@ -103,7 +104,7 @@ public sealed class AiExplanationViewModel : INotifyPropertyChanged, IDisposable
             var pending = new Pending(++_generation);
             _pending = pending;
             _state = AiExplanationState.Requesting;
-            _statusText = "Requesting AI assistive analysis through Core… Local security functions remain available.";
+            _statusText = T("Requesting AI assistive analysis through Core… Local security functions remain available.");
             NotifyAll();
             _ = ExplainCoreAsync(pending, _alertId!.Value);
             return pending.Task;
@@ -135,7 +136,7 @@ public sealed class AiExplanationViewModel : INotifyPropertyChanged, IDisposable
                         SuggestedRemediation = Array.AsReadOnly(analysis.SuggestedRemediation.ToArray())
                     };
                     _state = AiExplanationState.Ready;
-                    _statusText = "AI suggestions require administrator review. Confidence is qualitative, not a detection probability.";
+                    _statusText = T("AI suggestions require administrator review. Confidence is qualitative, not a detection probability.");
                     _errorText = string.Empty;
                 }
                 else SetFailureLocked(result.Outcome);
@@ -168,16 +169,16 @@ public sealed class AiExplanationViewModel : INotifyPropertyChanged, IDisposable
             outcome == AiExplanationOutcome.Unsupported ? AiExplanationState.Unsupported : AiExplanationState.Unavailable;
         if (outcome == AiExplanationOutcome.Disabled) _permitted = false;
         if (outcome is AiExplanationOutcome.Unsupported or AiExplanationOutcome.NotFound) _supported = false;
-        _statusText = "AI analysis was not produced. Local alert, risk and monitoring functions remain available.";
+        _statusText = T("AI analysis was not produced. Local alert, risk and monitoring functions remain available.");
         _errorText = outcome switch
         {
-            AiExplanationOutcome.Disabled => "Core does not currently permit cloud AI. Check licensing; Safe Mode preserves local security functions.",
-            AiExplanationOutcome.Unsupported => "Core cannot explain this alert's supported evidence.",
-            AiExplanationOutcome.NotFound => "The selected alert is no longer available. Refresh local alerts.",
-            AiExplanationOutcome.Throttled => "AI requests are temporarily limited. Wait before explicitly trying again.",
-            AiExplanationOutcome.UntrustedConnection => "The local Core connection could not be trusted.",
-            AiExplanationOutcome.InvalidResponse or AiExplanationOutcome.Success => "Core returned invalid AI analysis. No suggestions are shown.",
-            _ => "AI is unavailable or not configured. Restore availability, then explicitly try again."
+            AiExplanationOutcome.Disabled => T("Core does not currently permit cloud AI. Check licensing; Safe Mode preserves local security functions."),
+            AiExplanationOutcome.Unsupported => T("Core cannot explain this alert's supported evidence."),
+            AiExplanationOutcome.NotFound => T("The selected alert is no longer available. Refresh local alerts."),
+            AiExplanationOutcome.Throttled => T("AI requests are temporarily limited. Wait before explicitly trying again."),
+            AiExplanationOutcome.UntrustedConnection => T("The local Core connection could not be trusted."),
+            AiExplanationOutcome.InvalidResponse or AiExplanationOutcome.Success => T("Core returned invalid AI analysis. No suggestions are shown."),
+            _ => T("AI is unavailable or not configured. Restore availability, then explicitly try again.")
         };
     }
 
@@ -187,32 +188,32 @@ public sealed class AiExplanationViewModel : INotifyPropertyChanged, IDisposable
         if (_alertId is null)
         {
             _state = AiExplanationState.NoAlert;
-            _statusText = "Select a supported local alert to request AI assistive analysis.";
+            _statusText = T("Select a supported local alert to request AI assistive analysis.");
         }
         else if (!_supported)
         {
             _state = AiExplanationState.Unsupported;
-            _statusText = "AI explanation is unavailable for this alert's rule or evidence. Local alert details remain available.";
+            _statusText = T("AI explanation is unavailable for this alert's rule or evidence. Local alert details remain available.");
         }
         else if (!_cloudRequestsEnabled)
         {
             _state = AiExplanationState.Disabled;
-            _statusText = "Cloud AI requests are turned off in this Desktop session. Enable them in Settings before explicitly requesting an explanation.";
+            _statusText = T("Cloud AI requests are turned off in this Desktop session. Enable them in Settings before explicitly requesting an explanation.");
         }
         else if (_permitted is null)
         {
             _state = AiExplanationState.AvailabilityUnknown;
-            _statusText = "Cloud AI permission has not been verified. Refresh licensing before requesting an explanation.";
+            _statusText = T("Cloud AI permission has not been verified. Refresh licensing before requesting an explanation.");
         }
         else if (_permitted == false)
         {
             _state = AiExplanationState.Disabled;
-            _statusText = "Cloud AI is not permitted by the current license. Safe Mode preserves local security functions.";
+            _statusText = T("Cloud AI is not permitted by the current license. Safe Mode preserves local security functions.");
         }
         else
         {
             _state = AiExplanationState.NotRequested;
-            _statusText = "Explain with AI sends only this stored alert's minimized supported context through Core. No request starts automatically.";
+            _statusText = T("Explain with AI sends only this stored alert's minimized supported context through Core. No request starts automatically.");
         }
     }
 

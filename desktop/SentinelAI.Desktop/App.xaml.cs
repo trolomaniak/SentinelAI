@@ -1,7 +1,10 @@
+using System.Globalization;
 using System.Reflection;
 using System.Windows;
 using SentinelAI.Desktop.Foundation;
 using SentinelAI.Desktop.Services;
+using SentinelAI.Localization;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop;
 
@@ -21,6 +24,7 @@ public partial class App : Application
     private VulnerabilityFeedViewModel? _vulnerabilityFeed;
     private DeviceVulnerabilitiesViewModel? _deviceVulnerabilities;
     private RiskRegisterViewModel? _riskRegister;
+    private LanguageSettingsViewModel? _language;
     private AiExplanationViewModel? _aiExplanation;
     private WindowsDesktopInstance? _instance;
     private WindowsServiceStatusModel? _serviceStatus;
@@ -30,6 +34,10 @@ public partial class App : Application
     {
         base.OnStartup(e);
         ICoreClient? client = null;
+        // The installation language, before any window: Core's answer, else the last one seen, else Windows' language.
+        var languageCache = new WindowsLanguageCache();
+        using (var languageSource = new HttpCoreClient())
+            Localizer.Use(await DesktopLanguage.ResolveAsync(languageSource.GetLanguageAsync, languageCache, CultureInfo.CurrentUICulture, CancellationToken.None));
         try
         {
             if (e.Args.Length != 0)
@@ -45,7 +53,7 @@ public partial class App : Application
                 if (await _instance.ActivateExistingAsync()) Shutdown();
                 else
                 {
-                    MessageBox.Show("SentinelAI is already running, but its window could not be opened. Wait for it to respond or close it, then try again.",
+                    MessageBox.Show(T("SentinelAI is already running, but its window could not be opened. Wait for it to respond or close it, then try again."),
                         "SentinelAI", MessageBoxButton.OK, MessageBoxImage.Information);
                     Shutdown(1);
                 }
@@ -75,6 +83,7 @@ public partial class App : Application
             // TASK-032: business risks; Core validates, versions and keeps their history.
             _riskRegister = new RiskRegisterViewModel((IRiskRegisterClient)authenticationClient, (IDevicesClient)authenticationClient,
                 (IAlertsClient)authenticationClient);
+            _language = new LanguageSettingsViewModel((ILanguageSettingsClient)authenticationClient, languageCache, Localizer.Current);
             _aiExplanation = new AiExplanationViewModel((IAiExplanationClient)authenticationClient);
             var assembly = typeof(App).Assembly;
             var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -86,7 +95,7 @@ public partial class App : Application
             _serviceStatus = new WindowsServiceStatusModel();
             var window = new MainWindow(_shell, _authentication, _devices, _alerts, _risk, _reports, _license, _aiExplanation,
                 integration, _serviceStatus, _localNetwork, _computerEnrollment, _pilot, _centralUpdate, _vulnerabilityFeed, _deviceVulnerabilities,
-                _riskRegister);
+                _riskRegister, _language);
             MainWindow = window;
             _tray = new WindowsDesktopTray(window, integration, _serviceStatus, OpenSentinelAi, () => Shutdown());
             window.DesktopTray = _tray;
@@ -99,7 +108,7 @@ public partial class App : Application
                 _shell.Dispose();
             else
                 client?.Dispose();
-            MessageBox.Show("SentinelAI could not start. Close the application and try again.",
+            MessageBox.Show(T("SentinelAI could not start. Close the application and try again."),
                 "SentinelAI", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }

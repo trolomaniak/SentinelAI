@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -15,13 +16,13 @@ public sealed record UnusedCodeRow(Guid Id, string ExpiresText);
 // next batch, sign-out or session expiry; Desktop never logs or persists them except where the administrator saves them.
 public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDisposable
 {
-    public const string SecretNotice = "Each code enrolls one computer and is a secret. Give it only to the person installing SentinelAI Agent on that computer.";
-    public const string CentralComputerNotice = "This is the central computer's own Agent, which is part of the SentinelAI installation. It cannot be removed here.";
-    public const string AddressAdvice = "Agents keep using the address in their code. Prefer the computer name, or give this computer a fixed IP address.";
+    public static string SecretNotice => T("Each code enrolls one computer and is a secret. Give it only to the person installing SentinelAI Agent on that computer.");
+    public static string CentralComputerNotice => T("This is the central computer's own Agent, which is part of the SentinelAI installation. It cannot be removed here.");
+    public static string AddressAdvice => T("Agents keep using the address in their code. Prefer the computer name, or give this computer a fixed IP address.");
     public static readonly IReadOnlyList<int> CountChoices = Enumerable.Range(1, 50).ToArray();
     public static readonly IReadOnlyList<ValidityChoice> ValidityChoices =
     [
-        new(1, "1 hour"), new(8, "8 hours"), new(24, "24 hours"), new(72, "3 days"), new(168, "7 days")
+        new(1, T("1 hour")), new(8, T("8 hours")), new(24, T("24 hours")), new(72, T("3 days")), new(168, T("7 days"))
     ];
 
     private readonly IComputerEnrollmentClient _client;
@@ -96,10 +97,10 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
                 _addresses = value is null ? [] : value.Addresses.Select(Describe).ToArray();
                 _selectedAddress = _addresses.FirstOrDefault(address => address.Value == value?.RecommendedAddress) ?? _addresses.FirstOrDefault();
                 _unused = unused?.Value is { } list ? list.Select(code => new UnusedCodeRow(code.Id, ExpiryText(code.ExpiresUtc))).ToArray() : [];
-                _statusText = options.Outcome != ComputerEnrollmentOutcome.Success ? "Computer enrollment is unavailable. Try again."
-                    : value is not { Available: true } ? "Agents on other computers cannot connect: this installation is local to this computer only."
-                    : !value.Listening ? "Core is not listening on the local network right now. Codes work once it listens again."
-                    : _unused.Count == 0 ? "No unused codes." : $"{_unused.Count.ToString(CultureInfo.CurrentCulture)} unused codes.";
+                _statusText = options.Outcome != ComputerEnrollmentOutcome.Success ? T("Computer enrollment is unavailable. Try again.")
+                    : value is not { Available: true } ? T("Agents on other computers cannot connect: this installation is local to this computer only.")
+                    : !value.Listening ? T("Core is not listening on the local network right now. Codes work once it listens again.")
+                    : _unused.Count == 0 ? T("No unused codes.") : F("{0} unused codes.", _unused.Count);
                 _errorText = "";
             }
         }
@@ -131,8 +132,8 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
                     _errorText = "";
                 }
                 else _errorText = issued.Outcome == ComputerEnrollmentOutcome.Conflict
-                    ? "This installation is local to this computer only, so no codes can be created."
-                    : "The codes could not be created. Try again.";
+                    ? T("This installation is local to this computer only, so no codes can be created.")
+                    : T("The codes could not be created. Try again.");
             }
         }
         catch (OperationCanceledException) { return; }
@@ -151,7 +152,7 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
             {
                 if (generation != _generation) return;
                 _issued = _issued.Where(row => row.Id != id).ToArray();
-                _errorText = outcome is ComputerEnrollmentOutcome.Success or ComputerEnrollmentOutcome.NotFound ? "" : "The code could not be revoked. Try again.";
+                _errorText = outcome is ComputerEnrollmentOutcome.Success or ComputerEnrollmentOutcome.NotFound ? "" : T("The code could not be revoked. Try again.");
             }
         }
         catch (OperationCanceledException) { return; }
@@ -173,7 +174,7 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
                 var removed = outcome is ComputerEnrollmentOutcome.Success or ComputerEnrollmentOutcome.NotFound;
                 _errorText = removed ? ""
                     : outcome == ComputerEnrollmentOutcome.Conflict ? CentralComputerNotice
-                    : "The computer could not be removed. Try again.";
+                    : T("The computer could not be removed. Try again.");
                 return removed;
             }
         }
@@ -236,7 +237,7 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
             {
                 if (generation != _generation || unused.Value is not { } list) return;
                 _unused = list.Select(code => new UnusedCodeRow(code.Id, ExpiryText(code.ExpiresUtc))).ToArray();
-                _statusText = _unused.Count == 0 ? "No unused codes." : $"{_unused.Count.ToString(CultureInfo.CurrentCulture)} unused codes.";
+                _statusText = _unused.Count == 0 ? T("No unused codes.") : F("{0} unused codes.", _unused.Count);
             }
         }
         catch (OperationCanceledException) { }
@@ -279,12 +280,13 @@ public sealed class ComputerEnrollmentViewModel : INotifyPropertyChanged, IDispo
     }
 
     private string ExpiryText(DateTimeOffset expiresUtc) =>
-        "Expires " + expiresUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) +
-        (expiresUtc - _time.GetUtcNow() < TimeSpan.FromHours(1) ? " (soon)" : "");
+        expiresUtc - _time.GetUtcNow() < TimeSpan.FromHours(1)
+            ? F("Expires {0} (soon)", expiresUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture))
+            : F("Expires {0}", expiresUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture));
 
     private static EnrollmentAddressChoice Describe(EnrollmentAddressOption option) => new(option.Value,
-        option.IsName ? option.Value + (option.Resolves ? " (computer name, recommended)" : " (computer name, does not resolve yet)")
-                      : option.Value + " (IP address; keep it fixed)");
+        option.IsName ? option.Value + (option.Resolves ? T(" (computer name, recommended)") : T(" (computer name, does not resolve yet)"))
+                      : option.Value + T(" (IP address; keep it fixed)"));
 
     private void Notify() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
 }

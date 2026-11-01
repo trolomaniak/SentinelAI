@@ -1,5 +1,6 @@
 using System.Globalization;
 using SentinelAI.Scoring;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -36,25 +37,25 @@ public sealed class OrganizationRiskPresentation
         ArgumentNullException.ThrowIfNull(page);
         var organization = page.Organization;
         Score = organization.Score;
-        Explanation = organization.Explanation;
+        Explanation = T(organization.Explanation);
         Facts = RiskText.Facts(
-            new("Organization score", RiskText.Number(Score)),
-            new("Endpoints", RiskText.Number(organization.EndpointCount)),
-            new("Observed endpoints", RiskText.Number(organization.ObservedEndpointCount)),
-            new("Missing inventory", RiskText.Number(organization.MissingInventoryCount)),
-            new("Unknown signal coverage", RiskText.Number(organization.UnknownSignalCount)),
-            new("Partial signal coverage", RiskText.Number(organization.PartialSignalCount)),
-            new("Stale inventory", RiskText.Number(organization.StaleInventoryCount)),
-            new("Open alerts", RiskText.Number(organization.AlertStatusCounts.Open)),
-            new("Investigating alerts", RiskText.Number(organization.AlertStatusCounts.Investigating)),
-            new("Accepted alerts", RiskText.Number(organization.AlertStatusCounts.Accepted)),
-            new("Resolved alerts", RiskText.Number(organization.AlertStatusCounts.Resolved)),
-            new("Highest-risk endpoint count", RiskText.Number(organization.HighestRiskEndpointCount)),
-            new("Highest-risk endpoint IDs", RiskText.Join(organization.HighestRiskEndpointIds.Select(id => id.ToString("D")))),
-            new("Highest-risk IDs truncated", organization.HighestRiskEndpointIdsTruncated.ToString()),
-            new("Method", organization.Method),
-            new("Evaluated", RiskText.Timestamp(organization.EvaluatedUtc)),
-            new("Score interpretation", RiskText.Interpretation));
+            new(T("Organization score"), RiskText.Number(Score)),
+            new(T("Endpoints"), RiskText.Number(organization.EndpointCount)),
+            new(T("Observed endpoints"), RiskText.Number(organization.ObservedEndpointCount)),
+            new(T("Missing inventory"), RiskText.Number(organization.MissingInventoryCount)),
+            new(T("Unknown signal coverage"), RiskText.Number(organization.UnknownSignalCount)),
+            new(T("Partial signal coverage"), RiskText.Number(organization.PartialSignalCount)),
+            new(T("Stale inventory"), RiskText.Number(organization.StaleInventoryCount)),
+            new(T("Open alerts"), RiskText.Number(organization.AlertStatusCounts.Open)),
+            new(T("Investigating alerts"), RiskText.Number(organization.AlertStatusCounts.Investigating)),
+            new(T("Accepted alerts"), RiskText.Number(organization.AlertStatusCounts.Accepted)),
+            new(T("Resolved alerts"), RiskText.Number(organization.AlertStatusCounts.Resolved)),
+            new(T("Highest-risk endpoint count"), RiskText.Number(organization.HighestRiskEndpointCount)),
+            new(T("Highest-risk endpoint IDs"), RiskText.Join(organization.HighestRiskEndpointIds.Select(id => id.ToString("D")))),
+            new(T("Highest-risk IDs truncated"), organization.HighestRiskEndpointIdsTruncated.ToString()),
+            new(T("Method"), T(organization.Method)),
+            new(T("Evaluated"), RiskText.Timestamp(organization.EvaluatedUtc)),
+            new(T("Score interpretation"), RiskText.Interpretation));
         PolicyFacts = RiskText.PolicyFacts(page.Policy, page.InventoryFreshForHours);
     }
 
@@ -71,32 +72,32 @@ public sealed class RiskContributionRow
     {
         ArgumentNullException.ThrowIfNull(contribution);
         Source = contribution;
-        Title = alert?.Title ?? "Unknown / not reported";
-        Reason = alert?.Reason ?? "Unknown / not reported";
+        Title = alert?.Title is { } title ? T(title) : T("Unknown / not reported");
+        Reason = alert?.Reason is { } reason ? T(reason) : T("Unknown / not reported");
         Factors = RiskText.Facts(
-            new("Alert ID", AlertId.ToString("D")),
-            new("Rule ID", RuleId),
-            new("Title", Title),
-            new("Reason", Reason),
-            new("Severity", Severity),
-            new("Status", Status),
-            new("Last positive observation", LastObservedText),
-            new("Age (days)", RiskText.Number(Source.AgeDays)),
-            new("Age band", Source.AgeBand),
-            new("Future timestamp clamped", Source.FutureTimestampClamped.ToString()),
-            new("Severity points", RiskText.Number(Source.SeverityPoints)),
-            new("Confidence weight", RiskText.Number(Source.DetectionConfidence)),
-            new("Confidence source", Source.ConfidenceSource),
-            new("Asset multiplier", RiskText.Number(Source.AssetCriticalityMultiplier)),
-            new("Exposure multiplier", RiskText.Number(Source.ExposureMultiplier)),
-            new("Age multiplier", RiskText.Number(Source.AgeMultiplier)),
-            new("Remaining risk multiplier", RiskText.Number(Source.RemainingRiskMultiplier)),
-            new("Points before status effect", RiskText.Number(Source.PointsBeforeMitigation)),
-            new("Status reduction", RiskText.Number(Source.MitigationReduction)),
-            new("Contribution", ContributionText),
-            new("Correlation group", Source.CorrelationGroup ?? "None"),
-            new("Latest snapshot confirmed", Source.LatestSnapshotConfirmed.ToString()),
-            new("Correlation eligible", Source.CorrelationEligible.ToString()));
+            new(T("Alert ID"), AlertId.ToString("D")),
+            new(T("Rule ID"), RuleId),
+            new(T("Title"), Title),
+            new(T("Reason"), Reason),
+            new(T("Severity"), Severity),
+            new(T("Status"), Status),
+            new(T("Last positive observation"), LastObservedText),
+            new(T("Age (days)"), RiskText.Number(Source.AgeDays)),
+            new(T("Age band"), Source.AgeBand),
+            new(T("Future timestamp clamped"), Source.FutureTimestampClamped.ToString()),
+            new(T("Severity points"), RiskText.Number(Source.SeverityPoints)),
+            new(T("Confidence weight"), RiskText.Number(Source.DetectionConfidence)),
+            new(T("Confidence source"), Source.ConfidenceSource),
+            new(T("Asset multiplier"), RiskText.Number(Source.AssetCriticalityMultiplier)),
+            new(T("Exposure multiplier"), RiskText.Number(Source.ExposureMultiplier)),
+            new(T("Age multiplier"), RiskText.Number(Source.AgeMultiplier)),
+            new(T("Remaining risk multiplier"), RiskText.Number(Source.RemainingRiskMultiplier)),
+            new(T("Points before status effect"), RiskText.Number(Source.PointsBeforeMitigation)),
+            new(T("Status reduction"), RiskText.Number(Source.MitigationReduction)),
+            new(T("Contribution"), ContributionText),
+            new(T("Correlation group"), Source.CorrelationGroup ?? T("None")),
+            new(T("Latest snapshot confirmed"), Source.LatestSnapshotConfirmed.ToString()),
+            new(T("Correlation eligible"), Source.CorrelationEligible.ToString()));
     }
 
     public AlertRiskContribution Source { get; }
@@ -123,34 +124,34 @@ public sealed class EndpointRiskPresentation
         Score = detail.Risk.Score;
         RawScore = detail.Risk.RawScore;
         Saturated = detail.Risk.Saturated;
-        Explanation = detail.Risk.Explanation;
+        Explanation = T(detail.Risk.Explanation);
         var risk = detail.Risk;
         Facts = RiskText.Facts(
-            new("Endpoint", Name),
-            new("Endpoint ID", EndpointId.ToString("D")),
-            new("Endpoint score", RiskText.Number(Score)),
-            new("Raw score", RiskText.Number(RawScore)),
-            new("Saturated", Saturated.ToString()),
-            new("Evaluated", RiskText.Timestamp(risk.CalculatedUtc)),
-            new("Asset criticality", risk.Context.AssetCriticality),
-            new("Asset criticality source", risk.Context.AssetCriticalitySource),
-            new("Asset criticality multiplier", RiskText.Number(risk.AssetCriticalityMultiplier)),
-            new("Declared exposure", risk.Context.Exposure),
-            new("Exposure source", risk.Context.ExposureSource),
-            new("Exposure multiplier", RiskText.Number(risk.ExposureMultiplier)),
-            new("Correlation groups", RiskText.Join(risk.CorrelatedGroups)),
-            new("Correlation base bonus", RiskText.Number(risk.CorrelationBaseBonus)),
-            new("Correlation bonus", RiskText.Number(risk.CorrelationBonus)),
-            new("Latest scoring inventory", RiskText.Timestamp(risk.Context.LatestInventoryUtc)),
-            new("Score interpretation", RiskText.Interpretation));
+            new(T("Endpoint"), Name),
+            new(T("Endpoint ID"), EndpointId.ToString("D")),
+            new(T("Endpoint score"), RiskText.Number(Score)),
+            new(T("Raw score"), RiskText.Number(RawScore)),
+            new(T("Saturated"), Saturated.ToString()),
+            new(T("Evaluated"), RiskText.Timestamp(risk.CalculatedUtc)),
+            new(T("Asset criticality"), risk.Context.AssetCriticality),
+            new(T("Asset criticality source"), risk.Context.AssetCriticalitySource),
+            new(T("Asset criticality multiplier"), RiskText.Number(risk.AssetCriticalityMultiplier)),
+            new(T("Declared exposure"), risk.Context.Exposure),
+            new(T("Exposure source"), risk.Context.ExposureSource),
+            new(T("Exposure multiplier"), RiskText.Number(risk.ExposureMultiplier)),
+            new(T("Correlation groups"), RiskText.Join(risk.CorrelatedGroups)),
+            new(T("Correlation base bonus"), RiskText.Number(risk.CorrelationBaseBonus)),
+            new(T("Correlation bonus"), RiskText.Number(risk.CorrelationBonus)),
+            new(T("Latest scoring inventory"), RiskText.Timestamp(risk.Context.LatestInventoryUtc)),
+            new(T("Score interpretation"), RiskText.Interpretation));
         CoverageFacts = RiskText.Facts(
-            new("Inventory state", detail.Coverage.InventoryState),
-            new("Signal coverage", detail.Coverage.SignalCoverage),
-            new("Known rule signals", RiskText.Number(detail.Coverage.KnownRuleSignals)),
-            new("Total rule signals", RiskText.Number(detail.Coverage.TotalRuleSignals)),
-            new("Inventory collected", RiskText.Timestamp(detail.InventoryCollectedUtc)),
-            new("Inventory freshness (hours)", RiskText.Number(detail.InventoryFreshForHours)),
-            new("Coverage caution", detail.Coverage.Caution));
+            new(T("Inventory state"), detail.Coverage.InventoryState),
+            new(T("Signal coverage"), detail.Coverage.SignalCoverage),
+            new(T("Known rule signals"), RiskText.Number(detail.Coverage.KnownRuleSignals)),
+            new(T("Total rule signals"), RiskText.Number(detail.Coverage.TotalRuleSignals)),
+            new(T("Inventory collected"), RiskText.Timestamp(detail.InventoryCollectedUtc)),
+            new(T("Inventory freshness (hours)"), RiskText.Number(detail.InventoryFreshForHours)),
+            new(T("Coverage caution"), T(detail.Coverage.Caution)));
         PolicyFacts = RiskText.PolicyFacts(detail.Policy, detail.InventoryFreshForHours);
         var alerts = detail.Alerts.ToDictionary(alert => alert.AlertId);
         Contributions = Array.AsReadOnly(risk.Contributions.Select(contribution =>
@@ -171,38 +172,38 @@ public sealed class EndpointRiskPresentation
 
 internal static class RiskText
 {
-    internal const string Interpretation = "Scores prioritize reported findings. A zero score does not establish effective protection or telemetry completeness.";
+    internal static string Interpretation => T("Scores prioritize reported findings. A zero score does not establish effective protection or telemetry completeness.");
     internal static string Number(decimal value) => value.ToString(CultureInfo.InvariantCulture);
     internal static string Timestamp(DateTimeOffset? value) => value?.ToUniversalTime()
-        .ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "Unknown / not reported";
+        .ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? T("Unknown / not reported");
     internal static string Join(IEnumerable<string> values)
     {
         var text = string.Join(", ", values);
-        return text.Length == 0 ? "None" : text;
+        return text.Length == 0 ? T("None") : text;
     }
     internal static IReadOnlyList<DisplayFact> Facts(params DisplayFact[] facts) => Array.AsReadOnly(facts);
     internal static IReadOnlyList<DisplayFact> PolicyFacts(ScoringPolicySnapshot policy, int inventoryFreshForHours)
     {
         var facts = new List<DisplayFact>
         {
-            new("Policy version", policy.Version),
-            new("Maximum score", Number(policy.MaximumScore)),
-            new("Inventory freshness (hours)", Number(inventoryFreshForHours)),
-            new("Fresh observation age (days)", Number(policy.FreshForDays)),
-            new("Aging observation age (days)", Number(policy.AgingForDays)),
-            new("Aging multiplier", Number(policy.AgingMultiplier)),
-            new("Old multiplier", Number(policy.OldMultiplier)),
-            new("Default confidence weight", Number(policy.DefaultConfidence)),
-            new("Correlation points per extra group", Number(policy.CorrelationPointsPerExtraGroup)),
-            new("Maximum correlation base bonus", Number(policy.MaximumCorrelationBaseBonus))
+            new(T("Policy version"), policy.Version),
+            new(T("Maximum score"), Number(policy.MaximumScore)),
+            new(T("Inventory freshness (hours)"), Number(inventoryFreshForHours)),
+            new(T("Fresh observation age (days)"), Number(policy.FreshForDays)),
+            new(T("Aging observation age (days)"), Number(policy.AgingForDays)),
+            new(T("Aging multiplier"), Number(policy.AgingMultiplier)),
+            new(T("Old multiplier"), Number(policy.OldMultiplier)),
+            new(T("Default confidence weight"), Number(policy.DefaultConfidence)),
+            new(T("Correlation points per extra group"), Number(policy.CorrelationPointsPerExtraGroup)),
+            new(T("Maximum correlation base bonus"), Number(policy.MaximumCorrelationBaseBonus))
         };
-        Add("Severity points", policy.SeverityPoints);
-        Add("Confidence override", policy.ConfidenceByRule);
-        Add("Asset multiplier", policy.AssetMultipliers);
-        Add("Exposure multiplier", policy.ExposureMultipliers);
-        Add("Remaining risk", policy.RemainingRiskByStatus);
+        Add(T("Severity points"), policy.SeverityPoints);
+        Add(T("Confidence override"), policy.ConfidenceByRule);
+        Add(T("Asset multiplier"), policy.AssetMultipliers);
+        Add(T("Exposure multiplier"), policy.ExposureMultipliers);
+        Add(T("Remaining risk"), policy.RemainingRiskByStatus);
         facts.AddRange(policy.CorrelationGroupsByRule.OrderBy(pair => pair.Key, StringComparer.Ordinal)
-            .Select(pair => new DisplayFact($"Correlation group: {pair.Key}", pair.Value)));
+            .Select(pair => new DisplayFact(F("Correlation group: {0}", pair.Key), T(pair.Value))));
         return Array.AsReadOnly(facts.ToArray());
 
         void Add(string label, IReadOnlyDictionary<string, decimal> values) =>

@@ -1,4 +1,4 @@
-<Window x:Class="SentinelAI.Desktop.MainWindow"
+<Window xmlns:loc="clr-namespace:SentinelAI.Desktop.Localization" x:Class="SentinelAI.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:SentinelAI.Desktop.Views"
@@ -54,7 +54,7 @@
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          KeyboardNavigation.TabNavigation="Once"
                          AutomationProperties.AutomationId="NavigationList"
-                         AutomationProperties.Name="Workspace navigation">
+                         AutomationProperties.Name="{loc:T 'Workspace navigation'}">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <TextBlock Text="{Binding Title}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
@@ -63,7 +63,7 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
                 <StackPanel Grid.Row="2" Margin="20,12,20,20">
-                    <TextBlock Text="Local security workspace" FontSize="12" TextWrapping="Wrap"
+                    <TextBlock Text="{loc:T 'Local security workspace'}" FontSize="12" TextWrapping="Wrap"
                                Foreground="{DynamicResource NavigationSecondaryBrush}" />
                     <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0"
                                Foreground="{DynamicResource NavigationSecondaryBrush}"
@@ -98,7 +98,7 @@
             <Border x:Name="PilotNotice" Margin="0,0,0,16" Padding="16" CornerRadius="8" BorderThickness="2"
                     DataContext="{Binding Pilot, RelativeSource={RelativeSource AncestorType=Window}}"
                     Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource AccentBrush}"
-                    AutomationProperties.AutomationId="PilotNotice" AutomationProperties.Name="Pilot license notice">
+                    AutomationProperties.AutomationId="PilotNotice" AutomationProperties.Name="{loc:T 'Pilot license notice'}">
                 <Border.Style>
                     <Style TargetType="Border">
                         <Setter Property="Visibility" Value="Collapsed" />
@@ -117,7 +117,7 @@
                     <TextBlock Text="{Binding ContactText}" TextWrapping="Wrap" Margin="0,8,0,0" FontWeight="SemiBold"
                                AutomationProperties.AutomationId="PilotNoticeContact" />
                     <WrapPanel Margin="0,12,0,0">
-                        <Button Content="Hide until sign-out" Click="OnHidePilotNotice" Margin="0,0,8,0"
+                        <Button Content="{loc:T 'Hide until sign-out'}" Click="OnHidePilotNotice" Margin="0,0,8,0"
                                 AutomationProperties.AutomationId="HidePilotNoticeButton" />
                     </WrapPanel>
                     <StackPanel Margin="0,16,0,0">
@@ -131,7 +131,7 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
-                        <Button Content="Uninstall SentinelAI" Click="OnUninstallSentinelAi" HorizontalAlignment="Left"
+                        <Button Content="{loc:T 'Uninstall SentinelAI'}" Click="OnUninstallSentinelAi" HorizontalAlignment="Left"
                                 IsEnabled="{Binding CanUninstall}" AutomationProperties.AutomationId="UninstallSentinelAiButton" />
                         <TextBlock Text="{Binding UninstallStatusText}" TextWrapping="Wrap" Margin="0,6,0,0"
                                    AutomationProperties.AutomationId="UninstallSentinelAiStatus" AutomationProperties.LiveSetting="Polite" />
@@ -151,12 +151,12 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="Local Core" FontWeight="SemiBold" />
+                        <TextBlock Text="{loc:T 'Local Core'}" FontWeight="SemiBold" />
                         <TextBlock Text="{Binding CoreStatusText}" TextWrapping="Wrap" FontSize="12"
                                    Margin="0,4,0,0" Foreground="{DynamicResource SecondaryTextBrush}"
                                    AutomationProperties.LiveSetting="Polite" />
                     </StackPanel>
-                    <Button x:Name="RefreshCoreButton" Grid.Column="1" Content="Check connection"
+                    <Button x:Name="RefreshCoreButton" Grid.Column="1" Content="{loc:T 'Check connection'}"
                             Command="{Binding RefreshCoreCommand}" Margin="16,0,0,0"
                             VerticalAlignment="Center"
                             AutomationProperties.AutomationId="RefreshCoreButton" />

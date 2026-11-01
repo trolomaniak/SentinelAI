@@ -17,6 +17,7 @@ using SentinelAI.Contracts.EndpointTelemetry;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core.Persistence;
+using SentinelAI.Localization;
 using SentinelAI.Core.Reports;
 using SentinelAI.Licensing;
 using SentinelAI.Rules;
@@ -119,6 +120,9 @@ public static class CoreHost
         builder.Services.AddSingleton<VulnerabilityService>();
         // TASK-032: the operational Risk Register, kept apart from technical scoring.
         builder.Services.AddSingleton<RiskRegisterStore>();
+        // The installation language (English or Polish), chosen in Setup and changeable in Desktop.
+        builder.Services.AddSingleton(InstallationLanguageOptions.Load(builder.Configuration));
+        builder.Services.AddSingleton<InstallationLanguageStore>();
         builder.Services.AddSingleton(services => new CentralUpdateService(
             services.GetRequiredService<CentralUpdateOptions>(),
             Path.Combine(Path.GetDirectoryName(services.GetRequiredService<AdminStore>().DatabasePath)!, "central-update"),
@@ -279,6 +283,26 @@ public static class CoreHost
 
         app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
             .AllowAnonymous();
+
+        // The installation language is public: Desktop shows its sign-in in it before anyone signs in.
+        app.MapGet("/api/language", (HttpContext context, InstallationLanguageStore language) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Ok(new InstallationLanguageView(UiLanguages.Code(language.Current)));
+            })
+            .AllowAnonymous();
+
+        app.MapPut("/api/admin/settings/language", async (InstallationLanguageRequest? request, HttpContext context, InstallationLanguageStore language,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                if (!UiLanguages.TryParse(request?.Language, out var chosen)) return Results.BadRequest();
+                await language.SetAsync(chosen, cancellationToken);
+                return Results.Ok(new InstallationLanguageView(UiLanguages.Code(language.Current)));
+            })
+            .RequireAuthorization()
+            .WithMetadata(new RequestSizeLimitAttribute(1024));
 
         app.MapPost("/api/agent/heartbeat", async (
                 HeartbeatRequest? request,

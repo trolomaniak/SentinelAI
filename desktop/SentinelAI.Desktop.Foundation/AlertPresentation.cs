@@ -1,10 +1,11 @@
 using System.Globalization;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
 public sealed record AlertEndpointOption(Guid? EndpointId, string Name)
 {
-    public string DisplayName => EndpointId is { } id ? $"{Name} ({id:D})" : "All endpoints";
+    public string DisplayName => EndpointId is { } id ? $"{Name} ({id:D})" : T("All endpoints");
 }
 
 public sealed record AlertEvidenceRow(string Field, string TypeLabel, string Value)
@@ -29,7 +30,7 @@ public sealed class AlertRow
     public Guid EndpointId => Summary.EndpointId;
     public string EndpointName => Summary.EndpointName;
     public string RuleId => Summary.RuleId;
-    public string Title => Summary.Title;
+    public string Title => T(Summary.Title);
     public string Severity => Summary.Severity;
     public string SeverityLabel => Label(Severity);
     public string Status => Summary.Status;
@@ -46,9 +47,9 @@ public sealed class AlertRow
         .ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
     internal static string Label(string? value) => value switch
     {
-        "info" => "Info", "low" => "Low", "medium" => "Medium", "high" => "High", "critical" => "Critical",
-        "open" => "Open", "investigating" => "Investigating", "accepted" => "Accepted", "resolved" => "Resolved",
-        _ => "Unknown"
+        "info" => T("Info"), "low" => T("Low"), "medium" => T("Medium"), "high" => T("High"), "critical" => T("Critical"),
+        "open" => T("Open"), "investigating" => T("Investigating"), "accepted" => T("Accepted"), "resolved" => T("Resolved"),
+        _ => T("Unknown")
     };
 }
 
@@ -60,44 +61,44 @@ public sealed class AlertPresentation
         ArgumentNullException.ThrowIfNull(detail);
         Detail = detail;
         Row = new AlertRow(detail.Alert);
-        Reason = detail.Reason;
-        RecommendedAction = detail.RecommendedAction;
+        Reason = T(detail.Reason);
+        RecommendedAction = T(detail.RecommendedAction);
         Facts = Array.AsReadOnly(new[]
         {
-            new DisplayFact("Alert ID", Row.AlertId.ToString("D")),
-            new DisplayFact("Endpoint ID", Row.EndpointId.ToString("D")),
-            new DisplayFact("Endpoint", Row.EndpointName),
-            new DisplayFact("Rule ID", Row.RuleId),
-            new DisplayFact("Title", Row.Title),
-            new DisplayFact("Severity", Row.SeverityLabel),
-            new DisplayFact("Status", Row.StatusLabel),
-            new DisplayFact("First observed", Row.FirstObservedText),
-            new DisplayFact("Last observed", Row.LastObservedText),
-            new DisplayFact("Updated", Row.UpdatedText),
-            new DisplayFact("Created", AlertRow.Timestamp(detail.CreatedUtc)),
-            new DisplayFact("Status changed", AlertRow.Timestamp(detail.StatusChangedUtc)),
-            new DisplayFact("Version", Row.Version.ToString(CultureInfo.InvariantCulture))
+            new DisplayFact(T("Alert ID"), Row.AlertId.ToString("D")),
+            new DisplayFact(T("Endpoint ID"), Row.EndpointId.ToString("D")),
+            new DisplayFact(T("Endpoint"), Row.EndpointName),
+            new DisplayFact(T("Rule ID"), Row.RuleId),
+            new DisplayFact(T("Title"), Row.Title),
+            new DisplayFact(T("Severity"), Row.SeverityLabel),
+            new DisplayFact(T("Status"), Row.StatusLabel),
+            new DisplayFact(T("First observed"), Row.FirstObservedText),
+            new DisplayFact(T("Last observed"), Row.LastObservedText),
+            new DisplayFact(T("Updated"), Row.UpdatedText),
+            new DisplayFact(T("Created"), AlertRow.Timestamp(detail.CreatedUtc)),
+            new DisplayFact(T("Status changed"), AlertRow.Timestamp(detail.StatusChangedUtc)),
+            new DisplayFact(T("Version"), Row.Version.ToString(CultureInfo.InvariantCulture))
         });
         Evidence = Array.AsReadOnly(detail.Evidence.Select(evidence => new AlertEvidenceRow(evidence.Field,
             evidence.Kind switch
             {
-                AlertEvidenceKind.Boolean => "Boolean", AlertEvidenceKind.Integer => "Integer",
-                AlertEvidenceKind.String => "String", _ => "Unknown"
+                AlertEvidenceKind.Boolean => T("Boolean"), AlertEvidenceKind.Integer => T("Integer"),
+                AlertEvidenceKind.String => T("String"), _ => T("Unknown")
             }, evidence.Kind switch
             {
-                AlertEvidenceKind.Boolean => evidence.BooleanValue?.ToString() ?? "Unknown",
-                AlertEvidenceKind.Integer => evidence.IntegerValue?.ToString(CultureInfo.InvariantCulture) ?? "Unknown",
-                AlertEvidenceKind.String => evidence.StringValue ?? "Unknown",
-                _ => "Unknown"
+                AlertEvidenceKind.Boolean => evidence.BooleanValue?.ToString() ?? T("Unknown"),
+                AlertEvidenceKind.Integer => evidence.IntegerValue?.ToString(CultureInfo.InvariantCulture) ?? T("Unknown"),
+                AlertEvidenceKind.String => evidence.StringValue ?? T("Unknown"),
+                _ => T("Unknown")
             })).ToArray());
         History = Array.AsReadOnly(detail.StatusHistory.TakeLast(100).Select(change => new AlertHistoryRow(
-            change.PreviousStatus is null ? "None" : AlertRow.Label(change.PreviousStatus), AlertRow.Label(change.Status),
+            change.PreviousStatus is null ? T("None") : AlertRow.Label(change.PreviousStatus), AlertRow.Label(change.Status),
             AlertRow.Timestamp(change.ChangedUtc), change.ChangedBy,
-            change.PreviousStatus is null ? "Created" :
+            change.PreviousStatus is null ? T("Created") :
                 change.PreviousStatus == "resolved" && change.Status == "open" && change.ChangedBy == "system"
-                    ? "Reopened" : "Status changed")).ToArray());
-        HistoryDisclosure = detail.StatusHistoryCount == 0 ? "No status history reported."
-            : $"Showing the last {History.Count.ToString(CultureInfo.InvariantCulture)} of {detail.StatusHistoryCount.ToString(CultureInfo.InvariantCulture)} status changes.";
+                    ? T("Reopened") : T("Status changed"))).ToArray());
+        HistoryDisclosure = detail.StatusHistoryCount == 0 ? T("No status history reported.")
+            : F("Showing the last {0} of {1} status changes.", History.Count, detail.StatusHistoryCount);
     }
 
     public AlertDetail Detail { get; }

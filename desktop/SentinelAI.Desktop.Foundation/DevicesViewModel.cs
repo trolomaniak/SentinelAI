@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Foundation;
 
@@ -23,7 +24,7 @@ public sealed class DevicesViewModel : INotifyPropertyChanged, IDisposable
     private EndpointPresentation? _detail;
     private DeviceListState _listState;
     private DeviceDetailState _detailState;
-    private string _listStatusText = "Open Devices to load enrolled endpoints.";
+    private string _listStatusText = T("Open Devices to load enrolled endpoints.");
     private string _detailStatusText = string.Empty;
     private string _errorText = string.Empty;
     private string _searchText = string.Empty;
@@ -181,7 +182,7 @@ public sealed class DevicesViewModel : INotifyPropertyChanged, IDisposable
             ClearRowsLocked();
             CloseDetailLocked();
             _listState = DeviceListState.Loading;
-            _listStatusText = "Loading enrolled endpoints…";
+            _listStatusText = T("Loading enrolled endpoints…");
             _errorText = string.Empty;
             NotifyAll();
             _ = LoadListAsync(completion, cancellation, generation);
@@ -199,7 +200,7 @@ public sealed class DevicesViewModel : INotifyPropertyChanged, IDisposable
             {
                 CloseDetailLocked();
                 _detailState = DeviceDetailState.NotFound;
-                _detailStatusText = "This endpoint is no longer available. Refresh the device list.";
+                _detailStatusText = T("This endpoint is no longer available. Refresh the device list.");
                 NotifyAll();
                 return Task.CompletedTask;
             }
@@ -213,7 +214,7 @@ public sealed class DevicesViewModel : INotifyPropertyChanged, IDisposable
             var generation = ++_detailGeneration;
             _selectedDevice = row;
             _detailState = DeviceDetailState.Loading;
-            _detailStatusText = "Loading endpoint details…";
+            _detailStatusText = T("Loading endpoint details…");
             _errorText = string.Empty;
             NotifyAll();
             _ = LoadDetailAsync(completion, cancellation, generation, endpointId);
@@ -309,7 +310,7 @@ public sealed class DevicesViewModel : INotifyPropertyChanged, IDisposable
                     _detail = null;
                     _detailState = result.Outcome == DeviceReadOutcome.NotFound ? DeviceDetailState.NotFound : DeviceDetailState.Unavailable;
                     _detailStatusText = result.Outcome == DeviceReadOutcome.NotFound
-                        ? "This endpoint is no longer available. Refresh the device list."
+                        ? T("This endpoint is no longer available. Refresh the device list.")
                         : FailureText(result.Outcome);
                     _errorText = _detailStatusText;
                 }
@@ -353,9 +354,9 @@ public sealed class DevicesViewModel : INotifyPropertyChanged, IDisposable
             : _filteredCount == 0 ? DeviceListState.FilteredEmpty : DeviceListState.Ready;
         _listStatusText = _listState switch
         {
-            DeviceListState.Empty => "No enrolled endpoints. Enroll an Agent to report device inventory.",
-            DeviceListState.FilteredEmpty => "No endpoints match the current filters.",
-            _ => $"{_filteredCount} of {_allRows.Count} enrolled endpoints"
+            DeviceListState.Empty => T("No enrolled endpoints. Enroll an Agent to report device inventory."),
+            DeviceListState.FilteredEmpty => T("No endpoints match the current filters."),
+            _ => F("{0} of {1} enrolled endpoints", _filteredCount, _allRows.Count)
         };
     }
 
@@ -433,7 +434,7 @@ public sealed class DevicesViewModel : INotifyPropertyChanged, IDisposable
         ClearRowsLocked();
         CloseDetailLocked();
         _listState = DeviceListState.NotLoaded;
-        _listStatusText = "Open Devices to load enrolled endpoints.";
+        _listStatusText = T("Open Devices to load enrolled endpoints.");
         _errorText = string.Empty;
         _searchText = string.Empty;
         _healthFilter = DeviceHealthFilter.All;
@@ -463,10 +464,10 @@ public sealed class DevicesViewModel : INotifyPropertyChanged, IDisposable
 
     private static string FailureText(DeviceReadOutcome outcome) => outcome switch
     {
-        DeviceReadOutcome.UntrustedConnection => "The local Core connection could not be trusted.",
-        DeviceReadOutcome.InvalidResponse or DeviceReadOutcome.Success => "Core returned an invalid device response.",
-        DeviceReadOutcome.TooLarge => "The device response exceeds the supported size.",
-        _ => "Local Core is unavailable. Restore Core, then refresh Devices."
+        DeviceReadOutcome.UntrustedConnection => T("The local Core connection could not be trusted."),
+        DeviceReadOutcome.InvalidResponse or DeviceReadOutcome.Success => T("Core returned an invalid device response."),
+        DeviceReadOutcome.TooLarge => T("The device response exceeds the supported size."),
+        _ => T("Local Core is unavailable. Restore Core, then refresh Devices.")
     };
 
     private void NotifyAll()

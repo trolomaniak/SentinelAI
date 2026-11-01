@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Desktop.Services;
 
@@ -32,7 +33,7 @@ public sealed class WindowsServiceStatusModel : INotifyPropertyChanged, IDisposa
     private bool _disposed;
     private bool _isRefreshing;
     private LocalServiceStatusSnapshot _snapshot = Unknown;
-    private string _statusText = "Service status has not been checked.";
+    private string _statusText = T("Service status has not been checked.");
     private static readonly LocalServiceStatusSnapshot Unknown = new(LocalServiceState.Unknown, LocalServiceState.Unknown);
 
     public WindowsServiceStatusModel(ILocalServiceStatusReader? reader = null)
@@ -91,12 +92,12 @@ public sealed class WindowsServiceStatusModel : INotifyPropertyChanged, IDisposa
             var snapshot = await nativeRead.WaitAsync(TimeSpan.FromSeconds(2), linked.Token);
             if (_disposed || linked.IsCancellationRequested) return;
             Publish(snapshot, snapshot.Core == LocalServiceState.Unknown || snapshot.Agent == LocalServiceState.Unknown
-                ? "Some service status is unavailable. Core connection health is checked separately."
-                : "Read-only local Windows service status. Core connection health is checked separately.");
+                ? T("Some service status is unavailable. Core connection health is checked separately.")
+                : T("Read-only local Windows service status. Core connection health is checked separately."));
         }
         catch (TimeoutException)
         {
-            if (!_disposed) Publish(Unknown, "Local service status is unavailable. Try Refresh later.");
+            if (!_disposed) Publish(Unknown, T("Local service status is unavailable. Try Refresh later."));
         }
         catch (OperationCanceledException) { }
         finally { if (!_disposed) SetRefreshing(false); }
@@ -122,7 +123,7 @@ public sealed class WindowsServiceStatusModel : INotifyPropertyChanged, IDisposa
     private void OnTimer(object? sender, EventArgs args) => _ = RefreshAsync();
     private static string Display(LocalServiceState state) => state switch
     {
-        LocalServiceState.NotInstalled => "Not installed",
+        LocalServiceState.NotInstalled => T("Not installed"),
         LocalServiceState.Starting => "Starting",
         LocalServiceState.Running => "Running",
         LocalServiceState.Stopping => "Stopping",
