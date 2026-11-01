@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using SentinelAI.Setup.Foundation;
 using SentinelAI.Updates;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Setup;
 
@@ -45,7 +46,7 @@ internal sealed class WindowsSetupLifecycle(string workDirectory, SetupMetadata 
         var adapter = new ServiceAdapter(_worker, state.Kind == SetupInstallationKind.RecoveryPending);
         if (state.Kind == SetupInstallationKind.RecoveryPending)
         {
-            progress.Report("Recovering the interrupted installation...");
+            progress.Report(T("Recovering the interrupted installation..."));
             var recovered = await _updater.RecoverAsync(CodeRoot, policy, adapter, token).ConfigureAwait(false);
             if (recovered.Status == UpdateInstallStatus.RollbackFailed) return new(false, FailureCode: "rollback_failed");
             // A crash before the updater's journal or after its healthy commit can

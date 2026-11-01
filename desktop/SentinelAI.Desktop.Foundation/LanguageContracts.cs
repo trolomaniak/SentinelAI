@@ -44,7 +44,11 @@ public static class DesktopLanguage
     }
 }
 
-public sealed record LanguageOption(UiLanguage Language, string Text);
+/// <summary>A language as its own speakers write it; screen readers and UI Automation read that same name.</summary>
+public sealed record LanguageOption(UiLanguage Language, string Text)
+{
+    public override string ToString() => Text;
+}
 
 /// <summary>
 /// Settings → Language: the installation language for Desktop and Core's reports. Desktop is shown in it from its next

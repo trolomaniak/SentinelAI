@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using SentinelAI.Desktop.Foundation;
+using SentinelAI.Localization;
 using SentinelAI.Setup.Foundation;
 
 var assertions = 0;
@@ -343,6 +344,20 @@ using (var cancellation = new CancellationTokenSource())
     Ensure(sequence.SequenceEqual(new[] { "certificate", "remove:FFFF" }), "Cancellation after certificate creation removes the unreferenced certificate");
 }
 assertions += await EnrollmentProtocolTests.RunAsync();
+// The Polish version: Setup and Agent Setup show their own texts in the language chosen in their window; English stays the default.
+foreach (var exit in Enum.GetValues<AgentSetupExitCode>())
+    foreach (var uninstall in new[] { false, true })
+        Ensure(TextCatalog.Polish.Entries.ContainsKey(AgentSetupWorkflow.Describe(exit, uninstall)), $"Agent Setup result {exit} has a Polish text");
+Localizer.Use(UiLanguage.Polish);
+try
+{
+    Ensure(SetupWorkflow.ProgressFor("PROGRESS|validate") == "Sprawdzanie plików instalacyjnych...", "Setup progress in Polish");
+    Ensure(AgentSetupWorkflow.Describe(AgentSetupExitCode.InvalidCode, false).StartsWith("To nie jest prawidłowy kod dołączania SentinelAI.", StringComparison.Ordinal),
+        "Agent Setup result in Polish");
+}
+finally { Localizer.Use(UiLanguage.English); }
+Ensure(SetupWorkflow.ProgressFor("PROGRESS|validate") == "Validating installation files..." &&
+       AgentSetupWorkflow.Describe(AgentSetupExitCode.InvalidCode, false).StartsWith("This is not a valid SentinelAI enrollment code.", StringComparison.Ordinal), "English after Polish");
 assertions += await AgentSetupTests.RunAsync();
 assertions += await PilotSetupTests.RunAsync();
 Console.WriteLine($"Setup foundation: {assertions} assertions passed.");

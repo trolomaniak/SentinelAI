@@ -1,5 +1,6 @@
 using System.Text.Json;
 using SentinelAI.Desktop.Foundation;
+using static SentinelAI.Localization.Localizer;
 
 namespace SentinelAI.Setup.Foundation;
 
@@ -161,14 +162,14 @@ public static class SetupWorkflow
         var certificate = string.Empty;
         if (localNetwork is not null)
         {
-            progress.Report("Creating Core's local-network certificate...");
+            progress.Report(T("Creating Core's local-network certificate..."));
             certificate = await Task.Run(localNetwork.Create, token).ConfigureAwait(false);
             if (!ValidCertificateSha256(certificate)) throw new InvalidDataException("Core certificate unavailable.");
         }
         try
         {
             token.ThrowIfCancellationRequested();
-            progress.Report("Preparing Core...");
+            progress.Report(T("Preparing Core..."));
             await worker.PrepareCoreAsync(certificate, token).ConfigureAwait(false);
         }
         catch when (certificate.Length != 0)
@@ -178,24 +179,24 @@ public static class SetupWorkflow
             throw;
         }
         token.ThrowIfCancellationRequested();
-        progress.Report("Creating the local administrator...");
+        progress.Report(T("Creating the local administrator..."));
         if (await administrator.GetStateAsync(token).ConfigureAwait(false) != AdministratorSetupState.Required)
             throw new InvalidDataException("Local administrator setup unavailable.");
         token.ThrowIfCancellationRequested();
         if (await administrator.InitializeAsync(username.Trim(), password, token).ConfigureAwait(false) != AdministratorSetupResult.Created)
             throw new InvalidDataException("Local administrator setup unavailable.");
         token.ThrowIfCancellationRequested();
-        progress.Report("Starting Core...");
+        progress.Report(T("Starting Core..."));
         await worker.StartCoreAsync(token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         if (pilotKey is not null)
         {
-            progress.Report("Applying the pilot license key...");
+            progress.Report(T("Applying the pilot license key..."));
             try { await pilot!.ApplyAsync(username.Trim(), password, pilotKey, token).ConfigureAwait(false); }
             catch (Exception) when (!token.IsCancellationRequested) { pilotStored = false; }
             token.ThrowIfCancellationRequested();
         }
-        progress.Report("Enrolling Agent...");
+        progress.Report(T("Enrolling Agent..."));
         var issued = await issuer.IssueAsync(username.Trim(), password, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         if (!ValidEnrollmentToken(issued.AsSpan())) throw new InvalidDataException("Agent enrollment unavailable.");
@@ -203,7 +204,7 @@ public static class SetupWorkflow
         try
         {
             token.ThrowIfCancellationRequested();
-            progress.Report("Installing Windows services and Desktop...");
+            progress.Report(T("Installing Windows services and Desktop..."));
             await worker.CompleteAsync(enrollmentToken, token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
         }
@@ -242,20 +243,20 @@ public static class SetupWorkflow
 
     public static string? ProgressFor(string marker) => marker switch
     {
-        "PROGRESS|validate" => "Validating installation files...",
-        "PROGRESS|core" => "Preparing Core...",
-        "PROGRESS|services" => "Starting Windows services...",
-        "PROGRESS|network" => "Allowing Agents on the local network...",
-        "PROGRESS|agent" => "Installing and enrolling Agent...",
-        "PROGRESS|desktop" => "Installing Desktop and Updater...",
-        "PROGRESS|shortcut" => "Creating Start Menu shortcuts...",
-        "PROGRESS|inspect" => "Checking the installed deployment...",
-        "PROGRESS|replace" => "Replacing verified program files...",
-        "PROGRESS|health" => "Verifying installation health...",
-        "PROGRESS|rollback" => "Restoring the previous working version...",
-        "PROGRESS|uninstall" => "Removing the owned installation...",
-        "PROGRESS|updater" => "Installing Updater...",
-        "PROGRESS|apps" => "Adding the Windows Apps entry...",
+        "PROGRESS|validate" => T("Validating installation files..."),
+        "PROGRESS|core" => T("Preparing Core..."),
+        "PROGRESS|services" => T("Starting Windows services..."),
+        "PROGRESS|network" => T("Allowing Agents on the local network..."),
+        "PROGRESS|agent" => T("Installing and enrolling Agent..."),
+        "PROGRESS|desktop" => T("Installing Desktop and Updater..."),
+        "PROGRESS|shortcut" => T("Creating Start Menu shortcuts..."),
+        "PROGRESS|inspect" => T("Checking the installed deployment..."),
+        "PROGRESS|replace" => T("Replacing verified program files..."),
+        "PROGRESS|health" => T("Verifying installation health..."),
+        "PROGRESS|rollback" => T("Restoring the previous working version..."),
+        "PROGRESS|uninstall" => T("Removing the owned installation..."),
+        "PROGRESS|updater" => T("Installing Updater..."),
+        "PROGRESS|apps" => T("Adding the Windows Apps entry..."),
         _ => null
     };
 }

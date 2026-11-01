@@ -52,23 +52,34 @@ internal static class LocalizationTests
         }
     }
 
-    /// <summary>Every text Desktop translates, in code and in views, has a Polish translation.</summary>
+    /// <summary>Every text Desktop, Setup and Agent Setup translate, in code and in views, has a Polish translation.</summary>
     private static void Coverage()
     {
         var root = AppContext.BaseDirectory;
         while (!File.Exists(Path.Combine(root, "SentinelAI.sln"))) root = Path.GetDirectoryName(root) ?? throw new InvalidOperationException("Repository root not found.");
-        var desktop = Path.Combine(root, "desktop");
         var keys = new SortedSet<string>(StringComparer.Ordinal);
         var call = new Regex(@"\b(?:T|F)\(\s*""((?:[^""\\]|\\.)*)""");
-        foreach (var file in Directory.EnumerateFiles(desktop, "*.cs", SearchOption.AllDirectories).Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")))
-            foreach (Match match in call.Matches(File.ReadAllText(file))) keys.Add(Regex.Unescape(match.Groups[1].Value));
         var view = new Regex(@"\{loc:T '((?:[^'\\]|\\.)*)'\}");
-        foreach (var file in Directory.EnumerateFiles(desktop, "*.xaml", SearchOption.AllDirectories).Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")))
-            foreach (Match match in view.Matches(File.ReadAllText(file)))
-                keys.Add(WebUtility.HtmlDecode(match.Groups[1].Value.Replace("\\'", "'", StringComparison.Ordinal).Replace("\\\\", "\\", StringComparison.Ordinal)));
+        var found = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var folder in new[] { "desktop", "installer" })
+        {
+            var before = keys.Count;
+            foreach (var file in Sources(Path.Combine(root, folder), "*.cs"))
+                foreach (Match match in call.Matches(File.ReadAllText(file))) keys.Add(Regex.Unescape(match.Groups[1].Value));
+            foreach (var file in Sources(Path.Combine(root, folder), "*.xaml"))
+                foreach (Match match in view.Matches(File.ReadAllText(file)))
+                    keys.Add(WebUtility.HtmlDecode(match.Groups[1].Value.Replace("\\'", "'", StringComparison.Ordinal).Replace("\\\\", "\\", StringComparison.Ordinal)));
+            found[folder] = keys.Count - before;
+        }
         var missing = keys.Where(key => !TextCatalog.Polish.Entries.ContainsKey(key)).ToArray();
-        Ensure(keys.Count > 800 && missing.Length == 0, "Desktop texts without a Polish translation:" + Environment.NewLine + string.Join(Environment.NewLine, missing));
+        Ensure(found["desktop"] > 800 && found["installer"] > 90 && missing.Length == 0,
+            "Desktop or Setup texts without a Polish translation:" + Environment.NewLine + string.Join(Environment.NewLine, missing));
     }
+
+    private static IEnumerable<string> Sources(string folder, string pattern) =>
+        Directory.EnumerateFiles(folder, pattern, SearchOption.AllDirectories).Where(file =>
+            !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal) &&
+            !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
 
     private static void Translation()
     {
@@ -109,7 +120,8 @@ internal static class LocalizationTests
         var settings = new LanguageSettingsViewModel(client, cache, UiLanguage.English);
         var expired = 0;
         settings.SessionExpired += (_, _) => expired++;
-        Ensure(!settings.CanSave && LanguageSettingsViewModel.Options.Select(option => option.Text).SequenceEqual(["English", "Polski"]),
+        Ensure(!settings.CanSave && LanguageSettingsViewModel.Options.Select(option => option.Text).SequenceEqual(["English", "Polski"]) &&
+               LanguageSettingsViewModel.Options.Select(option => option.ToString()).SequenceEqual(["English", "Polski"]),
             "The language choice was not offered, each language named in itself.");
         settings.Selected = UiLanguage.Polish;
         await settings.SaveAsync();
