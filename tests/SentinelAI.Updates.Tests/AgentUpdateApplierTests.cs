@@ -1,6 +1,8 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using SentinelAI.Updater;
@@ -54,10 +56,26 @@ internal static class AgentUpdateApplierTests
             fixture.Stage("1.1.0", "candidate");
             var original = File.ReadAllBytes(fixture.Layout.Receipt);
             string? permissions = null;
+            string[]? accessRules = null;
             UnixFileMode mode = 0;
             if (OperatingSystem.IsWindows())
-                permissions = new FileInfo(fixture.Layout.Receipt).GetAccessControl(AccessControlSections.Access)
-                    .GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+            {
+                // Match Agent Setup's receipt, not an inherited Windows temp ACL:
+                // inheritance is blocked and only Administrators/SYSTEM may access it.
+                var protectedAccess = new FileSecurity();
+                protectedAccess.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+                foreach (var sid in new[] { "S-1-5-32-544", "S-1-5-18" })
+                    protectedAccess.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid),
+                        FileSystemRights.FullControl, AccessControlType.Allow));
+                new FileInfo(fixture.Layout.Receipt).SetAccessControl(protectedAccess);
+                var before = new FileInfo(fixture.Layout.Receipt).GetAccessControl(AccessControlSections.Access);
+                permissions = before.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+                accessRules = before.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
+                    .Select(DescribeAccessRule)
+                    .Order(StringComparer.Ordinal).ToArray();
+                Ensure(before.AreAccessRulesProtected && before.AreAccessRulesCanonical && accessRules.Length == 2,
+                    "The Windows receipt fixture does not match Setup's protected access policy.");
+            }
             else
             {
                 mode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
@@ -76,9 +94,20 @@ internal static class AgentUpdateApplierTests
             Ensure(observed.SequenceEqual(original) && fixture.ReceiptFields()["version"] == "1.1.0",
                 "Receipt replacement exposed a truncated or partially rewritten ownership proof.");
             if (OperatingSystem.IsWindows())
-                Ensure(new FileInfo(fixture.Layout.Receipt).GetAccessControl(AccessControlSections.Access)
-                    .GetSecurityDescriptorSddlForm(AccessControlSections.Access) == permissions,
-                    "Atomic receipt replacement changed its protected Windows access policy.");
+            {
+                var after = new FileInfo(fixture.Layout.Receipt).GetAccessControl(AccessControlSections.Access);
+                var actualRules = after.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
+                    .Select(DescribeAccessRule)
+                    .Order(StringComparer.Ordinal).ToArray();
+                // Compare every authority-bearing field. Windows can normalize the
+                // descriptor's auto-inheritance bookkeeping without changing rights.
+                var actualPermissions = after.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+                var expectedPermissions = permissions!;
+                Ensure(after.AreAccessRulesProtected && after.AreAccessRulesCanonical && actualRules.SequenceEqual(accessRules!),
+                    "Atomic receipt replacement changed its protected Windows access policy. Before=" +
+                    expectedPermissions[..Math.Min(expectedPermissions.Length, 1024)] + "; After=" +
+                    actualPermissions[..Math.Min(actualPermissions.Length, 1024)]);
+            }
             else
                 Ensure(File.GetUnixFileMode(fixture.Layout.Receipt) == mode,
                     "Atomic receipt replacement changed its file permissions.");
@@ -192,6 +221,10 @@ internal static class AgentUpdateApplierTests
                           "other channel, other artifact, linked staging, rollback retried three times, strict receipt).");
         return assertions;
     }
+
+    [SupportedOSPlatform("windows")]
+    private static string DescribeAccessRule(FileSystemAccessRule rule) =>
+        $"{rule.IdentityReference.Value}|{rule.AccessControlType}|{(int)rule.FileSystemRights}|{rule.InheritanceFlags}|{rule.PropagationFlags}|{rule.IsInherited}";
 
     private sealed class Service : IServiceUpdateLifecycle
     {

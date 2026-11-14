@@ -166,7 +166,16 @@ public sealed class AgentUpdateApplier(
             // Adjacent staging inherits the protected Setup directory. Match the
             // receipt's access policy before publishing the new complete document.
             if (OperatingSystem.IsWindows())
-                new FileInfo(temporary).SetAccessControl(new FileInfo(layout.Receipt).GetAccessControl(AccessControlSections.Access));
+            {
+                var currentAccess = new FileInfo(layout.Receipt).GetAccessControl(AccessControlSections.Access);
+                var replacementAccess = new FileSecurity();
+                // SetAccessControl persists modified sections only. A security
+                // object returned by GetAccessControl has no modified sections;
+                // explicitly clone the DACL so its rules and protection apply.
+                replacementAccess.SetSecurityDescriptorBinaryForm(currentAccess.GetSecurityDescriptorBinaryForm(),
+                    AccessControlSections.Access);
+                new FileInfo(temporary).SetAccessControl(replacementAccess);
+            }
             else
                 File.SetUnixFileMode(temporary, File.GetUnixFileMode(layout.Receipt));
             cancellationToken.ThrowIfCancellationRequested();
