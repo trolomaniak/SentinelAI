@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.AccessControl;
 using SentinelAI.Updates;
 
 namespace SentinelAI.Updater;
@@ -137,7 +138,7 @@ public sealed class AgentUpdateApplier(
         return fields;
     }
 
-    /// <summary>Rewrites only the version, in place, so the receipt keeps Setup's protected access control.</summary>
+    /// <summary>Atomically replaces only the version, retaining Setup's protected access control.</summary>
     private async Task WriteReceiptVersionAsync(string version, CancellationToken cancellationToken)
     {
         var fields = await ReadReceiptAsync(cancellationToken);
@@ -145,10 +146,39 @@ public sealed class AgentUpdateApplier(
         var ordered = ReceiptFields.ToDictionary(field => field, field => fields[field], StringComparer.Ordinal);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(ordered);
         RejectLink(layout.Receipt);
-        await using var stream = new FileStream(layout.Receipt, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        stream.SetLength(0);
-        await stream.WriteAsync(bytes, cancellationToken);
-        stream.Flush(flushToDisk: true);
+        var temporary = layout.Receipt + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        var created = false;
+        try
+        {
+            var options = new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None,
+                Options = FileOptions.Asynchronous | FileOptions.WriteThrough
+            };
+            if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            await using (var stream = new FileStream(temporary, options))
+            {
+                created = true;
+                await stream.WriteAsync(bytes, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+                stream.Flush(flushToDisk: true);
+            }
+            // Adjacent staging inherits the protected Setup directory. Match the
+            // receipt's access policy before publishing the new complete document.
+            if (OperatingSystem.IsWindows())
+                new FileInfo(temporary).SetAccessControl(new FileInfo(layout.Receipt).GetAccessControl(AccessControlSections.Access));
+            else
+                File.SetUnixFileMode(temporary, File.GetUnixFileMode(layout.Receipt));
+            cancellationToken.ThrowIfCancellationRequested();
+            RejectLink(layout.Receipt);
+            // The old ownership proof remains complete until this atomic commit.
+            // A crash afterwards is reconciled from the signed installed code receipt.
+            File.Replace(temporary, layout.Receipt, null);
+        }
+        finally
+        {
+            if (created) File.Delete(temporary);
+        }
     }
 
     /// <summary>How often this exact manifest was rolled back; an unreadable record counts as none.</summary>

@@ -14,20 +14,21 @@ Distribution is at the **development/pilot stage**: the two installers, `Sentine
 
 | Area | Current behavior |
 | --- | --- |
-| Devices and telemetry | Enrolled endpoint list/detail, heartbeat connectivity, inventory timestamps, OS/build, CPU, RAM, disks and selected Windows configuration, plus hourly endpoint security telemetry: BitLocker, antivirus and Defender health, local Administrators members (SIDs only), Windows Update policy and results, pending restarts, security service states and installed application counts ([endpoint telemetry](docs/ENDPOINT-TELEMETRY.md)). Unavailable observations remain Unknown with their reason. |
+| Devices and telemetry | Enrolled endpoint list/detail, heartbeat connectivity, inventory timestamps, OS/build, CPU, RAM, disks and selected Windows configuration, plus hourly endpoint security telemetry: BitLocker, antivirus and Defender health, local Administrators members (SIDs only), Windows Update policy and results, pending restarts, security service states and machine-wide installed application names, versions and publishers ([endpoint telemetry](docs/ENDPOINT-TELEMETRY.md)). Unavailable observations remain Unknown with their reason. |
 | Security rules | 13 deterministic configuration rules covering firewall profiles, UAC, RDP, SMB, automatic logon, LSA protection and update policy, whose findings describe the observed configuration, 4 endpoint telemetry rules (antivirus reported at risk, system volume without BitLocker protection, firewall or event log service not running), and 12 deterministic runtime event rules (`SA-EVT-*`) over collected Windows security events, such as failed-logon bursts, Defender detections, disabled protection, cleared logs and new services, drivers or scheduled tasks ([runtime event detections](docs/EVENT-RULES.md)). |
+| Vulnerabilities | Local matching of installed applications and the exact Windows release/build against signed provider data from NVD and CISA KEV. Findings show CVEs, fixes, coverage and data age; high/critical or known-exploited findings create tracked alerts. Data must be imported or downloaded with update checking enabled. Nothing is patched ([vulnerability data](docs/VULNERABILITIES.md)). |
 | Alerts and incidents | Stored detections, typed evidence, observation/history details and versioned Open / Investigating / Resolved / Accepted decisions. Conflicting edits require review of the current version. |
 | Risk | Local deterministic organization/endpoint scores with decimal contributions, correlation, policy, coverage and freshness explanations. |
 | Risk Register | Managed business risks with owner, likelihood × impact before and after existing controls, treatment (Avoid, Mitigate, Transfer, Accept), target and review dates, links to computers, alerts and tickets, filters and an auditable versioned history. Accepting a risk needs an owner, a rationale and an expiry within a year; lapsed reviews and acceptances are flagged. It never changes alerts, detection or the technical score ([Risk Register](docs/RISK-REGISTER.md)). |
 | Languages | English and Polish. One language per installation, chosen in Setup and changeable in Desktop Settings; Desktop and the texts Core writes follow it, and Setup and Agent Setup offer the choice in their own window ([languages](docs/LOCALIZATION.md)). |
 | Reports | Local HTML generation for an inclusive UTC date range and explicit saving through a native Windows picker. Reports work offline and in Safe Mode; historical score trends are unavailable. |
-| Licensing | Signed seven-day leases, FULL / GRACE / SAFE_MODE / RECOVERING states, public capabilities and explicit manual renewal. Safe Mode preserves local monitoring, incident access and reporting. |
+| Licensing | The free pilot uses a signed offline key for 1–365 days, without an endpoint limit or license server; monitoring continues after expiry. The separate optional lease system retains FULL / GRACE / SAFE_MODE / RECOVERING states and gates optional cloud features ([pilot licensing](docs/LICENSING.md#pilot-license-key-mvp-3)). |
 | Assistive AI | Explicit explanations for supported selected alerts. Requests require session consent, Core permission and a signed `cloud_ai` entitlement. Suggestions perform no endpoint actions. |
 | Desktop operation | One normal instance per Windows user/session, restoration on repeated launch, read-only service status, optional tray notifications and independent per-user Desktop auto-start. |
 | Windows setup | One elevated EXE installs the local deployment and offers owned-installation repair, upgrade, recovery and uninstall. Uninstall keeps protected data unless its removal is explicitly confirmed with DELETE. |
 | Updates | Explicit Setup maintenance uses signed whole-deployment verification and the existing transactional replacement/rollback API. Agents installed by Agent Setup update automatically from Core: the Agent downloads the signed Agent package Core carries and a SYSTEM task verifies and installs it with rollback ([automatic Agent updates](docs/UPDATES.md#automatic-agent-updates-from-core-mvp-7)). Optionally (off by default) Core downloads a newer signed Setup from the owner's built-in HTTPS server and a nightly SYSTEM task installs it ([central update](docs/UPDATES.md#optional-central-update-from-the-providers-server-mvp-7-part-2)). |
 
-**Overview remains a placeholder.** Current information is available in Devices, Alerts, Risk, Risk Register, Reports and Settings. Tray, notifications and Desktop auto-start default off. Cloud AI consent also defaults off and is cleared on sign-out or close.
+Desktop opens in **Devices**. **Overview** provides a localized guide with shortcuts to Devices, Alerts, Risk and Reports; current findings and scores remain in their dedicated views. Tray, notifications and Desktop auto-start default off. Cloud AI consent also defaults off and is cleared on sign-out or close.
 
 ## Architecture
 
@@ -43,15 +44,16 @@ The pilot installs one central computer per company (Windows 10 22H2 or Windows 
 Use a fresh Windows 11 x64 development/test machine and follow the [single-EXE setup guide](docs/SETUP.md):
 
 1. Build `SentinelAI-Setup.exe` using separate development signing/trust files, or obtain the artifact from a successful `setup-windows` CI job for the desired commit. Transfer it through a trusted channel.
-2. Run Setup, approve elevation and create the initial local administrator in its native window.
+2. Run Setup, approve elevation, choose English or Polish, enter the owner-issued pilot key and create the initial local administrator in its native window.
 3. Wait for installation progress to complete. Setup starts Core and enrolls/starts Agent without manual ZIP extraction.
 4. Open Desktop from Setup or **Start → SentinelAI**, sign in with the account you created, and verify the exact endpoint and fresh observation times in Devices.
+5. Use **Devices → Add computers** to create one-use enrollment codes, then run `SentinelAI-Agent-Setup.exe` on the other computers in the same local network. Follow the [IT guide](docs/pilot/SentinelAI-IT-guide.en.md) for certificate trust, network requirements and verification.
 
 Published applications include their .NET runtime. The target machine needs no SDK or browser; Setup uses the stock Windows PowerShell.
 
 For an existing owned Setup installation, close Desktop and follow the [maintenance guide](docs/SETUP.md#repair-upgrade-and-uninstall). Repair/upgrade require the matching installed trust root/channel and preserve security history, configuration, identity, enrollment and licensing state. Setup never treats retained data as a fresh deployment.
 
-AI and license renewal require operator-provided service configuration and credentials. Without a configured provider or entitlement, AI displays a safe unavailable/disabled state while local workflows remain available. Enable **Allow cloud AI requests for this session** in Settings before explicitly requesting an explanation. See [native AI/licensing](docs/DESKTOP-AI-LICENSING.md) and [licensing configuration](docs/LICENSING.md).
+Pilot keys are verified offline and need no license server. The separate optional AI and lease-renewal services require operator-provided configuration and credentials. Without a configured provider or entitlement, AI displays a safe unavailable/disabled state while local workflows remain available. Enable **Allow cloud AI requests for this session** in Settings before explicitly requesting an explanation. See [native AI/licensing](docs/DESKTOP-AI-LICENSING.md) and [licensing configuration](docs/LICENSING.md).
 
 ## Build and test from source
 
@@ -74,14 +76,14 @@ TASK-025 passed all twelve push/PR checks: full builds/regressions, **436 Setup 
 
 Current limits:
 
-- Detection covers the documented configuration, endpoint telemetry and runtime event rules. Malware scanning, patch compliance, vulnerability matching and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
+- Detection covers the documented configuration, endpoint telemetry, runtime event and vulnerability rules. Vulnerability coverage depends on installed signed data, its age and exact supported product/version matches; unassessed products are shown explicitly. Malware scanning, comprehensive patch compliance and automatic remediation are not implemented. An empty alert list or zero risk score does not prove security.
 - On the Windows Server CI runner the installed LocalService Agent collects every endpoint telemetry source except Security Center antivirus health, which servers do not provide. Client editions are not yet measured; a source an endpoint refuses is reported as access denied and is never treated as safe.
 - Monitored security settings are delivered within seconds of a reachable change, but other inventory can be stale, and posture is current state rather than an event history. Core does not retain complete inventory/heartbeat history or historical risk scores; reports distinguish current risk from retained incident activity.
 - Selected Windows security events are evaluated by twelve deterministic runtime rules whose alerts appear with the other alerts and in Risk; raw events are not shown in Desktop, reports or AI. Setup gives the installed Agent's own service SID read access to the Security channel and enables the auditing that scheduled task creation needs; detections work on Windows in any display language.
 - Setup's fresh Agent enrollment/DPAPI/heartbeat/inventory/restart and complete maintenance lifecycle acceptance passed.
 - Interactive UAC approval and physical multi-monitor DPI checks remain manual. Tray delivery and auto-start also depend on Windows shell/startup policy.
-- Pilot packages use development manifest signatures. Authenticode signing, production trust provisioning, automatic upgrades and state/account migrations remain outstanding. Unverified ownership is refused; failed transaction recovery requires explicit action.
-- Billing and enforcement of the signed endpoint limit are not implemented.
+- Pilot packages use development manifest signatures. Authenticode signing, production trust provisioning and general state/account migrations remain outstanding. Signed Agent updates from Core and optional central updates are implemented as described above. Unverified ownership is refused; failed transaction recovery requires explicit action.
+- Billing and enforcement of optional lease endpoint limits are not implemented. The free pilot key intentionally has no endpoint limit.
 - Gateway/provider integration tests use synthetic responses and development credentials. Live model-provider operation requires separate operator configuration.
 
 ## Documentation

@@ -181,6 +181,7 @@ public partial class MainWindow : Window
     }
 
     private void SetPagePresentation() => PageContent.ContentTemplate = (DataTemplate)FindResource(
+        _viewModel.CurrentPage.Id == PageId.Overview ? "OverviewTemplate" :
         Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices ? "DevicesTemplate" :
         Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts ? "AlertsTemplate" :
         Risk is not null && _viewModel.CurrentPage.Id == PageId.Risk ? "RiskTemplate" :

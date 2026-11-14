@@ -1,6 +1,6 @@
 # Native Desktop operation
 
-SentinelAI Desktop is the supported Windows production interface. Normal administrator setup, sign-in, endpoint review, incident review and status changes, deterministic Risk, report generation/saving, licensing and optional assistive AI use native controls. No browser or embedded web view is needed. Overview remains a placeholder; use the dedicated workspaces for current information.
+SentinelAI Desktop is the supported Windows production interface. Normal administrator setup, sign-in, endpoint review, incident review and status changes, deterministic Risk, report generation/saving, licensing and optional assistive AI use native controls. No browser or embedded web view is needed. A newly opened Desktop selects Devices after sign-in, with endpoint inventory and observation times. Overview provides a localized workflow guide and shortcuts to Devices, Alerts, Risk and Reports; current results remain in those dedicated workspaces.
 
 ## Open and reopen
 

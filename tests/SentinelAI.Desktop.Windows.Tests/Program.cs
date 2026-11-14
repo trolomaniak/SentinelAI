@@ -104,6 +104,7 @@ internal static partial class Program
             var refresh = RequireControl<Button>(window, "RefreshCoreButton");
             Ensure(navigation.Items.Count == model.Pages.Count && navigation.Items.Count > 1, "The native navigation is not bound to all placeholder pages.");
             Ensure(Keyboard.Focus(navigation) is not null && navigation.IsKeyboardFocusWithin, "Keyboard users cannot focus navigation.");
+            Ensure(model.CurrentPage.Id == PageId.Devices, "Desktop did not start in the implemented Devices workspace.");
 
             foreach (var size in new[] { new Size(window.MinWidth, window.MinHeight), new Size(window.Width, window.Height), new Size(1480, 960) })
             {
@@ -129,6 +130,26 @@ internal static partial class Program
                     Ensure(Descendants<ScrollViewer>(content).Any(scroll => scroll.ViewportWidth > 0 && scroll.ViewportHeight > 0),
                         "The page has no usable scroll viewport at the tested size.");
                 }
+            }
+
+            foreach (var (id, target) in new[]
+            {
+                ("OverviewDevicesButton", PageId.Devices), ("OverviewAlertsButton", PageId.Alerts),
+                ("OverviewRiskButton", PageId.Risk), ("OverviewReportsButton", PageId.Reports)
+            })
+            {
+                model.CurrentPage = model.Pages.Single(page => page.Id == PageId.Overview);
+                await FlushAsync();
+                Ensure(Descendants<OverviewView>(content).Count() == 1 && !Descendants<PlaceholderPage>(content).Any(),
+                    "Overview still displayed a placeholder instead of the local workflow guide.");
+                var shortcut = Descendants<Button>(content).Single(button => System.Windows.Automation.AutomationProperties.GetAutomationId(button) == id);
+                Ensure(shortcut.IsEnabled && shortcut.Command?.CanExecute(shortcut.CommandParameter) == true,
+                    "An Overview shortcut was not bound to the shell navigation command.");
+                var peer = new ButtonAutomationPeer(shortcut);
+                ((IInvokeProvider)peer.GetPattern(PatternInterface.Invoke)).Invoke();
+                await FlushAsync();
+                Ensure(model.CurrentPage.Id == target && ReferenceEquals(navigation.SelectedItem, model.CurrentPage),
+                    "A native Overview shortcut did not select its corresponding workspace.");
             }
 
             await WaitForAsync(() => !model.IsCheckingCore && client.Calls > 0, "Startup Core check did not complete.");

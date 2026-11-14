@@ -4,9 +4,9 @@ Szablony do pozyskania pierwszych firm pilotażowych. Nie trafiają do wydania: 
 
 ## Zanim wyślesz
 
-- **Zgoda na informację handlową.** W Polsce przesyłanie e-mailem informacji handlowej (marketingu bezpośredniego) bez wcześniejszej zgody odbiorcy jest zakazane, także między firmami (Prawo komunikacji elektronicznej oraz ustawa o świadczeniu usług drogą elektroniczną). Dlatego pierwszy mail tylko pyta o zgodę na przesłanie informacji, a opis pilotażu wysyłasz dopiero po odpowiedzi „tak”. Granica bywa różnie oceniana, więc przed większą wysyłką skonsultuj szablony z prawnikiem; to nie jest porada prawna.
+- **Podstawa kontaktu.** Przed wysyłką ustal, czy możesz przesłać danej osobie tę wiadomość, i zachowaj informację o zgodzie lub uzgodnieniu kontaktu. Publiczny adres firmowy ani nazwanie wiadomości „prośbą o zgodę” nie potwierdzają prawa do wysłania opisu produktu lub pilotażu. Poniższy mail 1 już taki opis zawiera; nie traktuj go jako automatycznego wyjątku od zasad dotyczących informacji handlowej. Wątpliwości co do konkretnej listy i sposobu kontaktu wymagają osobnej oceny; ten dokument nie potwierdza legalności wysyłki.
 - **Najpierw ciepłe kontakty.** Najbezpieczniej i najskuteczniej zaczynać od osób, które znasz, poleceń i firm, które same zostawiły kontakt (na przykład po rozmowie na wydarzeniu).
-- **RODO.** Adres w rodzaju imie.nazwisko@firma.pl to dane osobowe. Pierwszy mail zawiera krótką informację o przetwarzaniu (stopka poniżej). Prowadź listę osób, które odmówiły lub nie odpowiedziały, i nie pisz do nich ponownie; ich adresy usuń w terminie podanym w stopce.
+- **RODO.** Adres w rodzaju imie.nazwisko@firma.pl to dane osobowe. Pierwszy mail zawiera krótką informację o przetwarzaniu (stopka poniżej). Odnotuj odmowę lub sprzeciw i zakończ kontakt marketingowy. Brak odpowiedzi nie jest zgodą. Ustal okres przechowywania danych kontaktowych i zakres informacji dla odbiorcy; terminy i opis w stopce muszą odpowiadać rzeczywistemu postępowaniu.
 - **Jeden mail, jedna firma.** Pisz do konkretnej osoby, nie do listy. Bez śledzenia otwarć, bez załączników w pierwszym mailu i nigdy z instalatorem w załączniku.
 - **Nie obiecuj więcej niż pilotaż.** Bez deklaracji zgodności (RODO, NIS2, ISO), bez „gwarancji bezpieczeństwa” i straszenia atakami. Bez wersji na Linuksa lub macOS, dostępu przez przeglądarkę czy zdalnej pomocy, których pilotaż nie ma.
 
@@ -23,7 +23,7 @@ Firmy z około 5–50 komputerami z Windows 10 22H2 lub Windows 11 (64-bit), w j
 
 Nie pasują: firmy bez komputera, który może pozostać włączony, z komputerami w wielu lokalizacjach lub łączącymi się przez VPN, z komputerami Mac lub Linux, a także firmy, w których Smart App Control lub polityka EDR nie pozwolą uruchomić niepodpisanego instalatora.
 
-## Mail 1: pierwszy kontakt (prośba o zgodę)
+## Mail 1: krótki kontakt po wcześniejszym uzgodnieniu
 
 **Temat (do wyboru):**
 - Krótkie pytanie o komputery w [nazwa firmy]
@@ -33,46 +33,46 @@ Nie pasują: firmy bez komputera, który może pozostać włączony, z komputera
 ```text
 Dzień dobry,
 
-nazywam się [Imię Nazwisko] i tworzę w Polsce SentinelAI, program, który pokazuje małym firmom stan zabezpieczeń ich komputerów z Windows. Szukam kilku firm takich jak [nazwa firmy], które bezpłatnie wypróbują go u siebie i powiedzą mi szczerze, co o nim myślą.
+zgodnie z [wcześniejsza zgoda lub ustalenie kontaktu, data] piszę w sprawie SentinelAI. Nazywam się [Imię Nazwisko] i tworzę w Polsce program, który pokazuje małym firmom zaobserwowany stan zabezpieczeń ich komputerów z Windows. Szukam kilku firm takich jak [nazwa firmy], które bezpłatnie wypróbują go u siebie i powiedzą mi szczerze, co o nim myślą.
 
-Zanim cokolwiek prześlę, chcę zapytać: czy mogę wysłać krótką informację o pilotażu (jedna strona)? Wystarczy odpowiedzieć „tak”. Jeśli temat Państwa nie interesuje, wystarczy krótkie „nie” — nie napiszę ponownie.
+Czy chcą Państwo otrzymać krótką informację o pilotażu (jedna strona)? Wystarczy odpowiedzieć „tak”. Jeśli temat Państwa nie interesuje, wystarczy krótkie „nie” — nie napiszę ponownie.
 
 Pozdrawiam
 [Imię Nazwisko]
 [Firma] · [telefon] · [strona internetowa]
 
 ---
-Adres e-mail mam z [źródło, np. strony internetowej firmy]. Administratorem danych jest [Firma, adres]. Używam go tylko, aby zapytać o zgodę na przesłanie informacji; bez Państwa zgody usunę go w ciągu 30 dni. Mają Państwo prawo do dostępu do danych, ich usunięcia i sprzeciwu: [adres e-mail].
+Adres e-mail mam z [rzeczywiste źródło i uzgodnienie kontaktu]. Administratorem danych jest [Firma, adres]. Używam go do [rzeczywisty cel i podstawa przetwarzania], przez [uzasadniony okres przechowywania]. Informacje o przetwarzaniu i prawach: [link do właściwej informacji]. Kontakt w sprawie danych i sprzeciwu: [adres e-mail].
 ```
 
 **Wariant dla biura rachunkowego** (zamiast pierwszego akapitu):
 
 ```text
-nazywam się [Imię Nazwisko] i tworzę w Polsce SentinelAI, program, który w jednym miejscu pokazuje, czy komputery w biurze są dobrze zabezpieczone: czy dyski są zaszyfrowane, antywirus działa, a aktualizacje są instalowane. Biura rachunkowe przechowują dane wielu klientów, dlatego szukam kilku z nich, które bezpłatnie wypróbują program u siebie i powiedzą mi szczerze, co o nim myślą.
+zgodnie z [wcześniejsza zgoda lub ustalenie kontaktu, data] piszę w sprawie SentinelAI. Tworzę program, który w jednym miejscu pokazuje zgłoszony stan szyfrowania dysków i antywirusa, ustawienia aktualizacji oraz czas ostatniej odnotowanej instalacji aktualizacji. Biura rachunkowe przechowują dane wielu klientów, dlatego szukam kilku z nich, które bezpłatnie wypróbują program u siebie i powiedzą mi szczerze, co o nim myślą.
 ```
 
 **Wariant dla firmy informatycznej (partnera):**
 
 ```text
-nazywam się [Imię Nazwisko] i tworzę w Polsce SentinelAI, program, który pokazuje stan zabezpieczeń komputerów z Windows w małej firmie: jeden komputer centralny, mały Agent na każdym komputerze, dane zostają u klienta. Szukam firm informatycznych, które przeprowadzą bezpłatny pilotaż u jednego lub kilku swoich klientów i powiedzą mi, czego brakuje do codziennej pracy.
+zgodnie z [wcześniejsza zgoda lub ustalenie kontaktu, data] piszę w sprawie SentinelAI, programu, który pokazuje zaobserwowany stan zabezpieczeń komputerów z Windows w małej firmie: jeden komputer centralny, mały Agent na każdym komputerze, dane zostają u klienta. Szukam firm informatycznych, które przeprowadzą bezpłatny pilotaż u jednego lub kilku swoich klientów i powiedzą mi, czego brakuje do codziennej pracy.
 ```
 
-## Mail 2: jedno przypomnienie (opcjonalne, po 5–7 dniach roboczych, tylko bez odpowiedzi)
+## Mail 2: jedno uzgodnione przypomnienie (opcjonalne)
 
-Przypomnienie to kolejna wiadomość bez zgody odbiorcy; wysyłaj je tylko wtedy, gdy zaakceptujesz to ryzyko po konsultacji prawnej.
+Użyj wyłącznie wtedy, gdy odbiorca wcześniej zgodził się na taki kontakt lub uzgodnił termin przypomnienia. Brak odpowiedzi na mail 1 nie jest podstawą do kolejnej wysyłki. Uwzględnij każdą późniejszą odmowę lub sprzeciw.
 
 **Temat:** Re: [temat maila 1]
 
 ```text
 Dzień dobry,
 
-wracam jeden raz do pytania z [data]: czy mogę przesłać krótką informację o bezpłatnym pilotażu SentinelAI? Jeśli nie, rozumiem i nie będę pisać ponownie.
+zgodnie z [uzgodnienie przypomnienia] wracam do pytania z [data]: czy mogę przesłać krótką informację o bezpłatnym pilotażu SentinelAI? Jeśli nie, rozumiem i nie będę pisać ponownie.
 
 Pozdrawiam
 [Imię Nazwisko]
 ```
 
-Po braku odpowiedzi na przypomnienie zakończ kontakt i usuń adres zgodnie ze stopką.
+Po braku odpowiedzi na uzgodnione przypomnienie zakończ kontakt. Dane kontaktowe przechowuj zgodnie z rzeczywistym celem i informacją przekazaną odbiorcy.
 
 ## Mail 3: informacja o pilotażu (po zgodzie)
 
@@ -84,17 +84,17 @@ Dzień dobry,
 dziękuję za zgodę. Krótko o pilotażu:
 
 Czym jest SentinelAI
-Program dla firm bez własnego zespołu bezpieczeństwa. Na jednym komputerze w firmie pokazuje, czy komputery z Windows są dobrze zabezpieczone i co wymaga uwagi:
+Program dla firm bez własnego zespołu bezpieczeństwa. Na jednym komputerze w firmie pokazuje zaobserwowany stan zabezpieczeń komputerów z Windows i to, co wymaga uwagi:
 - czy dyski są zaszyfrowane (BitLocker), antywirus i Microsoft Defender działają, a zapora jest włączona;
 - czy aktualizacje Windows są instalowane i czy komputer czeka na ponowne uruchomienie;
 - ryzykowne ustawienia, np. wyłączona Kontrola konta użytkownika, stary protokół SMB1 albo automatyczne logowanie;
 - podejrzane zdarzenia, np. znalezienie złośliwego oprogramowania, wyłączenie Defendera, wyczyszczenie dziennika zdarzeń, powtarzające się nieudane logowania;
-- znane podatności w popularnych programach i w Windows, na podstawie dostarczanych przez nas danych;
+- znane podatności w obsługiwanych programach i wydaniach Windows, po zaimportowaniu podpisanych danych albo pobraniu ich przy włączonym sprawdzaniu aktualizacji; pokazuje też wiek danych i programy, których nie oceniono;
 - ocenę ryzyka każdego komputera z wyjaśnieniem, alerty z zalecanym działaniem, rejestr ryzyk firmy i raport za wybrany okres.
-Nie zastępuje antywirusa: sprawdza, czy ochrona, którą Państwo już mają, jest włączona i działa. Agent na komputerach tylko odczytuje dane i niczego nie zmienia.
+Nie zastępuje antywirusa: pokazuje zgłoszony stan obecnej ochrony i nie naprawia automatycznie wykrytych problemów. Instalacja nadaje Agentowi dostęp do potrzebnych dzienników Windows i włącza wymagane audytowanie; podpisane aktualizacje mogą wymieniać własne komponenty programu.
 
 Dane zostają w firmie
-Wszystko jest przechowywane na komputerze centralnym w Państwa sieci. Nic nie jest wysyłane do nas ani do chmury. Program i raporty są po polsku.
+Telemetria jest przechowywana na komputerze centralnym w Państwa sieci; standardowy pilotaż nie wysyła jej do nas. Sprawdzanie aktualizacji na serwerze dostawcy jest opcjonalne i domyślnie wyłączone. Osobno skonfigurowana funkcja AI wymaga uprawnienia i zgody na sesję, a wysyła jedynie ograniczony kontekst wybranego alertu; klucz pilotażowy jej nie włącza. Program i raporty są po polsku.
 
 Warunki pilotażu
 - bezpłatnie, zwykle przez 30–90 dni, bez limitu komputerów i bez zobowiązań;
@@ -102,7 +102,7 @@ Warunki pilotażu
 - w zamian proszę o dwie krótkie rozmowy: po pierwszym tygodniu i pod koniec pilotażu;
 - po zakończeniu monitorowanie działa dalej; program można w każdej chwili odinstalować, a dane zostają, dopóki sami ich nie usuną.
 
-Uczciwie: to wersja pilotażowa. Nie przeszła jeszcze niezależnego audytu bezpieczeństwa, a instalatory nie są podpisane cyfrowo, więc Windows wyświetli ostrzeżenie SmartScreen. Szczegóły i ograniczenia opisuje dokument „SentinelAI dla firm”: [link].
+Uczciwie: to wersja pilotażowa. Nie przeszła jeszcze niezależnego audytu bezpieczeństwa, a instalatory nie mają jeszcze podpisu wydawcy Authenticode, więc Windows może wyświetlić ostrzeżenie SmartScreen. Szczegóły i ograniczenia opisuje dokument „SentinelAI dla firm”: [link].
 
 Jeśli to brzmi interesująco, proponuję 20-minutową rozmowę, żeby sprawdzić, czy SentinelAI pasuje do Państwa firmy: [dwa–trzy terminy] albo [link do kalendarza].
 
@@ -159,9 +159,9 @@ Dziękuję za pomoc
 
 ## Krótkie odpowiedzi na częste pytania
 
-- **„Czy widzicie nasze dane?”** Nie. Wszystko zostaje na komputerze centralnym w Państwa sieci; program nic do nas nie wysyła.
-- **„Czy to spowolni komputery?”** Agent tylko odczytuje ustawienia i wybrane zdarzenia Windows i przesyła niewielkie ilości danych do komputera centralnego.
+- **„Czy widzicie nasze dane?”** Standardowy pilotaż przechowuje telemetrię u Państwa. Opcjonalne sprawdzanie aktualizacji łączy się z serwerem dostawcy; oddzielna funkcja AI wysyła ograniczony kontekst wybranego alertu dopiero po konfiguracji, uzyskaniu uprawnienia i zgodzie na sesję. Klucz pilotażowy nie włącza AI.
+- **„Czy to spowolni komputery?”** Zbieranie i przesyłanie danych ma ograniczenia rozmiaru i częstotliwości. Wpływ na pracę konkretnych komputerów sprawdzimy w pilotażu; nie obiecujemy braku obciążenia.
 - **„Czy to zastępuje antywirusa?”** Nie. Sprawdza, czy antywirus i inne zabezpieczenia są włączone i działają.
 - **„Czy to zapewnia zgodność z RODO lub NIS2?”** Nie deklarujemy zgodności z żadnymi normami ani przepisami. Program pomaga zobaczyć stan zabezpieczeń komputerów; ocenę zgodności robi się osobno.
 - **„Ile to będzie kosztować po pilotażu?”** [Uzupełnij przed wysyłką; do czasu decyzji: „Pilotaż jest bezpłatny i nie zobowiązuje. Warunki dalszego korzystania ustalimy razem, także na podstawie Państwa opinii.”]
-- **„Dlaczego Windows ostrzega przed instalatorem?”** Instalatory pilotażu nie są jeszcze podpisane cyfrowo, więc SmartScreen pokazuje nieznanego wydawcę. Dlatego zawsze sprawdzamy plik po sumie kontrolnej SHA-256 z naszej strony.
+- **„Dlaczego Windows ostrzega przed instalatorem?”** Instalatory pilotażu nie mają jeszcze podpisu wydawcy Authenticode; Windows może ostrzegać o nieznanym wydawcy. Podpisane paczki wewnątrz instalatora i suma kontrolna SHA-256 nie zastępują podpisu wydawcy. Plik i sumę pobieramy z zaufanego kanału dostawcy.
