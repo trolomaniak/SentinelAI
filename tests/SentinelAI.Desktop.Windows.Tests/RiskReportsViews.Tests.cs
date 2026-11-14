@@ -438,6 +438,8 @@ internal static partial class Program
     {
         using var health = new FakeCoreClient();
         using var shell = new ShellViewModel(health, "session-ordering-test");
+        // This concurrency fixture intentionally starts on a page with no protected reads.
+        shell.CurrentPage = shell.Pages.Single(page => page.Id == PageId.Overview);
         using var auth = new AuthenticationViewModel(new FakeAuthenticationClient { AllowSignIn = true },
             new FakeAdministratorSetup { Created = true });
         var riskClient = new NativeRiskClient();

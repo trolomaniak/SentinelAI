@@ -1,6 +1,6 @@
 # Desktop administrator setup and sign-in
 
-The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. Desktop is the only interface: Devices, Alerts/incidents, Risk and Reports provide native workspaces. Settings provides licensing and session AI consent; Overview remains a placeholder. See [native Risk and Reports](DESKTOP-RISK-REPORTS.md).
+The native desktop creates the first local administrator and signs in through Core. Core remains the authority for account creation, password hashing and verification. The desktop never opens SQLite or stores credentials. Desktop is the only interface: Devices, Alerts/incidents, Risk and Reports provide native workspaces. Settings provides licensing and session AI consent. A newly opened Desktop selects Devices after sign-in; Overview provides a workflow guide with shortcuts to the local workspaces. See [native Risk and Reports](DESKTOP-RISK-REPORTS.md).
 
 ## Fresh installation
 

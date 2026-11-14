@@ -1,5 +1,8 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using SentinelAI.Updater;
@@ -46,6 +49,117 @@ internal static class AgentUpdateApplierTests
                 "The SYSTEM updater must never delete from the Agent's data directory.");
             Ensure(await applier.ApplyAsync(CancellationToken.None) == AgentUpdateOutcome.NoUpdate && service.Stops == 1,
                 "An installed update must not be installed again.");
+        }
+
+        using (var fixture = new Fixture())
+        {
+            fixture.Stage("1.1.0", "candidate");
+            var original = File.ReadAllBytes(fixture.Layout.Receipt);
+            string? permissions = null;
+            string[]? accessRules = null;
+            UnixFileMode mode = 0;
+            if (OperatingSystem.IsWindows())
+            {
+                // Match Agent Setup's receipt, not an inherited Windows temp ACL:
+                // inheritance is blocked and only Administrators/SYSTEM may access it.
+                var protectedAccess = new FileSecurity();
+                protectedAccess.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+                foreach (var sid in new[] { "S-1-5-32-544", "S-1-5-18" })
+                    protectedAccess.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid),
+                        FileSystemRights.FullControl, AccessControlType.Allow));
+                new FileInfo(fixture.Layout.Receipt).SetAccessControl(protectedAccess);
+                var before = new FileInfo(fixture.Layout.Receipt).GetAccessControl(AccessControlSections.Access);
+                permissions = before.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+                accessRules = before.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
+                    .Select(DescribeAccessRule)
+                    .Order(StringComparer.Ordinal).ToArray();
+                Ensure(before.AreAccessRulesProtected && before.AreAccessRulesCanonical && accessRules.Length == 2,
+                    "The Windows receipt fixture does not match Setup's protected access policy.");
+            }
+            else
+            {
+                mode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                File.SetUnixFileMode(fixture.Layout.Receipt, mode);
+            }
+            // Readers that already opened the ownership proof must continue to
+            // see a complete old document while new readers see the new one.
+            using var reader = new FileStream(fixture.Layout.Receipt, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            var service = new Service();
+            var applier = new AgentUpdateApplier(fixture.Layout, service, updater);
+            Ensure(await applier.ApplyAsync(CancellationToken.None) == AgentUpdateOutcome.Installed,
+                "A concurrent reader must not prevent atomic receipt publication.");
+            var observed = new byte[checked((int)reader.Length)];
+            reader.ReadExactly(observed);
+            Ensure(observed.SequenceEqual(original) && fixture.ReceiptFields()["version"] == "1.1.0",
+                "Receipt replacement exposed a truncated or partially rewritten ownership proof.");
+            if (OperatingSystem.IsWindows())
+            {
+                var after = new FileInfo(fixture.Layout.Receipt).GetAccessControl(AccessControlSections.Access);
+                var actualRules = after.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
+                    .Select(DescribeAccessRule)
+                    .Order(StringComparer.Ordinal).ToArray();
+                // Compare every authority-bearing field. Windows can normalize the
+                // descriptor's auto-inheritance bookkeeping without changing rights.
+                var actualPermissions = after.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+                var expectedPermissions = permissions!;
+                Ensure(after.AreAccessRulesProtected && after.AreAccessRulesCanonical && actualRules.SequenceEqual(accessRules!),
+                    "Atomic receipt replacement changed its protected Windows access policy. Before=" +
+                    expectedPermissions[..Math.Min(expectedPermissions.Length, 1024)] + "; After=" +
+                    actualPermissions[..Math.Min(actualPermissions.Length, 1024)]);
+            }
+            else
+                Ensure(File.GetUnixFileMode(fixture.Layout.Receipt) == mode,
+                    "Atomic receipt replacement changed its file permissions.");
+            Ensure(!Directory.EnumerateFiles(Path.GetDirectoryName(fixture.Layout.Receipt)!, "*.tmp").Any(),
+                "Receipt publication left a temporary ownership document.");
+
+            // Simulate interruption after the signed code commit but before the
+            // ownership receipt was published: a later run reconciles the old proof.
+            File.WriteAllBytes(fixture.Layout.Receipt, original);
+            Ensure(await applier.ApplyAsync(CancellationToken.None) == AgentUpdateOutcome.NoUpdate &&
+                   fixture.ReceiptFields()["version"] == "1.1.0" && service.Stops == 1,
+                "An interrupted ownership receipt publication did not reconcile from the signed installed receipt.");
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            using var fixture = new Fixture();
+            fixture.Stage("1.1.0", "candidate");
+            var original = File.ReadAllBytes(fixture.Layout.Receipt);
+            var directory = Path.GetDirectoryName(fixture.Layout.Receipt)!;
+            var mode = File.GetUnixFileMode(directory);
+            var service = new Service();
+            var applier = new AgentUpdateApplier(fixture.Layout, service, updater);
+            try
+            {
+                // A protected directory that temporarily refuses new files makes
+                // publication fail after the code transaction has committed.
+                File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                var failed = false;
+                try { await applier.ApplyAsync(CancellationToken.None); }
+                catch (UnauthorizedAccessException) { failed = true; }
+                Ensure(failed && fixture.Code == "candidate" && File.ReadAllBytes(fixture.Layout.Receipt).SequenceEqual(original),
+                    "A failed receipt publication must retain the complete previous ownership proof.");
+            }
+            finally { File.SetUnixFileMode(directory, mode); }
+            Ensure(await applier.ApplyAsync(CancellationToken.None) == AgentUpdateOutcome.NoUpdate &&
+                   fixture.ReceiptFields()["version"] == "1.1.0" && service.Stops == 1,
+                "Retry after failed receipt publication must reconcile without installing the code again.");
+        }
+
+        using (var fixture = new Fixture())
+        {
+            fixture.Stage("1.1.0", "candidate");
+            var original = File.ReadAllBytes(fixture.Layout.Receipt);
+            var service = new Service();
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            var cancelled = false;
+            try { await new AgentUpdateApplier(fixture.Layout, service, updater).ApplyAsync(cancellation.Token); }
+            catch (OperationCanceledException) { cancelled = true; }
+            Ensure(cancelled && service.Stops == 0 && File.ReadAllBytes(fixture.Layout.Receipt).SequenceEqual(original),
+                "Cancellation must preserve a complete ownership proof without stopping the Agent.");
         }
 
         foreach (var (label, prepare) in new (string, Action<Fixture>)[]
@@ -103,9 +217,14 @@ internal static class AgentUpdateApplierTests
         }
 
         Console.WriteLine($"Agent update installation tests passed ({assertions} assertions: newer only, exact receipt update, " +
-                          "no deletes in the Agent's data, tampered, foreign, other channel, other artifact, linked staging, rollback retried three times, strict receipt).");
+                          "atomic protected receipt and recovery, cancellation, no deletes in the Agent's data, tampered, foreign, " +
+                          "other channel, other artifact, linked staging, rollback retried three times, strict receipt).");
         return assertions;
     }
+
+    [SupportedOSPlatform("windows")]
+    private static string DescribeAccessRule(FileSystemAccessRule rule) =>
+        $"{rule.IdentityReference.Value}|{rule.AccessControlType}|{(int)rule.FileSystemRights}|{rule.InheritanceFlags}|{rule.PropagationFlags}|{rule.IsInherited}";
 
     private sealed class Service : IServiceUpdateLifecycle
     {

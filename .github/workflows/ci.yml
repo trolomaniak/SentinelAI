@@ -54,6 +54,18 @@ jobs:
             Write-Output "::error title=Windows Agent enrollment test::$message"
           }
           exit $testExitCode
+      - name: Run signed update and ownership receipt tests on Windows
+        shell: pwsh
+        run: |
+          dotnet run --project tests/SentinelAI.Updates.Tests/SentinelAI.Updates.Tests.csproj --configuration Release *> "$env:RUNNER_TEMP\sentinelai-update-test.log"
+          $testExitCode = $LASTEXITCODE
+          $tail = Get-Content "$env:RUNNER_TEMP\sentinelai-update-test.log" | Select-Object -Last 25
+          $tail
+          if ($testExitCode -ne 0) {
+            $message = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows signed update test::$message"
+          }
+          exit $testExitCode
       - name: Verify native posture change monitoring on Windows
         shell: pwsh
         run: |

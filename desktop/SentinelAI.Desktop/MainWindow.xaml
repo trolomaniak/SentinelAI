@@ -9,6 +9,7 @@
         AutomationProperties.AutomationId="SentinelAIMainWindow">
     <Window.Resources>
         <DataTemplate x:Key="PlaceholderTemplate"><views:PlaceholderPage /></DataTemplate>
+        <DataTemplate x:Key="OverviewTemplate"><views:OverviewView /></DataTemplate>
         <DataTemplate x:Key="DevicesTemplate">
             <views:DevicesView DataContext="{Binding Devices, RelativeSource={RelativeSource AncestorType=Window}}" />
         </DataTemplate>

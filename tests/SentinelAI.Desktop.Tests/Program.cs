@@ -61,18 +61,18 @@ void NavigationTests()
     using var shell = new ShellViewModel(client, "1.2.3-test");
     Ensure(shell.Title == "SentinelAI" && shell.Version == "1.2.3-test", "The shell lost the application title or supplied version.");
     Ensure(shell.Pages.Select(page => page.Id).SequenceEqual(Enum.GetValues<PageId>()), "Navigation must contain each assigned page exactly once in order.");
-    Ensure(shell.CurrentPage.Id == PageId.Overview, "Startup must select Overview.");
-    Ensure(shell.Pages.All(page => !string.IsNullOrWhiteSpace(page.Title) && !string.IsNullOrWhiteSpace(page.Description)), "All placeholder pages need a title and explanation.");
+    Ensure(shell.CurrentPage.Id == PageId.Devices, "Startup must select the implemented Devices workspace.");
+    Ensure(shell.Pages.All(page => !string.IsNullOrWhiteSpace(page.Title) && !string.IsNullOrWhiteSpace(page.Description)), "All navigation pages need a title and explanation.");
     Ensure(((ICollection<NavigationPage>)shell.Pages).IsReadOnly, "A caller can mutate the navigation collection.");
     Throws<NotSupportedException>(() => ((IList<NavigationPage>)shell.Pages)[0] = new NavigationPage(PageId.Settings, "Injected", "Injected"), "Navigation was mutable.");
     Ensure(client.Calls == 0 && !shell.IsCheckingCore && shell.RefreshCoreCommand.CanExecute(null), "Constructing the shell must not block on a network request.");
 
     var changes = new List<string?>();
     shell.PropertyChanged += (_, args) => changes.Add(args.PropertyName);
-    foreach (var page in shell.Pages.Skip(1))
+    foreach (var page in shell.Pages.Where(page => !ReferenceEquals(page, shell.CurrentPage)).ToArray())
     {
         shell.CurrentPage = page;
-        Ensure(ReferenceEquals(shell.CurrentPage, page), "Navigation failed to select its placeholder.");
+        Ensure(ReferenceEquals(shell.CurrentPage, page), "Navigation failed to select its page.");
     }
     Ensure(changes.Count == shell.Pages.Count - 1 && changes.All(name => name == nameof(shell.CurrentPage)), "Navigation must notify only actual page changes.");
     shell.CurrentPage = shell.CurrentPage;
@@ -82,6 +82,20 @@ void NavigationTests()
     Throws<ArgumentException>(() => shell.CurrentPage = new NavigationPage((PageId)99, "Injected", "Injected"), "An undefined page entered the shell.");
     Throws<ArgumentNullException>(() => shell.CurrentPage = null!, "A null page entered the shell.");
     Ensure(ReferenceEquals(shell.CurrentPage, selected) && changes.Count == shell.Pages.Count - 1, "Rejected navigation changed selection or raised notifications.");
+    foreach (var id in new[] { PageId.Devices, PageId.Alerts, PageId.Risk, PageId.Reports })
+    {
+        Ensure(shell.NavigateCommand.CanExecute(id), "An implemented Overview shortcut was disabled.");
+        shell.NavigateCommand.Execute(id);
+        Ensure(shell.CurrentPage.Id == id, "An Overview shortcut failed to select its existing workspace.");
+    }
+    selected = shell.CurrentPage;
+    foreach (var invalid in new object?[] { null, "Devices", (PageId)99, selected with { Title = "Injected" } })
+    {
+        Ensure(!shell.NavigateCommand.CanExecute(invalid), "An unknown navigation command parameter was accepted.");
+        shell.NavigateCommand.Execute(invalid);
+        Ensure(ReferenceEquals(shell.CurrentPage, selected), "An invalid shortcut changed the active page.");
+    }
+    Ensure(client.Calls == 0, "Navigation shortcuts must not make an unauthenticated shell request.");
     Throws<ArgumentNullException>(() => _ = new ShellViewModel(null!, "1.0"), "A null service was accepted.");
     Throws<ArgumentException>(() => _ = new ShellViewModel(client, " "), "An empty application version was accepted.");
 }
@@ -150,6 +164,8 @@ async Task ShellLifecycleTestsAsync()
         await pending.WaitAsync(TimeSpan.FromSeconds(2));
         Ensure(shell.CoreStatusText == disposedStatus && notificationsAfterDisposal == 0, "A stale successful response changed the disposed shell.");
         Throws<ObjectDisposedException>(() => shell.CurrentPage = shell.Pages[1], "Disposed navigation accepted further changes.");
+        Ensure(!shell.NavigateCommand.CanExecute(PageId.Devices), "A disposed shell still offered navigation shortcuts.");
+        shell.NavigateCommand.Execute(PageId.Devices);
     }
 
     using (var client = new ControlledCoreClient())

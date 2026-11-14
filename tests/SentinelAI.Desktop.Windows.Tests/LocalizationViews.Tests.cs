@@ -24,6 +24,13 @@ internal static partial class Program
                 await WaitForAsync(() => auth.State == AuthenticationState.SignedOut, "Polish fixture did not reach sign-in.");
                 auth.Username = "native-polish-admin";
                 await auth.SignInAsync("Synthetic-Polish-Admin!".AsMemory());
+                Ensure(shell.CurrentPage.Id == PageId.Devices && shell.CurrentPage.Title == "Urządzenia", "The initial Devices workspace was not localized.");
+                shell.CurrentPage = shell.Pages.Single(page => page.Id == PageId.Overview);
+                await FlushAsync();
+                var overview = Descendants<OverviewView>(window).Single();
+                Ensure(Descendants<Button>(overview).Any(button => button.Content as string == "Urządzenia") &&
+                       Descendants<TextBlock>(overview).Any(text => text.Text.StartsWith("Sprawdź komputery", StringComparison.Ordinal)),
+                    "The Overview guide and navigation shortcuts were not shown in Polish.");
                 shell.CurrentPage = shell.Pages.Single(page => page.Id == PageId.RiskRegister);
                 await WaitForAsync(() => register.ListState == RiskRegisterListState.Ready, "The Polish Risk Register page did not read Core's records.");
                 await FlushAsync();

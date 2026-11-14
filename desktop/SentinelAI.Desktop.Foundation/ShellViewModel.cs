@@ -10,6 +10,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
     private readonly ICoreClient _client;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly RefreshCommand _refreshCommand;
+    private readonly NavigationCommand _navigateCommand;
     private NavigationPage _currentPage;
     private string _coreStatusText = T("Core status not checked");
     private bool _isCheckingCore;
@@ -32,14 +33,16 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
             new NavigationPage(PageId.Reports, T("Reports"), T("Local security reports.")),
             new NavigationPage(PageId.Settings, T("Settings"), T("Local application settings and licensing."))
         });
-        _currentPage = Pages[0];
+        _currentPage = Pages.Single(page => page.Id == PageId.Devices);
         _refreshCommand = new RefreshCommand(this);
+        _navigateCommand = new NavigationCommand(this);
     }
 
     public string Title => T("SentinelAI");
     public string Version { get; }
     public IReadOnlyList<NavigationPage> Pages { get; }
     public ICommand RefreshCoreCommand => _refreshCommand;
+    public ICommand NavigateCommand => _navigateCommand;
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public NavigationPage CurrentPage
@@ -132,6 +135,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
             if (_disposed)
                 return;
             _disposed = true;
+            _navigateCommand.RaiseCanExecuteChanged();
             SetCoreState(_coreStatusText, false);
             _refreshCommand.RaiseCanExecuteChanged();
             _lifetime.Cancel();
@@ -139,6 +143,23 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
             if (_pendingRefresh is null)
                 _lifetime.Dispose();
         }
+    }
+
+    private sealed class NavigationCommand(ShellViewModel owner) : ICommand
+    {
+        public event EventHandler? CanExecuteChanged;
+        public bool CanExecute(object? parameter)
+        {
+            lock (owner._gate) return !owner._disposed && parameter is PageId id && owner.Pages.Any(page => page.Id == id);
+        }
+
+        public void Execute(object? parameter)
+        {
+            lock (owner._gate)
+                if (CanExecute(parameter)) owner.CurrentPage = owner.Pages.Single(page => page.Id == (PageId)parameter!);
+        }
+
+        public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private sealed class RefreshCommand(ShellViewModel owner) : ICommand

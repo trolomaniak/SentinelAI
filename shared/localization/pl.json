@@ -1164,5 +1164,7 @@
  "{0} unknown scope": "nieznany zakres: {0}",
  "{0} unused codes.": "Niewykorzystane kody: {0}.",
  "{0} · {1} total · {2} available": "{0} · łącznie {1} · wolne {2}",
- "{0}; {1}; {2} of {3} known": "{0}; {1}; znane {2} z {3}"
+ "{0}; {1}; {2} of {3} known": "{0}; {1}; znane {2} z {3}",
+ "Review computers, investigate alerts, prioritize findings and save a local report.": "Sprawdź komputery, przeanalizuj alerty, ustal priorytety i zapisz lokalny raport.",
+ "Check observation times and coverage when reviewing results. An empty alert list does not establish that a computer is secure.": "Oceniając wyniki, sprawdzaj czas obserwacji i zakres zebranych danych. Pusta lista alertów nie oznacza, że komputer jest bezpieczny."
 }
