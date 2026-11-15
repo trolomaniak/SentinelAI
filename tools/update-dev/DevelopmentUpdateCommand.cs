@@ -104,7 +104,7 @@ public static class DevelopmentUpdateCommand
             }
             return 0;
         }
-        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or
+        catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or
                                          UpdateValidationException or CryptographicException or FormatException or JsonException or
                                          InvalidOperationException or KeyNotFoundException)
         {
