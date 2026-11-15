@@ -173,6 +173,7 @@ try
     await RiskApiTests.VerifyAsync(username, password);
     await SecurityEventApiTests.VerifyAsync(username, password);
     await DefenderDetectionApiTests.VerifyAsync(username, password);
+    await HeartbeatConcurrencyTests.RunAsync();
     await EndpointTelemetryApiTests.VerifyAsync(username, password);
     await AgentUpdateApiTests.VerifyAsync();
     await CentralUpdateTests.VerifyAsync();
@@ -321,7 +322,6 @@ try
 
     await LocalNetworkTests.RunAsync(username, password);
     await CoreServiceHostingTests.RunAsync();
-    await HeartbeatConcurrencyTests.RunAsync();
     await DesktopAuthenticationTests.RunAsync();
     Console.WriteLine("Core integration tests passed.");
 }
