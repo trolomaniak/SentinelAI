@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using SentinelAI.Contracts.Heartbeat;
 
@@ -18,6 +19,8 @@ public static class DeviceEnrollmentStatus
 
 public sealed class DeviceStore(AdminStore admins)
 {
+    private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(30);
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = CreateConnection();
@@ -44,9 +47,13 @@ public sealed class DeviceStore(AdminStore admins)
         }
 
         var utcTicks = DateTimeOffset.UtcNow.UtcDateTime.Ticks;
-        await using var connection = CreateConnection();
+        await using var connection = CreateConnection(defaultTimeout: 1);
         await connection.OpenAsync(cancellationToken);
+        var writeWait = Stopwatch.StartNew();
+        using var transaction = await RetryBusyAsync(
+            () => connection.BeginTransaction(deferred: false), writeWait, cancellationToken);
         await using var upsert = connection.CreateCommand();
+        upsert.Transaction = transaction;
         upsert.CommandText = """
             INSERT INTO Devices (InstallationId, LastSeenUtcTicks, HealthStatus, EnrollmentStatus)
             SELECT $installationId, $lastSeenUtcTicks, $healthStatus, $enrollmentStatus
@@ -67,17 +74,21 @@ public sealed class DeviceStore(AdminStore admins)
         upsert.Parameters.AddWithValue("$healthStatus", DeviceHealthStatus.Reporting);
         upsert.Parameters.AddWithValue("$enrollmentStatus", DeviceEnrollmentStatus.Unverified);
 
-        await using var reader = await upsert.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
+        DeviceRecord? device = null;
+        await using (var reader = await upsert.ExecuteReaderAsync(cancellationToken))
         {
-            return null;
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                device = new DeviceRecord(
+                    installationId,
+                    new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
+                    reader.GetString(1),
+                    reader.GetString(2));
+            }
         }
 
-        return new DeviceRecord(
-            installationId,
-            new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
-            reader.GetString(1),
-            reader.GetString(2));
+        await CommitHeartbeatAsync(transaction, writeWait, cancellationToken);
+        return device;
     }
 
     public async Task<DeviceRecord> RecordEnrolledHeartbeatAsync(
@@ -90,9 +101,13 @@ public sealed class DeviceStore(AdminStore admins)
         }
 
         var utcTicks = DateTimeOffset.UtcNow.UtcDateTime.Ticks;
-        await using var connection = CreateConnection();
+        await using var connection = CreateConnection(defaultTimeout: 1);
         await connection.OpenAsync(cancellationToken);
+        var writeWait = Stopwatch.StartNew();
+        using var transaction = await RetryBusyAsync(
+            () => connection.BeginTransaction(deferred: false), writeWait, cancellationToken);
         await using var upsert = connection.CreateCommand();
+        upsert.Transaction = transaction;
         upsert.CommandText = """
             INSERT INTO Devices (InstallationId, LastSeenUtcTicks, HealthStatus, EnrollmentStatus)
             VALUES ($installationId, $lastSeenUtcTicks, $healthStatus, $enrollmentStatus)
@@ -106,15 +121,21 @@ public sealed class DeviceStore(AdminStore admins)
         upsert.Parameters.AddWithValue("$lastSeenUtcTicks", utcTicks);
         upsert.Parameters.AddWithValue("$healthStatus", DeviceHealthStatus.Reporting);
         upsert.Parameters.AddWithValue("$enrollmentStatus", DeviceEnrollmentStatus.Enrolled);
-        await using var reader = await upsert.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
+        DeviceRecord device;
+        await using (var reader = await upsert.ExecuteReaderAsync(cancellationToken))
         {
-            throw new InvalidOperationException("The enrolled heartbeat was not persisted.");
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                throw new InvalidOperationException("The enrolled heartbeat was not persisted.");
+            }
+
+            device = new DeviceRecord(installationId,
+                new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
+                reader.GetString(1), reader.GetString(2));
         }
 
-        return new DeviceRecord(installationId,
-            new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
-            reader.GetString(1), reader.GetString(2));
+        await CommitHeartbeatAsync(transaction, writeWait, cancellationToken);
+        return device;
     }
 
     public async Task<DeviceRecord?> FindByInstallationIdAsync(
@@ -159,13 +180,42 @@ public sealed class DeviceStore(AdminStore admins)
         return (long)(await count.ExecuteScalarAsync(cancellationToken) ?? 0L);
     }
 
-    private SqliteConnection CreateConnection()
+    private static Task CommitHeartbeatAsync(SqliteTransaction transaction, Stopwatch writeWait,
+        CancellationToken cancellationToken) => RetryBusyAsync(() =>
+        {
+            // Dispose RETURNING's reader before COMMIT. Autocommit on reader disposal
+            // does not run the provider's busy retry and can otherwise fail immediately.
+            transaction.Commit();
+            return true;
+        }, writeWait, cancellationToken);
+
+    private static async Task<T> RetryBusyAsync<T>(Func<T> operation, Stopwatch writeWait,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return operation();
+            }
+            catch (SqliteException exception) when (
+                exception.SqliteErrorCode == 5 && writeWait.Elapsed < WriteTimeout)
+            {
+                // SQLite's async API waits synchronously for locks. One-second native
+                // attempts keep cancellation bounded; BEGIN and COMMIT share 30s of retries.
+                await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken);
+            }
+        }
+    }
+
+    private SqliteConnection CreateConnection(int defaultTimeout = 30)
     {
         var connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = admins.DatabasePath,
             Mode = SqliteOpenMode.ReadWrite,
-            DefaultTimeout = 30
+            DefaultTimeout = defaultTimeout
         };
         return new SqliteConnection(connectionString.ToString());
     }

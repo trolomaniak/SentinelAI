@@ -104,7 +104,7 @@ public static class DevelopmentUpdateCommand
             }
             return 0;
         }
-        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or
+        catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or
                                          UpdateValidationException or CryptographicException or FormatException or JsonException or
                                          InvalidOperationException or KeyNotFoundException)
         {
@@ -167,7 +167,9 @@ public static class DevelopmentUpdateCommand
         try
         {
             foreach (var file in files) documents.Add(await ReadAsync(file));
-            var feed = VulnerabilityFeedBuilder.Build(curated, documents.Select(document => document.RootElement), kev.RootElement,
+            var pages = documents.Select(document => document.RootElement).ToArray();
+            VulnerabilityNvdPages.ValidateComplete(pages);
+            var feed = VulnerabilityFeedBuilder.Build(curated, pages, kev.RootElement,
                 Time("generated"), Time("nvd-retrieved"), Time("kev-retrieved"));
             await using var destination = CreatePrivateFile(Path.GetFullPath(options["output"]));
             await destination.WriteAsync(VulnerabilityFeedFormat.Serialize(feed));

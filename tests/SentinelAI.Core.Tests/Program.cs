@@ -172,6 +172,8 @@ try
     await ReportApiTests.VerifyAsync(username, password);
     await RiskApiTests.VerifyAsync(username, password);
     await SecurityEventApiTests.VerifyAsync(username, password);
+    await DefenderDetectionApiTests.VerifyAsync(username, password);
+    await HeartbeatConcurrencyTests.RunAsync();
     await EndpointTelemetryApiTests.VerifyAsync(username, password);
     await AgentUpdateApiTests.VerifyAsync();
     await CentralUpdateTests.VerifyAsync();

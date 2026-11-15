@@ -15,6 +15,8 @@ using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Reports;
 using SentinelAI.Localization;
+using SentinelAI.Rules;
+using SentinelAI.Rules.Vulnerabilities;
 
 internal static class ReportApiTests
 {
@@ -129,6 +131,7 @@ internal static class ReportApiTests
                 var token = await LoginAsync(client, username, password);
                 Check(await DownloadAsync(client, token) == persistedHtml,
                     "Restart changed report bytes derived from the same persisted SentinelAI state and UTC time.");
+                await VerifyVulnerabilityReportsAsync(restarted, client, token);
                 await VerifyCapacityAsync(restarted, client, token);
                 await restarted.StopAsync();
             }
@@ -308,6 +311,142 @@ internal static class ReportApiTests
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await client.SendAsync(request);
         return response.StatusCode == HttpStatusCode.OK;
+    }
+
+    private static async Task VerifyVulnerabilityReportsAsync(WebApplication app, HttpClient client, string token)
+    {
+        var database = app.Services.GetRequiredService<AdminStore>().DatabasePath;
+        var endpoint = (await app.Services.GetRequiredService<SecurityReportReadStore>().GenerateAsync(September))
+            .Endpoints.Single(item => item.EndpointName == HostileName).EndpointId;
+        var finding = new VulnerabilityFinding("CVE-2026-1234", "synthetic", PrivateText + " <img src=x>",
+            PrivateText, "1.2.3", VulnerabilitySeverities.Critical, 9.8m, null, true, "2026-09-01", "2.0", PrivateText);
+        var assessment = new VulnerabilityAssessment("2026.1001.1200", [], null,
+            [finding, finding with { Cve = "CVE-2026-2345", KnownExploited = false },
+                finding with { Cve = "CVE-2026-3456", KnownExploited = false, Severity = VulnerabilitySeverities.High }]);
+        var alerts = VulnerabilityRules.Evaluate(assessment, endpoint, September.StartUtc.AddDays(4), Now.AddDays(-1));
+        foreach (var alert in alerts)
+            await SeedReportAlertAsync(database, alert with
+            {
+                Evidence = alert.Evidence.Concat(new[]
+                {
+                    RuleEvidence.Text("credentials.password", PrivateText),
+                    RuleEvidence.Text("raw.log", PrivateText),
+                    RuleEvidence.Text("vulnerability.11", "CVE-2026-7777 " + PrivateText + " 1.0"),
+                    RuleEvidence.Text("vulnerability.2", "CVE-2026-8888 Synthetic 1.0 " + PrivateText),
+                    RuleEvidence.Text("feed.source.url", "https://" + PrivateText)
+                }).ToArray()
+            });
+
+        // Supported runtime/telemetry metadata and the existing exclusion of their raw evidence remain intact.
+        var runtime = EventRuleEngine.CreateDefault().Rules.OfType<EventRule>().Single(rule => rule.Id == "SA-EVT-DEF-001");
+        var telemetry = TelemetryRuleEngine.CreateDefault().Rules.Single(rule => rule.Id == "SA-AV-001");
+        foreach (var alert in new[]
+        {
+            new SecurityAlert(runtime.Id, runtime.Title, runtime.Severity, runtime.Reason,
+                [RuleEvidence.Text("threat.name", PrivateText)], endpoint, September.StartUtc, runtime.RecommendedAction),
+            new SecurityAlert(telemetry.Id, telemetry.Title, telemetry.Severity, telemetry.Reason,
+                [RuleEvidence.Text("antivirus.name", PrivateText)], endpoint, September.StartUtc, telemetry.RecommendedAction)
+        }) await SeedReportAlertAsync(database, alert);
+
+        var report = await app.Services.GetRequiredService<SecurityReportReadStore>().GenerateAsync(September);
+        foreach (var expected in alerts)
+        {
+            var incident = report.PeriodIncidents.Single(item => item.RuleId == expected.RuleId);
+            Check(incident.Title == expected.Title && incident.Reason == expected.Reason &&
+                  incident.RecommendedAction == expected.RecommendedAction && incident.Severity == expected.Severity &&
+                  report.MajorPostureFindings.Count(item => item.RuleId == expected.RuleId) == 1,
+                "A supported vulnerability family lost its rule ID, canonical metadata or current finding.");
+            var evidence = incident.Evidence.ToDictionary(item => item.Field, item => item.Value);
+            Check(evidence.Count == 6 && evidence["vulnerabilities.count"].GetInt32() == 1 &&
+                  evidence["feed.version"].GetString() == assessment.FeedVersion &&
+                  evidence["feed.generatedUtc"].GetString() == "2026-10-01T12:00:00Z" &&
+                  evidence["vulnerability.1.cve"].GetString() == expected.Evidence.Single(item => item.Field == "vulnerability.1")
+                      .Value.GetString()!.Split(' ')[0] &&
+                  evidence["vulnerability.1.installedVersion"].GetString() == "1.2.3" &&
+                  evidence["vulnerability.1.fixedVersion"].GetString() == "2.0",
+                "The report omitted bounded CVE/version/feed evidence or copied unrelated raw evidence.");
+            var action = report.PriorityActions.Single(item => item.RuleId == expected.RuleId);
+            Check(action.Action == expected.RecommendedAction && action.Reason == SecurityReport.VulnerabilityFindingsReason &&
+                  action.AffectedEndpointCount == 1,
+                "Vulnerability recommendations collapsed families or incorrectly described configuration findings.");
+            Check(AiContract.GetEvidenceFields(expected.RuleId) is null,
+                "Adding report evidence expanded the cloud AI allowlist.");
+        }
+        foreach (var (id, title, reason) in new[]
+        {
+            (runtime.Id, runtime.Title, SecurityReport.EventFindingsReason),
+            (telemetry.Id, telemetry.Title, SecurityReport.TelemetryFindingsReason)
+        })
+            Check(report.PeriodIncidents.Single(item => item.RuleId == id) is { Evidence.Count: 0 } incident &&
+                  incident.Title == title && report.PriorityActions.Single(item => item.RuleId == id).Reason == reason,
+                "Vulnerability reporting changed runtime-event or telemetry metadata/evidence behavior.");
+
+        var html = await DownloadAsync(client, token);
+        foreach (var text in new[] { "SA-VULN-001", "SA-VULN-002", "SA-VULN-003", "CVE-2026-1234", "CVE-2026-2345",
+                     "CVE-2026-3456", "vulnerability.1.installedVersion", "vulnerability.1.fixedVersion", "2026.1001.1200", "&lt;img" })
+            Check(html.Contains(text, StringComparison.Ordinal), "The actual HTML download omitted vulnerability context: " + text);
+        foreach (var text in new[] { "unsupported", PrivateText, "CVE-2026-7777", "CVE-2026-8888", "<img", "<script", "https://" })
+            Check(!html.Contains(text, StringComparison.OrdinalIgnoreCase), "The vulnerability export included private or unsafe content: " + text);
+        await VerifyPolishAsync(client, token, report, html);
+
+        var forged = report with
+        {
+            MajorPostureFindings = [report.MajorPostureFindings.Single(item => item.RuleId == VulnerabilityRules.KnownExploitedRuleId) with
+            {
+                Evidence = [RuleEvidence.Text("vulnerability.1.cve", PrivateText + "<img>"),
+                    RuleEvidence.Text("vulnerability.11.installedVersion", "1.0"),
+                    RuleEvidence.Text("feed.version", PrivateText), RuleEvidence.Text("raw.log", PrivateText)]
+            }],
+            PeriodIncidents = []
+        };
+        Check(!SecurityReportRenderer.Render(forged).Contains(PrivateText, StringComparison.Ordinal),
+            "The renderer trusted unvalidated evidence supplied outside the SQLite read store.");
+
+        foreach (var evidence in new object[][]
+        {
+            [new { Field = "vulnerability.1", Value = "CVE-2026-1234 Synthetic 1.0 (fixed in 2.0)" },
+                new { Field = "vulnerability.1", Value = "CVE-2026-2345 Synthetic 1.0 (fixed in 2.0)" }],
+            [new { Field = "vulnerabilities.count", Value = (object)100001 },
+                new { Field = "feed.version", Value = (object)PrivateText },
+                new { Field = "feed.generatedUtc", Value = (object)"2026-10-01T12:00:00Z<script>" },
+                new { Field = "vulnerability.1", Value = (object)("CVE-2026-1234 Synthetic 1.0 " + PrivateText) },
+                new { Field = "vulnerability.2", Value = (object)"CVE-2026-1234 Synthetic 1234567890.0" }]
+        })
+        {
+            await using var connection = Connection(database);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE TrackedAlerts SET EvidenceJson=$json WHERE EndpointId=$endpoint AND RuleId=$rule;";
+            command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(evidence));
+            command.Parameters.AddWithValue("$endpoint", endpoint.ToString("D"));
+            command.Parameters.AddWithValue("$rule", VulnerabilityRules.KnownExploitedRuleId);
+            await command.ExecuteNonQueryAsync();
+            var malformed = await app.Services.GetRequiredService<SecurityReportReadStore>().GenerateAsync(September);
+            Check(malformed.PeriodIncidents.Single(item => item.RuleId == VulnerabilityRules.KnownExploitedRuleId).Evidence.Count == 0,
+                "Malformed, unbounded or ambiguous vulnerability evidence entered the report.");
+        }
+    }
+
+    private static async Task SeedReportAlertAsync(string database, SecurityAlert alert)
+    {
+        await using var connection = Connection(database);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO TrackedAlerts (AlertId,EndpointId,EndpointName,RuleId,Title,Severity,Status,
+                FirstObservedUtcTicks,LastObservedUtcTicks,CreatedUtcTicks,UpdatedUtcTicks,StatusChangedUtcTicks,
+                Version,Reason,EvidenceJson,RecommendedAction)
+            VALUES ($id,$endpoint,$private,$rule,$private,$severity,'open',$observed,$observed,$observed,$observed,$observed,
+                1,$private,$evidence,$private);
+            """;
+        command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("D"));
+        command.Parameters.AddWithValue("$endpoint", alert.EndpointId.ToString("D"));
+        command.Parameters.AddWithValue("$private", PrivateText);
+        command.Parameters.AddWithValue("$rule", alert.RuleId);
+        command.Parameters.AddWithValue("$severity", alert.Severity);
+        command.Parameters.AddWithValue("$observed", alert.Timestamp.UtcTicks);
+        command.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(alert.Evidence));
+        await command.ExecuteNonQueryAsync();
     }
 
     private static async Task<string> DownloadAsync(HttpClient client, string token)

@@ -65,6 +65,7 @@ public sealed record SecurityReport(ReportPeriod Period, DateTimeOffset Generate
     public const string UnsupportedRuleAction = "Review this stored incident locally; no supported deterministic recommendation is available.";
     public const string EventFindingsReason = "Tracked unresolved runtime event detections; confirm the recorded activity on the endpoint before approved changes.";
     public const string TelemetryFindingsReason = "Tracked unresolved endpoint telemetry findings; verify the current state on the endpoint before approved changes.";
+    public const string VulnerabilityFindingsReason = "Tracked unresolved vulnerability findings; verify the installed and fixed versions against the identified vulnerability feed before approved updates.";
     public const string ConfigurationFindingsReason = "Tracked unresolved configuration findings; verify current configuration before approved changes.";
     public const string CoverageAction = "Refresh missing, stale or future-dated inventories and investigate unknown supported configuration signals.";
     public const string CoverageReason = "Unknown observations can conceal risks and do not contribute a score.";

@@ -293,6 +293,41 @@
                         </StackPanel>
                     </Border>
                     <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,16,0,0"
+                            DataContext="{Binding DefenderDetections, RelativeSource={RelativeSource AncestorType=Window}}"
+                            AutomationProperties.AutomationId="DeviceDefenderHistory">
+                        <Border.Style>
+                            <Style TargetType="Border"><Style.Triggers>
+                                <DataTrigger Binding="{Binding}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            </Style.Triggers></Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <TextBlock Text="{loc:T 'Microsoft Defender — threat history'}" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       AutomationProperties.AutomationId="DefenderHistoryStatus" AutomationProperties.LiveSetting="Polite" />
+                            <TextBlock Text="{Binding SourceText}" TextWrapping="Wrap" Margin="0,0,0,8" AutomationProperties.AutomationId="DefenderSourceStatus" />
+                            <Button Content="{loc:T 'Refresh Defender history'}" Click="OnRefreshDefender" IsEnabled="{Binding CanRefresh}"
+                                    HorizontalAlignment="Left" Margin="0,0,0,12" AutomationProperties.AutomationId="RefreshDefenderHistory" />
+                            <ItemsControl ItemsSource="{Binding Detections}" AutomationProperties.AutomationId="DefenderDetections">
+                                <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,0,0,16">
+                                    <TextBlock Text="{Binding ThreatName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding EventText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding TimeText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding IdentifiersText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ResultText}" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" />
+                                </StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <WrapPanel Margin="0,0,0,8">
+                                <Button Content="{loc:T 'Previous'}" Click="OnPreviousDefenderPage" IsEnabled="{Binding CanPreviousPage}" Margin="0,0,8,0"
+                                        AutomationProperties.AutomationId="PreviousDefenderPage" />
+                                <Button Content="{loc:T 'Next'}" Click="OnNextDefenderPage" IsEnabled="{Binding CanNextPage}" Margin="0,0,8,0"
+                                        AutomationProperties.AutomationId="NextDefenderPage" />
+                                <TextBlock Text="{Binding PageText}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding RetentionText}" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
+                                       AutomationProperties.AutomationId="DefenderRetention" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,16,0,0"
                             DataContext="{Binding DeviceVulnerabilities, RelativeSource={RelativeSource AncestorType=Window}}"
                             AutomationProperties.AutomationId="DeviceVulnerabilities">
                         <Border.Style>

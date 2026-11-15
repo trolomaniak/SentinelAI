@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Unicode;
-using SentinelAI.Contracts.Ai;
 using SentinelAI.Localization;
 
 namespace SentinelAI.Core.Reports;
@@ -72,7 +71,7 @@ public static class SecurityReportRenderer
             Definition(T("Score trend"), T(SecurityReport.UnavailableTrend));
             _html.Append("</dl>");
             Paragraph(T(report.OrganizationRisk.Explanation));
-            Paragraph(T("Higher scores prioritize recorded configuration risks. A zero score does not establish endpoint safety. Unknown or stale observations can conceal risks. Accepted and Investigating do not reduce remaining risk; Resolved changes the current score contribution but does not itself remediate an endpoint."));
+            Paragraph(T("Higher scores prioritize recorded security findings. A zero score does not establish endpoint safety. Unknown or stale observations can conceal risks. Accepted and Investigating do not reduce remaining risk; Resolved changes the current score contribution but does not itself remediate an endpoint."));
             if (report.Endpoints.Count == 0)
                 Paragraph(T("No enrolled endpoints are stored. No endpoint security assurance can be made from this empty fleet."));
 
@@ -119,7 +118,7 @@ public static class SecurityReportRenderer
                 report.PeriodIncidents.Where(incident => incident.ResolutionsInPeriod > 0).ToArray(),
                 T("No retained alert has a stored resolved transition inside this period."));
             IncidentSection(T("Current major security posture findings"), report.MajorPostureFindings,
-                T("No tracked unresolved configuration findings are stored. This does not establish endpoint safety."));
+                T("No tracked unresolved security findings are stored. This does not establish endpoint safety."));
 
             Heading(T("Recommended priority actions"));
             Paragraph(T("Deterministic local recommendations prioritize current unresolved findings by severity, current risk contribution, and rule ID, followed by telemetry gaps. Review compatibility and approved policy before making changes. This report performs no remediation."));
@@ -156,7 +155,7 @@ public static class SecurityReportRenderer
                 Row(Severity(severity), Number(report.Policy.SeverityPoints[severity]));
             EndTable();
             Paragraph(T("Risk uses current policy, severity, configured confidence weight, asset criticality, exposure, observation age and current status, plus bounded correlation of configuration findings confirmed by the latest inventory, of endpoint telemetry findings confirmed by the latest telemetry report and of fresh runtime event detections. Confidence is not statistical probability. Age discounts do not prove remediation. Endpoint raw points and incident contributions are shown before the final score cap; correlation is additional to individual alert contributions. The organization score is the highest endpoint score, not a fleet average. Decimal values and timestamps use invariant formatting and UTC."));
-            Paragraph(T("The report contains selected endpoint identities and typed security configuration evidence. Authentication credentials, tokens, signing material, status actors and arbitrary raw evidence are excluded."));
+            Paragraph(T("The report contains selected endpoint identities, typed configuration evidence and bounded CVE, version and feed identifiers. Authentication credentials, tokens, signing material, status actors and arbitrary raw evidence are excluded."));
             _html.Append("</main></body></html>");
             return _html.ToString();
         }
@@ -188,20 +187,18 @@ public static class SecurityReportRenderer
                 _html.Append("</dl>");
                 Paragraph(T(incident.Reason));
                 Paragraph(T("Technical evidence below is the latest stored positive observation. It is not evidence captured at each period transition and does not establish current effective runtime protection."));
-                var allowed = AiContract.GetEvidenceFields(incident.RuleId);
-                var evidence = incident.Evidence.Where(item => allowed is not null &&
-                    allowed.TryGetValue(item.Field, out var kind) &&
-                    ((kind == JsonValueKind.True && item.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) ||
-                     (kind == JsonValueKind.Number && item.Value.ValueKind == JsonValueKind.Number &&
-                      item.Value.TryGetInt32(out var integer) && integer is >= 0 and <= 5)))
-                    .OrderBy(item => item.Field, StringComparer.Ordinal).ToArray();
-                if (evidence.Length == 0) Paragraph(T("Supported typed evidence is unavailable; arbitrary or malformed evidence is excluded."));
+                var evidence = SecurityReportEvidence.Filter(incident.RuleId, incident.Evidence);
+                if (evidence.Count == 0) Paragraph(T("Supported typed evidence is unavailable; arbitrary or malformed evidence is excluded."));
                 else
                 {
-                    StartTable(T("Observed configuration field"), T("Typed value"));
+                    StartTable(T("Observed evidence field"), T("Typed value"));
                     foreach (var item in evidence)
-                        Row(item.Field, item.Value.ValueKind == JsonValueKind.Number ? Number(item.Value.GetInt32())
-                            : item.Value.GetBoolean() ? "true" : "false");
+                        Row(item.Field, item.Value.ValueKind switch
+                        {
+                            JsonValueKind.String => item.Value.GetString()!,
+                            JsonValueKind.Number => Number(item.Value.GetInt32()),
+                            _ => item.Value.GetBoolean() ? "true" : "false"
+                        });
                     EndTable();
                 }
                 Paragraph(F("Recommended action: {0}", T(incident.RecommendedAction)));
