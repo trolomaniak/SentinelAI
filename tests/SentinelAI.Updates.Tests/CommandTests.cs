@@ -86,7 +86,7 @@ internal static class CommandTests
                  "cpe":"cpe:2.3:a:example:viewer","displayName":"^Example Viewer$","publishers":["Example Corp"],"version":"^([0-9]+\\.[0-9]+\\.[0-9]+)$"}]}
                 """);
             await File.WriteAllTextAsync(Path.Combine(feedInputs, "nvd", "page-1.json"), """
-                {"vulnerabilities":[{"cve":{"id":"CVE-2099-3001","published":"2099-01-02T00:00:00.000","vulnStatus":"Analyzed","metrics":{},
+                {"format":"NVD_CVE","version":"2.0","startIndex":0,"resultsPerPage":1,"totalResults":1,"vulnerabilities":[{"cve":{"id":"CVE-2099-3001","published":"2099-01-02T00:00:00.000","vulnStatus":"Analyzed","metrics":{},
                  "configurations":[{"nodes":[{"operator":"OR","negate":false,"cpeMatch":[{"vulnerable":true,"criteria":"cpe:2.3:a:example:viewer:*:*:*:*:*:*:*:*","versionEndExcluding":"2.0.0"}]}]}]}}]}
                 """);
             await File.WriteAllTextAsync(Path.Combine(feedInputs, "kev.json"), """{"vulnerabilities":[]}""");
@@ -102,6 +102,13 @@ internal static class CommandTests
             Ensure(builtFeed.Version == "2099.105.1030" && builtFeed.Vulnerabilities.Single().Cve == "CVE-2099-3001" &&
                    feedBytes.SequenceEqual(againBytes), "The feed build is not deterministic.");
             EnsureRejected(await RunDevAsync(FeedArguments(feedPath)), privateKey);
+            var nvdInputPath = Path.Combine(feedInputs, "nvd", "page-1.json");
+            var completePage = await File.ReadAllTextAsync(nvdInputPath);
+            await File.WriteAllTextAsync(nvdInputPath, completePage.Replace("\"totalResults\":1", "\"totalResults\":2", StringComparison.Ordinal));
+            var incompleteFeed = Path.Combine(directory, "incomplete-feed.json");
+            EnsureRejected(await RunDevAsync(FeedArguments(incompleteFeed)), privateKey);
+            Ensure(!File.Exists(incompleteFeed), "Incomplete NVD input created an output feed.");
+            await File.WriteAllTextAsync(nvdInputPath, completePage);
             var feedManifest = Path.Combine(directory, "vulnerability-feed.manifest.json");
             Ensure((await RunDevAsync(["sign", "--private-key", privateKey, "--key-id", KeyId, "--package", feedPath, "--version", builtFeed.Version,
                        "--artifact-id", SentinelAI.Rules.Vulnerabilities.VulnerabilityFeedFormat.ArtifactId, "--artifact-url",

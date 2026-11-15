@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     public CentralUpdateViewModel? CentralUpdate { get; }
     public VulnerabilityFeedViewModel? VulnerabilityFeed { get; }
     public DeviceVulnerabilitiesViewModel? DeviceVulnerabilities { get; }
+    public DefenderDetectionsViewModel? DefenderDetections { get; }
     public AiExplanationViewModel? AiExplanation { get; }
     public DesktopIntegrationViewModel? DesktopIntegration { get; }
     public WindowsServiceStatusModel? ServiceStatus { get; }
@@ -60,7 +61,8 @@ public partial class MainWindow : Window
         LocalNetworkViewModel? localNetwork = null, ComputerEnrollmentViewModel? computerEnrollment = null,
         PilotLicenseViewModel? pilot = null, CentralUpdateViewModel? centralUpdate = null,
         VulnerabilityFeedViewModel? vulnerabilityFeed = null, DeviceVulnerabilitiesViewModel? deviceVulnerabilities = null,
-        RiskRegisterViewModel? riskRegister = null, LanguageSettingsViewModel? language = null)
+        RiskRegisterViewModel? riskRegister = null, LanguageSettingsViewModel? language = null,
+        DefenderDetectionsViewModel? defenderDetections = null)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
@@ -79,6 +81,7 @@ public partial class MainWindow : Window
         CentralUpdate = centralUpdate;
         VulnerabilityFeed = vulnerabilityFeed;
         DeviceVulnerabilities = deviceVulnerabilities;
+        DefenderDetections = defenderDetections;
         AiExplanation = aiExplanation;
         DesktopIntegration = desktopIntegration;
         ServiceStatus = serviceStatus;
@@ -100,6 +103,7 @@ public partial class MainWindow : Window
         if (centralUpdate is not null) centralUpdate.SessionExpired += OnWorkspaceSessionExpired;
         if (vulnerabilityFeed is not null) vulnerabilityFeed.SessionExpired += OnWorkspaceSessionExpired;
         if (deviceVulnerabilities is not null) deviceVulnerabilities.SessionExpired += OnWorkspaceSessionExpired;
+        if (defenderDetections is not null) defenderDetections.SessionExpired += OnWorkspaceSessionExpired;
         if (pilot is not null)
         {
             pilot.SessionExpired += OnWorkspaceSessionExpired;
@@ -158,7 +162,7 @@ public partial class MainWindow : Window
         if (!authorized)
         {
             AiExplanation?.Clear(); License?.Clear(); LocalNetwork?.Clear(); ComputerEnrollment?.Clear(); Pilot?.Clear(); CentralUpdate?.Clear();
-            VulnerabilityFeed?.Clear(); DeviceVulnerabilities?.Clear();
+            VulnerabilityFeed?.Clear(); DeviceVulnerabilities?.Clear(); DefenderDetections?.Clear();
             Devices?.Clear(); Alerts?.Clear(); Risk?.Clear(); RiskRegister?.Clear(); Reports?.Clear();
         }
         else if (authorizationChanged)
@@ -174,6 +178,7 @@ public partial class MainWindow : Window
         if (!_closed && e.PropertyName == nameof(ShellViewModel.CurrentPage))
         {
             if (_viewModel.CurrentPage.Id != PageId.Reports) Reports?.Clear();
+            if (_viewModel.CurrentPage.Id != PageId.Devices) DefenderDetections?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Alerts) AiExplanation?.SetAlert(null);
             SetPagePresentation();
             RefreshCurrentPage();
@@ -283,6 +288,7 @@ public partial class MainWindow : Window
         if (CentralUpdate is not null) { CentralUpdate.SessionExpired -= OnWorkspaceSessionExpired; CentralUpdate.Dispose(); }
         if (VulnerabilityFeed is not null) { VulnerabilityFeed.SessionExpired -= OnWorkspaceSessionExpired; VulnerabilityFeed.Dispose(); }
         if (DeviceVulnerabilities is not null) { DeviceVulnerabilities.SessionExpired -= OnWorkspaceSessionExpired; DeviceVulnerabilities.Dispose(); }
+        if (DefenderDetections is not null) { DefenderDetections.SessionExpired -= OnWorkspaceSessionExpired; DefenderDetections.Dispose(); }
         _pilotTimer.Stop();
         _pilotTimer.Tick -= OnPilotTick;
         if (Pilot is not null) { Pilot.SessionExpired -= OnWorkspaceSessionExpired; Pilot.Dispose(); }

@@ -107,6 +107,8 @@ Console.WriteLine($"Event rule tests passed ({EventRuleEngine.DefaultRuleIds.Cou
 var telemetryChecks = TelemetryRuleTests.Run();
 Console.WriteLine($"Telemetry rule tests passed ({TelemetryRuleEngine.DefaultRuleIds.Count} rules, {telemetryChecks} checks: positives, benign, Unknown and uncollected sections, determinism).");
 var vulnerabilityChecks = VulnerabilityTests.Run();
+var nvdPageChecks = NvdPageCompletenessTests.Run();
+Console.WriteLine($"NVD page completeness tests passed ({nvdPageChecks} checks: missing pages, overlapping ranges, changed totals, duplicates, complete queries).");
 LocalizationCoverageTests.Run();
 Console.WriteLine($"Vulnerability tests passed ({vulnerabilityChecks} checks: versions, deterministic feed build, skipped mappings, strict format, matching, Windows builds, alerts).");
 

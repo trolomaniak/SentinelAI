@@ -1,9 +1,8 @@
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
-using SentinelAI.Contracts.Ai;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Core.Reports;
 using SentinelAI.Rules;
+using SentinelAI.Rules.Vulnerabilities;
 
 namespace SentinelAI.Core.Persistence;
 
@@ -177,7 +176,7 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
                 metadata?.RuleId ?? "unsupported", metadata?.Title ?? SecurityReport.UnsupportedRuleTitle,
                 reader.GetString(3), reader.GetString(4), first, last,
                 metadata?.Reason ?? SecurityReport.UnsupportedRuleReason,
-                ReadEvidence(ruleId, reader.IsDBNull(7) ? null : reader.GetString(7)),
+                SecurityReportEvidence.Read(ruleId, reader.IsDBNull(7) ? null : reader.GetString(7)),
                 metadata?.RecommendedAction ?? SecurityReport.UnsupportedRuleAction,
                 InPeriod(first, period), InPeriod(last, period), reader.GetInt64(8), reader.GetInt64(9),
                 reader.IsDBNull(10) ? null : ReadUtc(reader, 10), reader.GetInt64(11) != 0, 0m);
@@ -186,40 +185,6 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
                 incident.CurrentStatus, last, incident.Reason));
         }
         return incidents;
-    }
-
-    private static IReadOnlyList<RuleEvidence> ReadEvidence(string ruleId, string? json)
-    {
-        if (json is null || AiContract.GetEvidenceFields(ruleId) is not { } allowed) return [];
-        try
-        {
-            using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 8 });
-            if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() > 32) return [];
-            var evidence = new SortedDictionary<string, RuleEvidence>(StringComparer.Ordinal);
-            var duplicates = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var item in document.RootElement.EnumerateArray())
-            {
-                if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("Field", out var field) ||
-                    field.ValueKind != JsonValueKind.String || field.GetString() is not { } name ||
-                    !allowed.TryGetValue(name, out var kind) || !item.TryGetProperty("Value", out var value)) continue;
-                var isBoolean = kind == JsonValueKind.True && value.ValueKind is JsonValueKind.True or JsonValueKind.False;
-                var isInteger = kind == JsonValueKind.Number && value.ValueKind == JsonValueKind.Number &&
-                    value.TryGetInt32(out var integer) && integer is >= 0 and <= 5;
-                // A malformed duplicate is not supported evidence; valid conflicting duplicates are excluded.
-                if (!isBoolean && !isInteger) continue;
-                if (evidence.ContainsKey(name) || duplicates.Contains(name))
-                {
-                    evidence.Remove(name);
-                    duplicates.Add(name);
-                    continue;
-                }
-                if (isBoolean)
-                    evidence.Add(name, RuleEvidence.Boolean(name, value.GetBoolean()));
-                else evidence.Add(name, RuleEvidence.Integer(name, value.GetInt32()));
-            }
-            return evidence.Values.ToArray();
-        }
-        catch (JsonException) { return []; }
     }
 
     private static IReadOnlyDictionary<string, SecurityAlert> CreateCatalog()
@@ -236,7 +201,15 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
         // Endpoint telemetry rules likewise carry fixed wording and no AI-allowlisted evidence.
         var telemetry = TelemetryRuleEngine.CreateDefault().Rules.Select(rule => new SecurityAlert(rule.Id,
             rule.Title, rule.Severity, rule.Reason, [], Guid.Empty, DateTimeOffset.UnixEpoch, rule.RecommendedAction));
-        return first.Concat(second).DistinctBy(alert => alert.RuleId).Concat(events).Concat(telemetry)
+        // Exercise all three deterministic vulnerability families to reuse their canonical metadata,
+        // rather than trusting stored freeform wording or maintaining a second set of templates.
+        var finding = new VulnerabilityFinding("CVE-2026-1000", "catalog", "Catalog", "Catalog", "1.0",
+            VulnerabilitySeverities.Critical, 9.8m, null, false, null, "2.0", "");
+        var assessment = new VulnerabilityAssessment("2026.101.0", [], null,
+            [finding with { KnownExploited = true }, finding, finding with { Severity = VulnerabilitySeverities.High }]);
+        var vulnerabilities = VulnerabilityRules.Evaluate(assessment, Guid.Empty, DateTimeOffset.UnixEpoch,
+            DateTimeOffset.UnixEpoch);
+        return first.Concat(second).DistinctBy(alert => alert.RuleId).Concat(events).Concat(telemetry).Concat(vulnerabilities)
             .ToDictionary(alert => alert.RuleId, StringComparer.Ordinal);
     }
 
@@ -250,7 +223,9 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
                     ? SecurityReport.EventFindingsReason
                     : TelemetryRuleEngine.DefaultRuleIds.Contains(group.Key)
                         ? SecurityReport.TelemetryFindingsReason
-                        : SecurityReport.ConfigurationFindingsReason,
+                        : VulnerabilityRules.RuleIds.Contains(group.Key)
+                            ? SecurityReport.VulnerabilityFindingsReason
+                            : SecurityReport.ConfigurationFindingsReason,
                 group.Sum(incident => incident.CurrentRiskContribution)))
             .OrderByDescending(action => SeverityRank(action.Priority)).ThenByDescending(action => action.CurrentRiskContribution)
             .ThenBy(action => action.RuleId, StringComparer.Ordinal).ToList();

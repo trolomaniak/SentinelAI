@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Hosting.WindowsServices;
+using SentinelAI.Contracts.DefenderDetections;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Heartbeat;
 using SentinelAI.Contracts.EndpointTelemetry;
@@ -94,6 +95,7 @@ public static class CoreHost
         builder.Services.AddSingleton(SecurityEventRetention.Default);
         builder.Services.AddSingleton(EventRuleEngine.CreateDefault());
         builder.Services.AddSingleton<SecurityEventStore>();
+        builder.Services.AddSingleton<DefenderDetectionReadStore>();
         builder.Services.AddSingleton<AlertStore>();
         builder.Services.AddSingleton(TelemetryRuleEngine.CreateDefault());
         builder.Services.AddSingleton<EndpointTelemetryStore>();
@@ -697,6 +699,28 @@ public static class CoreHost
                 }
 
                 return Results.Ok(await events.GetSourcesViewAsync(endpointId, cancellationToken));
+            })
+            .RequireAuthorization();
+
+        // Safe malware metadata only: no raw observation, file path, account or event XML.
+        app.MapGet("/api/admin/devices/{endpointId:guid}/defender-detections", async (
+                Guid endpointId,
+                int? offset,
+                int? limit,
+                HttpContext context,
+                DeviceReadStore devices,
+                DefenderDetectionReadStore detections,
+                CancellationToken cancellationToken) =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!IsLocalOrHttps(context)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+                var pageOffset = offset ?? 0;
+                var pageLimit = limit ?? DefenderDetectionContract.DefaultLimit;
+                if (pageOffset is < 0 or > DefenderDetectionContract.MaximumOffset ||
+                    pageLimit is < 1 or > DefenderDetectionContract.MaximumLimit)
+                    return Results.BadRequest();
+                if (await devices.FindAsync(endpointId, cancellationToken) is null) return Results.NotFound();
+                return Results.Ok(await detections.ReadAsync(endpointId, pageOffset, pageLimit, cancellationToken));
             })
             .RequireAuthorization();
 

@@ -20,8 +20,24 @@ public partial class DevicesView : UserControl
         DataContextChanged += (_, e) =>
         {
             if (e.OldValue is DevicesViewModel previous) previous.PropertyChanged -= OnModelChanged;
-            if (e.NewValue is DevicesViewModel next) next.PropertyChanged += OnModelChanged;
+            if (IsLoaded && e.NewValue is DevicesViewModel next) next.PropertyChanged += OnModelChanged;
+            _shownDetail = null;
             DisarmRemoval();
+            if (IsLoaded) OnModelChanged(this, new System.ComponentModel.PropertyChangedEventArgs(null));
+        };
+        Loaded += (_, _) =>
+        {
+            if (Model is { } model)
+            {
+                model.PropertyChanged -= OnModelChanged;
+                model.PropertyChanged += OnModelChanged;
+            }
+            OnModelChanged(this, new System.ComponentModel.PropertyChangedEventArgs(null));
+        };
+        Unloaded += (_, _) =>
+        {
+            if (Model is { } model) model.PropertyChanged -= OnModelChanged;
+            _shownDetail = null;
         };
     }
 
@@ -29,6 +45,7 @@ public partial class DevicesView : UserControl
     private void OnModelChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => OnModelChanged(sender, e))); return; }
+        if (!IsLoaded) return;
         var shown = Model?.Detail?.EndpointId;
         if (_removalArmedFor is { } armed && shown != armed) DisarmRemoval();
         if (shown != _shownDetail)
@@ -41,6 +58,11 @@ public partial class DevicesView : UserControl
                 if (shown is { } endpointId) _ = vulnerabilities.LoadAsync(endpointId);
                 else vulnerabilities.Clear();
             }
+            if (DefenderDetections is { } defender)
+            {
+                if (shown is { } endpointId) _ = defender.LoadAsync(endpointId);
+                else defender.Clear();
+            }
         }
     }
 
@@ -52,6 +74,7 @@ public partial class DevicesView : UserControl
 
     private DevicesViewModel? Model => DataContext as DevicesViewModel;
     private ComputerEnrollmentViewModel? Enrollment => (Window.GetWindow(this) as MainWindow)?.ComputerEnrollment;
+    private DefenderDetectionsViewModel? DefenderDetections => (Window.GetWindow(this) as MainWindow)?.DefenderDetections;
     private DeviceVulnerabilitiesViewModel? Vulnerabilities => (Window.GetWindow(this) as MainWindow)?.DeviceVulnerabilities;
 
     private async void OnAddComputersExpanded(object sender, RoutedEventArgs e)
@@ -115,6 +138,21 @@ public partial class DevicesView : UserControl
         model.CloseDetail();
         PageScroller.ScrollToTop();
         await model.RefreshAsync();
+    }
+
+    private async void OnRefreshDefender(object sender, RoutedEventArgs e)
+    {
+        if (DefenderDetections is { } defender) await defender.RefreshAsync();
+    }
+
+    private async void OnPreviousDefenderPage(object sender, RoutedEventArgs e)
+    {
+        if (DefenderDetections is { } defender) await defender.PreviousPageAsync();
+    }
+
+    private async void OnNextDefenderPage(object sender, RoutedEventArgs e)
+    {
+        if (DefenderDetections is { } defender) await defender.NextPageAsync();
     }
 
     private async void OnRefresh(object sender, RoutedEventArgs e)
