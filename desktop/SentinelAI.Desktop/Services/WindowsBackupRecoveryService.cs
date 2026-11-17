@@ -44,7 +44,7 @@ internal sealed class WindowsBackupRecoveryService : IBackupRecoveryWorker, IBac
             var start = new ProcessStartInfo(WindowsInstallationTrust.ExecutablePath)
             {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
-                StandardInputEncoding = new UTF8Encoding(false),
+                StandardInputEncoding = new System.Text.UTF8Encoding(false),
                 WorkingDirectory = WindowsInstallationTrust.CodeDirectory
             };
             start.ArgumentList.Add(BackupRecoveryContract.Command); start.ArgumentList.Add("--config"); start.ArgumentList.Add(WindowsInstallationTrust.ConfigurationPath);

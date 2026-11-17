@@ -279,7 +279,9 @@ internal static class BackupWindowsAcceptance
         if (signer is not ECDsaCng cng || cng.Key.ExportPolicy != CngExportPolicies.None) throw new InvalidDataException();
         var descriptor = cng.Key.GetProperty("Security Descr", (CngPropertyOptions)4).GetValue();
         if (descriptor is null) throw new InvalidDataException();
-        return new(pin, cng.Key.UniqueName, cng.Key.ExportPolicy, Convert.ToBase64String(descriptor));
+        var keyName = cng.Key.UniqueName;
+        if (string.IsNullOrWhiteSpace(keyName)) throw new InvalidDataException();
+        return new(pin, keyName, cng.Key.ExportPolicy, Convert.ToBase64String(descriptor));
     }
 
     [SupportedOSPlatform("windows")]
