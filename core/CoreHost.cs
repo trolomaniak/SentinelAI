@@ -18,6 +18,7 @@ using SentinelAI.Contracts.EndpointTelemetry;
 using SentinelAI.Contracts.Inventory;
 using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core.Persistence;
+using SentinelAI.Core.Backups;
 using SentinelAI.Localization;
 using SentinelAI.Core.Reports;
 using SentinelAI.Licensing;
@@ -88,6 +89,10 @@ public static class CoreHost
         });
         builder.Services.AddSingleton<IPasswordHasher<AdminRecord>, PasswordHasher<AdminRecord>>();
         builder.Services.AddSingleton<AdminStore>();
+        builder.Services.AddSingleton<IBackupKeyProtection, WindowsBackupKeyProtection>();
+        builder.Services.AddSingleton<BackupStore>();
+        builder.Services.AddSingleton<IBackupSnapshotSource, SqliteBackupSnapshotSource>();
+        builder.Services.AddSingleton<BackupService>();
         builder.Services.AddSingleton<DeviceStore>();
         builder.Services.AddSingleton<DeviceReadStore>();
         builder.Services.AddSingleton<EnrollmentStore>();
@@ -141,6 +146,7 @@ public static class CoreHost
             new AiGatewayClient(services.GetRequiredService<AiOptions>()));
         builder.Services.AddSingleton<AiExplanationService>();
         builder.Services.AddHostedService<AdminInitializationService>();
+        builder.Services.AddHostedService(services => services.GetRequiredService<BackupService>());
         builder.Services.AddHostedService<LicenseRenewalWorker>();
         builder.Services.AddHostedService(services => services.GetRequiredService<CentralUpdateService>());
 
@@ -282,6 +288,8 @@ public static class CoreHost
         app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
+
+        app.MapBackupEndpoints(IsLocalOrHttps);
 
         app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
             .AllowAnonymous();

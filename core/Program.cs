@@ -1,5 +1,13 @@
 using SentinelAI.Core;
 using Microsoft.Extensions.Hosting.WindowsServices;
+using SentinelAI.Core.Recovery;
+
+if (BackupRestoreCommand.IsRecoveryCommand(args))
+{
+    Environment.ExitCode = await BackupRestoreCommand.RunAsync(args, Console.OpenStandardInput(),
+        Console.Out, WindowsServiceHelpers.IsWindowsService(), Console.IsInputRedirected);
+    return;
+}
 
 if (AdministratorSetupCommand.IsSetupCommand(args))
 {
@@ -8,4 +16,5 @@ if (AdministratorSetupCommand.IsSetupCommand(args))
     return;
 }
 
+BackupRestoreCommand.AssertHostStartupAllowed(args);
 CoreHost.Build(args).Run();

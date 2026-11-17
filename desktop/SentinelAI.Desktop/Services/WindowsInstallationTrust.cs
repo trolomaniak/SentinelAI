@@ -108,6 +108,14 @@ internal static class WindowsInstallationTrust
         return new FileStream(InstalledSetupPath, FileMode.Open, FileAccess.Read, FileShare.Read);
     }
 
+    internal static string InstalledDesktopPath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "SentinelAI", "Desktop", "SentinelAI.Desktop.exe");
+
+    internal static FileStream ValidateInstalledDesktop()
+    {
+        ValidatePath(InstalledDesktopPath, new HashSet<string>(SystemWriters, StringComparer.Ordinal), serviceOnAncestors: false);
+        return new FileStream(InstalledDesktopPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+    }
+
     internal static string InstalledUpdaterPath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "SentinelAI", "Updater", "SentinelAI.Updater.exe");
 
     /// <summary>MVP-7: the installed Updater that Install runs elevated; the same owner and writer rules as the installed Setup.</summary>

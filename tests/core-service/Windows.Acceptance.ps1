@@ -262,6 +262,9 @@ $consoleProcess = $null
 $serviceProcess = $null
 $serviceInstalled = $false
 $client = $null
+$backupArchiveId = $null
+$backupArchiveDigest = $null
+$backupRecoveryKey = $null
 $assertionCount = 0
 $startedUtc = [DateTime]::UtcNow
 $stateFingerprint = $null
@@ -347,7 +350,129 @@ function Assert-PersistedCoreState {
         $fingerprint = [SentinelAI.CoreService.Acceptance.Native]::ReadStateFingerprint($script:nativeSqlitePath, $script:databasePath)
         if ($null -eq $script:stateFingerprint) { $script:stateFingerprint = $fingerprint }
         Assert-CoreServiceAcceptance ($fingerprint -ceq $script:stateFingerprint) 'The administrator password hash or persistent Core/organization identity changed.'
+        if ($null -ne $script:backupArchiveId) {
+            $backup = Invoke-TestCoreRequest '/api/admin/backups' 'GET' $null $token | ConvertFrom-Json
+            $retainedArchive = @($backup.archives | Where-Object { [string]$_.archiveId -ceq [string]$script:backupArchiveId })
+            Assert-CoreServiceAcceptance ($retainedArchive.Count -eq 1 -and $retainedArchive[0].sha256 -ceq $script:backupArchiveDigest) 'A service transition lost or changed the retained backup record.'
+            $archivePath = Join-Path (Join-Path $script:coreData 'backups') (([Guid]$script:backupArchiveId).ToString('N') + '.sab')
+            Assert-CoreServiceAcceptance ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $script:backupArchiveDigest) 'A service transition changed encrypted archive bytes.'
+        }
     } finally { $loginBody = $null; $session = $null; $token = $null }
+}
+
+function Invoke-TestBackupRequest {
+    param([string]$Path, [string]$Method, [string]$Bearer, [byte[]]$RecoveryKey, [long]$Version = 0, [switch]$Download)
+    $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::new($Method), [Uri]::new([Uri]$script:coreUrl, $Path))
+    $response = $null; $stream = $null
+    $memory = [IO.MemoryStream]::new()
+    $timeout = [Threading.CancellationTokenSource]::new(30000)
+    try {
+        $request.Headers.Authorization = [Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $Bearer)
+        if ($null -ne $RecoveryKey) {
+            $request.Headers.IfMatch.Add([Net.Http.Headers.EntityTagHeaderValue]::new('"' + $Version.ToString([Globalization.CultureInfo]::InvariantCulture) + '"'))
+            $request.Content = [Net.Http.ByteArrayContent]::new($RecoveryKey)
+            $request.Content.Headers.ContentType = [Net.Http.Headers.MediaTypeHeaderValue]::new('application/octet-stream')
+        }
+        $response = $script:client.SendAsync($request, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $timeout.Token).GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) { throw 'Core rejected an encrypted backup acceptance request.' }
+        Assert-CoreServiceAcceptance ($response.Headers.CacheControl.NoStore) 'Backup data was cacheable.'
+        if ($Download) { Assert-CoreServiceAcceptance ($response.Content.Headers.ContentType.MediaType -ceq 'application/octet-stream') 'Backup download was not a binary encrypted attachment.' }
+        $maximum = if ($Download) { 4MB } else { 64KB }
+        $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $buffer = [byte[]]::new(4096)
+        while (($count = $stream.ReadAsync($buffer, 0, $buffer.Length, $timeout.Token).GetAwaiter().GetResult()) -gt 0) {
+            if ($memory.Length + $count -gt $maximum) { throw 'Backup acceptance response exceeded its fixture bound.' }
+            $memory.Write($buffer, 0, $count)
+        }
+        if ($Download) { return ,$memory.ToArray() }
+        return [Text.Encoding]::UTF8.GetString($memory.ToArray()) | ConvertFrom-Json
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        if ($null -ne $response) { $response.Dispose() }
+        $memory.Dispose(); $timeout.Dispose(); $request.Dispose()
+    }
+}
+
+function Wait-TestBackupOperation {
+    param([string]$Bearer, [string]$Kind)
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while ($deadline.Elapsed.TotalSeconds -lt 120) {
+        $status = Invoke-TestBackupRequest '/api/admin/backups' 'GET' $Bearer
+        if (-not $status.busy) {
+            Assert-CoreServiceAcceptance ($status.lastAttempt.kind -ceq $Kind -and $status.lastAttempt.outcome -ceq 'succeeded') 'The installed Core backup operation did not succeed.'
+            return $status
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    throw 'The installed Core backup operation exceeded the acceptance deadline.'
+}
+
+function Test-InstalledCoreBackup {
+    $token = $null; $login = $null
+    $key = [byte[]]::new(32)
+    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $login = @{ username = $script:credential.UserName; password = $script:credential.GetNetworkCredential().Password } | ConvertTo-Json -Compress
+        $token = [string](Invoke-TestCoreRequest '/api/auth/login' 'POST' $login | ConvertFrom-Json).accessToken
+        $script:sensitiveValues.Add($token)
+        $initial = Invoke-TestBackupRequest '/api/admin/backups' 'GET' $token
+        Assert-CoreServiceAcceptance (-not $initial.policy.enabled -and $null -eq $initial.policy.recoveryKeyId) 'A fresh Core enabled backup or generated recovery material without operator setup.'
+        $random.GetBytes($key)
+        $configured = Invoke-TestBackupRequest '/api/admin/backups/key' 'PUT' $token $key $initial.policy.version
+        Assert-CoreServiceAcceptance ($configured.availability -ceq 'available' -and -not $configured.policy.enabled -and
+            $configured.policy.recoveryKeyId -cmatch '\A[0-9a-f]{64}\z') 'The installed virtual service could not protect the synthetic recovery key.'
+        $script:backupRecoveryKey = [byte[]]$key.Clone()
+        $script:sensitiveValues.Add([Convert]::ToBase64String($key))
+        Invoke-TestBackupRequest '/api/admin/backups' 'POST' $token | Out-Null
+        $created = Wait-TestBackupOperation $token 'create'
+        Assert-CoreServiceAcceptance ($created.archives.Count -eq 1 -and $created.archives[0].verificationState -ceq 'verified') 'Installed Core did not create and fully verify its encrypted archive.'
+        $archive = $created.archives[0]
+        $script:backupArchiveId = [string]$archive.archiveId
+        $script:backupArchiveDigest = [string]$archive.sha256
+        $bytes = Invoke-TestBackupRequest ('/api/admin/backups/' + $script:backupArchiveId + '/download') 'GET' $token -Download
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $digest = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+        Assert-CoreServiceAcceptance ($bytes.Length -eq $archive.sizeBytes -and $digest -ceq $script:backupArchiveDigest) 'Exported encrypted archive differs from the verified retained bytes.'
+        Assert-CoreServiceAcceptance ($bytes.Length -gt 16 -and [Text.Encoding]::ASCII.GetString($bytes, 0, 16) -cne "SQLite format 3$([char]0)") 'The archive exposed the SQLite plaintext header.'
+        Invoke-TestBackupRequest ('/api/admin/backups/' + $script:backupArchiveId + '/verify') 'POST' $token | Out-Null
+        $verified = Wait-TestBackupOperation $token 'verify'
+        Assert-CoreServiceAcceptance ($verified.archives[0].verificationState -ceq 'verified') 'The explicit installed Core restore verification failed.'
+    } finally {
+        [Array]::Clear($key, 0, $key.Length)
+        $random.Dispose(); $token = $null; $login = $null
+    }
+}
+
+function Invoke-TestNativeBackupRecovery {
+    $harness = Join-Path $script:repositoryRoot 'tests/SentinelAI.Core.Tests/bin/Release/net10.0/SentinelAI.Core.Tests.dll'
+    if (-not (Test-Path -LiteralPath $harness -PathType Leaf)) { throw 'Build the Core test project before native backup recovery acceptance.' }
+    $arguments = @($harness, '--native-backup-acceptance', $script:coreExecutable, $script:configurationPath, [string]$script:coreUrl, $script:WorkDirectory)
+    foreach ($argument in $arguments) {
+        if ($argument.IndexOfAny([char[]]@('"', [char]0, [char]10, [char]13)) -ge 0) { throw 'Invalid native acceptance argument.' }
+    }
+    $start = [Diagnostics.ProcessStartInfo]::new((Get-Command dotnet -ErrorAction Stop).Source)
+    $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+    $start.Arguments = (($arguments | ForEach-Object { '"' + $_.TrimEnd('\') + '"' }) -join ' ')
+    $process = [Diagnostics.Process]::Start($start)
+    $payload = $null
+    try {
+        $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
+        $payload = @{ username = $script:credential.UserName; password = $script:credential.GetNetworkCredential().Password;
+            recoveryKeyBase64 = [Convert]::ToBase64String($script:backupRecoveryKey) } | ConvertTo-Json -Compress
+        $process.StandardInput.WriteLine($payload); $process.StandardInput.Close(); $payload = $null
+        if (-not $process.WaitForExit(450000)) { $process.Kill(); throw 'Native backup recovery acceptance exceeded its deadline.' }
+        $output = $stdout.GetAwaiter().GetResult(); $errors = $stderr.GetAwaiter().GetResult()
+        if ($output.Length -gt 32768 -or $errors.Length -gt 32768) { throw 'Native backup recovery acceptance output exceeded its bound.' }
+        Assert-NoTestSecrets ($output + $errors)
+        if ($process.ExitCode -ne 0) { throw ('Native backup recovery acceptance failed: ' + $errors.Trim()) }
+        Assert-CoreServiceAcceptance ($output -match '\ANative backup restore acceptance passed \(') 'The native backup recovery harness did not report a completed restore.'
+        Write-Host $output.Trim()
+    } finally {
+        $payload = $null
+        if ($null -ne $script:backupRecoveryKey) { [Array]::Clear($script:backupRecoveryKey, 0, $script:backupRecoveryKey.Length); $script:backupRecoveryKey = $null }
+        if ($null -ne $process) { if (-not $process.HasExited) { $process.Kill() }; $process.Dispose() }
+    }
 }
 function Get-OwnedCoreProcess {
     $service = Get-TestCoreService
@@ -410,6 +535,13 @@ try {
     Assert-CoreServiceAcceptance (($dataRights -band $readExecute) -eq $readExecute -and ($dataRights -band [int][Security.AccessControl.FileSystemRights]::CreateFiles) -ne 0) 'The virtual account cannot read/create required SQLite state.'
     $parentControl = [int]([Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership)
     Assert-CoreServiceAcceptance (($dataRights -band $parentControl) -eq 0) 'The virtual account can delete/change protected configuration through its parent.'
+    Assert-CoreServiceAcceptance (($dataRights -band [int][Security.AccessControl.FileSystemRights]::CreateDirectories) -eq 0) 'Core can create directories outside its scoped backup storage.'
+    $backupDirectory = Join-Path $coreData 'backups'
+    Assert-CoreServiceAcceptance (Test-Path -LiteralPath $backupDirectory -PathType Container) 'Setup did not provision backup storage for the virtual service.'
+    $backupRights = Get-ServiceAllowRights $backupDirectory $serviceSid
+    $backupWrites = [int]([Security.AccessControl.FileSystemRights]::CreateFiles -bor [Security.AccessControl.FileSystemRights]::CreateDirectories -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles)
+    $backupControl = [int]([Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::WriteAttributes -bor [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership)
+    Assert-CoreServiceAcceptance (($backupRights -band $backupWrites) -eq $backupWrites -and ($backupRights -band $backupControl) -eq 0) 'Core backup storage grants too little runtime access or permits replacing/changing its protected root.'
     $databaseRights = Get-ServiceAllowRights $databasePath $serviceSid
     Assert-CoreServiceAcceptance (($databaseRights -band [int][Security.AccessControl.FileSystemRights]::Modify) -eq [int][Security.AccessControl.FileSystemRights]::Modify) 'The virtual account cannot maintain the SQLite database.'
     foreach ($path in @($configurationPath, $pilotReceiptPath, $serviceReceiptPath)) {
@@ -419,6 +551,15 @@ try {
     }
     Assert-CoreServiceAcceptance ((Get-FileHash -LiteralPath $configurationPath -Algorithm SHA256).Hash -ceq $configDigest) 'Service installation modified the existing pilot configuration.'
     Assert-CoreServiceAcceptance ((Get-FileHash -LiteralPath $pilotReceiptPath -Algorithm SHA256).Hash -ceq $receiptDigest) 'Service installation modified the existing signed pilot receipt.'
+
+    Test-InstalledCoreBackup
+    $archivePath = Join-Path $backupDirectory (([Guid]$backupArchiveId).ToString('N') + '.sab')
+    $archiveRights = Get-ServiceAllowRights $archivePath $serviceSid
+    Assert-CoreServiceAcceptance (($archiveRights -band [int][Security.AccessControl.FileSystemRights]::Modify) -eq [int][Security.AccessControl.FileSystemRights]::Modify -and
+        ($archiveRights -band [int]([Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership)) -eq 0) 'Encrypted backup archive rights escaped the service runtime boundary.'
+    Invoke-TestNativeBackupRecovery
+    $serviceProcess.Dispose(); $serviceProcess = Get-OwnedCoreProcess
+    Assert-PersistedCoreState
 
     Invoke-TestServiceAction Stop
     Assert-CoreServiceAcceptance ((Get-TestCoreService).State -eq 'Stopped') 'SCM did not report a stopped Core after graceful stop.'
@@ -496,6 +637,7 @@ try {
             finally { $consoleProcess.Dispose() }
         }
         if ($null -ne $client) { $client.Dispose() }
+        if ($null -ne $backupRecoveryKey) { [Array]::Clear($backupRecoveryKey, 0, $backupRecoveryKey.Length); $backupRecoveryKey = $null }
         $sensitiveValues.Clear()
         $credential = $null
         $securePassword.Dispose()

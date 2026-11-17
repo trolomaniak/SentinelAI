@@ -570,6 +570,52 @@ function Invoke-SetupCoreRequest([string]$Path, [string]$Method = 'GET', [string
         $request.Dispose(); $timeout.Dispose(); $memory.Dispose()
     }
 }
+
+function Test-SetupNativeBackupRecovery {
+    # The .NET 10 harness exercises the production offline worker, including the
+    # real central certificate. Synthetic credentials cross stdin only.
+    $harness = Join-Path $script:repositoryRoot 'tests/SentinelAI.Core.Tests/bin/Release/net10.0/SentinelAI.Core.Tests.dll'
+    if (-not (Test-Path -LiteralPath $harness -PathType Leaf)) { throw 'Build the Core test project before native backup recovery acceptance.' }
+    $privateRoot = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) ('SentinelAI-Backup-Acceptance-' + [Guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $privateRoot) { throw 'Backup recovery acceptance requires a new private fixture directory.' }
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
+    foreach ($sid in @('S-1-5-32-544', 'S-1-5-18')) {
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),
+            'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
+    }
+    [void][IO.Directory]::CreateDirectory($privateRoot, $acl)
+    Assert-ProtectedTree $privateRoot @('S-1-5-32-544', 'S-1-5-18')
+    $arguments = @($harness, '--native-backup-acceptance', (Join-Path $script:coreCode 'SentinelAI.Core.exe'),
+        (Join-Path $script:coreData 'pilot-config.json'), 'http://127.0.0.1:5000/', $privateRoot)
+    foreach ($argument in $arguments) {
+        if ($argument.IndexOfAny([char[]]@('"', [char]0, [char]10, [char]13)) -ge 0) { throw 'Invalid native backup acceptance argument.' }
+    }
+    $start = [Diagnostics.ProcessStartInfo]::new((Get-Command dotnet -ErrorAction Stop).Source)
+    $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+    $start.Arguments = (($arguments | ForEach-Object { '"' + $_.TrimEnd('\') + '"' }) -join ' ')
+    $process = [Diagnostics.Process]::Start($start)
+    $payload = $null
+    try {
+        $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
+        # The harness saves the encrypted owner key before enabling its use in
+        # Core. No key, password or bearer is supplied as an argument or environment variable.
+        $payload = @{ username = $script:username; password = $script:password; recoveryKeyBase64 = $null } | ConvertTo-Json -Compress
+        $process.StandardInput.WriteLine($payload); $process.StandardInput.Close(); $payload = $null
+        if (-not $process.WaitForExit(450000)) { $process.Kill(); throw 'Native backup recovery acceptance exceeded its deadline.' }
+        $output = $stdout.GetAwaiter().GetResult(); $errors = $stderr.GetAwaiter().GetResult()
+        if ($output.Length -gt 32768 -or $errors.Length -gt 32768) { throw 'Native backup recovery acceptance output exceeded its bound.' }
+        Assert-NoSecretText ($output + $errors)
+        if ($process.ExitCode -ne 0) { throw ('Native backup recovery acceptance failed: ' + $errors.Trim()) }
+        Assert-SetupAcceptance ($output -match '\ANative backup restore acceptance passed \(') 'The native backup recovery harness did not report a completed restore.'
+        Write-Host $output.Trim()
+    } finally {
+        $payload = $null
+        if ($null -ne $process) { if (-not $process.HasExited) { $process.Kill() }; $process.Dispose() }
+    }
+}
 function Get-EffectiveAllowRights([string]$Path, [string]$Sid) {
     $rights = 0
     foreach ($rule in (Get-Acl -LiteralPath $Path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
@@ -1336,6 +1382,24 @@ try {
     Assert-SetupAcceptance ($rerun.WaitForExit(30000)) 'Unsubmitted maintenance did not close.'
     Assert-SetupAcceptance ($rerunOuter.WaitForExit(30000) -and $rerunOuter.ExitCode -eq $rerun.ExitCode) 'The actual single-EXE wrapper did not propagate maintenance closure.'
     Assert-PoisonedCallerUntouched
+    Test-SetupNativeBackupRecovery
+    $coreProcess.Dispose()
+    $coreProcess = Get-HeldInstalledProcess 'SentinelAICore' (Join-Path $coreCode 'SentinelAI.Core.exe') 'NT SERVICE\SentinelAICore'
+    Assert-CoreListener
+    Assert-SetupAcceptance (-not $agentProcess.HasExited -and (Get-SetupService 'SentinelAIAgent').ProcessId -eq $agentProcess.Id) 'Core recovery changed the independent installed Agent process.'
+    $loginBody = @{ username = $username; password = $password } | ConvertTo-Json -Compress
+    try { $session = Invoke-SetupCoreRequest '/api/auth/login' 'POST' $loginBody | ConvertFrom-Json } finally { $loginBody = $null }
+    $accessToken = [string]$session.accessToken; $session = $null
+    Assert-SetupAcceptance (-not [string]::IsNullOrWhiteSpace($accessToken)) 'The original administrator could not sign in after cold recovery.'
+    foreach ($path in $preservedPaths) { Assert-SetupAcceptance ((Read-SetupStateDigest $path) -ceq $preserved[$path]) 'Core recovery changed protected configuration, ownership or Agent DPAPI state.' }
+    Assert-SetupLocalNetworkCertificate (Get-SetupLocalNetworkPin)
+    Assert-SetupLocalNetworkListener
+    $recoveredAt = [DateTimeOffset]::UtcNow
+    Wait-SetupAcceptance {
+        $detail = Invoke-SetupCoreRequest ('/api/admin/devices/' + $script:endpointId.ToString('D')) 'GET' $null $script:accessToken | ConvertFrom-Json
+        $seen = [DateTimeOffset]::MinValue
+        return [DateTimeOffset]::TryParse([string]$detail.device.lastSeenUtc, [ref]$seen) -and $seen -ge $recoveredAt
+    } 'The original installed Agent did not send a fresh authenticated heartbeat after cold recovery.' 90
     if ($PreserveInstallation -and $null -ne $InstallationContext) {
         # Private in-process synthetic fixture handoff; never emit this object.
         $InstallationContext.Value = [pscustomobject]@{ Username = $username; Password = $password; EndpointId = $endpointId }

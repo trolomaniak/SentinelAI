@@ -310,6 +310,9 @@ jobs:
           ./tests/setup/HangProbe.Tests.ps1
           ./tests/setup/AccountAccess.Tests.ps1
           ./tests/setup/ScheduledTask.Tests.ps1
+      - name: Build the native backup recovery acceptance harness
+        shell: pwsh
+        run: dotnet build tests/SentinelAI.Core.Tests/SentinelAI.Core.Tests.csproj --configuration Release
       - name: Publish one native Setup EXE with a private self-contained runtime
         shell: pwsh
         run: |
@@ -403,6 +406,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Build the native backup recovery acceptance harness
+        shell: pwsh
+        run: dotnet build tests/SentinelAI.Core.Tests/SentinelAI.Core.Tests.csproj --configuration Release
       - name: Publish older, newer and signed unhealthy development Setup executables
         shell: pwsh
         run: |

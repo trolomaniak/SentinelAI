@@ -14,6 +14,12 @@ using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 
+if (args.Length > 0 && args[0] == "--native-backup-acceptance")
+{
+    Environment.ExitCode = await BackupWindowsAcceptance.RunAsync(args, Console.OpenStandardInput());
+    return;
+}
+
 var coreAssembly = typeof(CoreHost).Assembly;
 Ensure(coreAssembly.GetName().Name == "SentinelAI.Core", "The Core project did not produce the expected assembly.");
 Ensure(coreAssembly.EntryPoint is not null, "The Core assembly must be executable.");
@@ -173,6 +179,10 @@ try
     await RiskApiTests.VerifyAsync(username, password);
     await SecurityEventApiTests.VerifyAsync(username, password);
     await DefenderDetectionApiTests.VerifyAsync(username, password);
+    await BackupCryptographyTests.RunAsync();
+    await BackupDatabaseTests.RunAsync();
+    await BackupApiTests.VerifyAsync(username, password);
+    await BackupRestoreTests.RunAsync();
     await HeartbeatConcurrencyTests.RunAsync();
     await EndpointTelemetryApiTests.VerifyAsync(username, password);
     await AgentUpdateApiTests.VerifyAsync();

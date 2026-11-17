@@ -69,6 +69,11 @@ public partial class AuthenticationView : UserControl
         PasswordInput.Clear();
         if (_model is not null) await _model.InitializeAsync();
     }
+    private void OnRecovery(object sender, RoutedEventArgs e)
+    {
+        PasswordInput.Clear();
+        if (!new WindowsBackupRecoveryLauncher().Open()) MessageBox.Show(T("Recovery could not be opened. Run the installed SentinelAI as a Windows administrator and try again."), "SentinelAI", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
     private void OnElevatedSetup(object sender, RoutedEventArgs e)
     {
         PasswordInput.Clear();
