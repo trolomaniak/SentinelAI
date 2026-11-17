@@ -222,6 +222,48 @@ internal static class NotificationStoreTests
             }
             Check((await store.DeliveriesAsync(0, 100)).Items.Single(x => x.NotificationId == blockedSender.NotificationId).State == "cancelled",
                 "A policy change failed to cancel an in-flight worker attempt.");
+
+            policy = (await store.UpdatePolicyAsync(Write(await store.GetPolicyAsync(), true) with { MonitoringChanges = true }))!;
+            await DirectAsync(); time.Advance(TimeSpan.FromMinutes(5));
+            var monitoredEndpoint = Guid.NewGuid(); var monitoredInstallation = Guid.NewGuid();
+            await SqlAsync("""
+                INSERT INTO EndpointEnrollments(InstallationId,EndpointId,CoreInstallationId,OrganizationId,CredentialHash)
+                    SELECT $install,$endpoint,CoreInstallationId,OrganizationId,$hash FROM CoreIdentity;
+                INSERT INTO Devices VALUES($install,$seen,'reporting','enrolled');
+                """, ("$install", monitoredInstallation.ToString("D")), ("$endpoint", monitoredEndpoint.ToString("D")),
+                ("$hash", RandomNumberGenerator.GetBytes(32)), ("$seen", time.GetUtcNow().AddMinutes(-15).AddSeconds(1).UtcTicks));
+            await store.ObserveMonitoringAsync();
+            var slowSender = new BlockingSender();
+            using (var activeWorker = new NotificationWorker(store, slowSender, time, NullLogger<NotificationWorker>.Instance))
+            {
+                async Task WaitForMonitoringAsync(string kind)
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    while (!(await store.ListAsync(0, 100)).Items.Any(x => x.EndpointId == monitoredEndpoint && x.Kind == kind))
+                        await Task.Delay(10, timeout.Token);
+                }
+
+                await activeWorker.StartAsync(CancellationToken.None);
+                try
+                {
+                    await slowSender.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                    time.Advance(TimeSpan.FromSeconds(15));
+                    await WaitForMonitoringAsync("monitoringOffline");
+                    await SqlAsync("UPDATE Devices SET LastSeenUtcTicks=$now WHERE InstallationId=$install;",
+                        ("$now", time.GetUtcNow().UtcTicks), ("$install", monitoredInstallation.ToString("D")));
+                    time.Advance(TimeSpan.FromSeconds(15));
+                    await WaitForMonitoringAsync("monitoringRecovered");
+                    var transitions = (await store.ListAsync(0, 100)).Items.Where(x => x.EndpointId == monitoredEndpoint).ToArray();
+                    Check(transitions.Count(x => x.Kind == "monitoringOffline") == 1 && transitions.Count(x => x.Kind == "monitoringRecovered") == 1 &&
+                        slowSender.Calls == 1 && !slowSender.Cancelled.Task.IsCompleted,
+                        "A blocked external send delayed local monitoring transitions or caused concurrent delivery attempts.");
+                }
+                finally
+                {
+                    using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    await activeWorker.StopAsync(stop.Token);
+                }
+            }
             await DirectAsync();
             await using (var connection = Connection())
             {
@@ -281,9 +323,55 @@ internal static class NotificationStoreTests
 
     private sealed class TestTime : TimeProvider
     {
+        private readonly object _gate = new();
+        private readonly HashSet<ManualTimer> _timers = [];
         private DateTimeOffset _now = new(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
-        public override DateTimeOffset GetUtcNow() => _now;
-        internal void Advance(TimeSpan delta) => _now += delta;
+        public override DateTimeOffset GetUtcNow() { lock (_gate) return _now; }
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ManualTimer(this, callback, state);
+            timer.Change(dueTime, period); return timer;
+        }
+        internal void Advance(TimeSpan delta)
+        {
+            List<ManualTimer> ready;
+            lock (_gate)
+            {
+                _now += delta;
+                ready = _timers.Where(timer => timer.Due(_now.UtcTicks)).ToList();
+            }
+            foreach (var timer in ready) timer.Fire();
+        }
+
+        private sealed class ManualTimer(TestTime owner, TimerCallback callback, object? state) : ITimer
+        {
+            private long _next = long.MaxValue;
+            private long _period;
+            private bool _disposed;
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                lock (owner._gate)
+                {
+                    if (_disposed) return false;
+                    _next = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : owner._now.UtcTicks + dueTime.Ticks;
+                    _period = period.Ticks;
+                    owner._timers.Add(this); return true;
+                }
+            }
+            internal bool Due(long now)
+            {
+                if (_disposed || _next > now) return false;
+                _next = _period > 0 ? _next + ((now - _next) / _period + 1) * _period : long.MaxValue;
+                return true;
+            }
+            internal void Fire()
+            {
+                lock (owner._gate) { if (_disposed) return; }
+                callback(state);
+            }
+            public void Dispose() { lock (owner._gate) { _disposed = true; owner._timers.Remove(this); } }
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
     }
     private sealed class FakeSender : INotificationSender
     {
@@ -293,11 +381,14 @@ internal static class NotificationStoreTests
     }
     private sealed class BlockingSender : INotificationSender
     {
+        private int _calls;
         internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Guid NotificationId { get; private set; }
+        internal int Calls => Volatile.Read(ref _calls);
         public async Task<NotificationSendResult> SendAsync(NotificationPayload payload, NotificationDestination destination, CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref _calls);
             NotificationId = payload.NotificationId; Started.TrySetResult();
             try { await Task.Delay(Timeout.Infinite, cancellationToken); }
             catch (OperationCanceledException) { Cancelled.TrySetResult(); throw; }

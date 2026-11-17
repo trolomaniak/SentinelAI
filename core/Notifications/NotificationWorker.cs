@@ -13,22 +13,42 @@ internal sealed class NotificationWorker(NotificationStore store,INotificationSe
         store.PolicyChanged+=CancelAttempt;
         try
         {
+            // Local monitoring must keep progressing while an external recipient is slow or unavailable.
+            await Task.WhenAll(RunPeriodicAsync(MaintainAsync,stoppingToken),
+                RunPeriodicAsync(DeliverAsync,stoppingToken));
+        }
+        finally { store.PolicyChanged-=CancelAttempt; }
+    }
+
+    private async Task RunPeriodicAsync(Func<CancellationToken,Task> process,CancellationToken stoppingToken)
+    {
+        try
+        {
             using var timer=new PeriodicTimer(TimeSpan.FromSeconds(15),time);
             do
             {
-                try { await ProcessOnceAsync(stoppingToken); }
+                try { await process(stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
                 catch (Exception) { logger.LogWarning("Notification processing deferred."); }
             } while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-        finally { store.PolicyChanged-=CancelAttempt; }
     }
 
     internal async Task ProcessOnceAsync(CancellationToken cancellationToken=default)
     {
+        await MaintainAsync(cancellationToken);
+        await DeliverAsync(cancellationToken);
+    }
+
+    private async Task MaintainAsync(CancellationToken cancellationToken)
+    {
         await store.ObserveMonitoringAsync(cancellationToken);
         await store.PruneAsync(cancellationToken);
+    }
+
+    private async Task DeliverAsync(CancellationToken cancellationToken)
+    {
         for (var count=0;count<20;count++)
         {
             cancellationToken.ThrowIfCancellationRequested();

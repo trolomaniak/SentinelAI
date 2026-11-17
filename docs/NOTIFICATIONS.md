@@ -1,6 +1,6 @@
 # Security notifications
 
-The native **Notifications** page provides a durable local center, read markers, grouped occurrence counts, delivery history and explicit policy settings. It works while Desktop is closed because Core records and processes notifications. External channels are disabled by default; the local center does not require them.
+The native **Notifications** page provides a durable local center, read markers, grouped occurrence counts, delivery history and explicit policy settings. It works while Desktop is closed because Core records and processes notifications. External channels are disabled by default; the local center does not require them. Monitoring and delivery run independently, so a slow external recipient does not pause local heartbeat evaluation.
 
 ## What creates a notification
 
