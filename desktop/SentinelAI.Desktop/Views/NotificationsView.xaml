@@ -1,0 +1,109 @@
+<UserControl xmlns:loc="clr-namespace:SentinelAI.Desktop.Localization" x:Class="SentinelAI.Desktop.Views.NotificationsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:foundation="clr-namespace:SentinelAI.Desktop.Foundation;assembly=SentinelAI.Desktop.Foundation"
+             AutomationProperties.AutomationId="NotificationsView">
+    <UserControl.Resources>
+        <Style x:Key="Label" TargetType="TextBlock"><Setter Property="Margin" Value="0,12,0,4" /><Setter Property="TextWrapping" Value="Wrap" /><Setter Property="FontWeight" Value="SemiBold" /></Style>
+        <Style x:Key="Hint" TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap" /><Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" /><Setter Property="Margin" Value="0,6,0,0" /></Style>
+    </UserControl.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.AutomationId="NotificationsScroll">
+        <StackPanel Margin="0,0,8,16">
+            <TextBlock Text="{loc:T 'Notifications'}" FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="{loc:T 'Notifications'}" />
+            <TextBlock Text="{loc:T 'Local critical-alert and monitoring notifications. External channels are optional and disabled by default.'}" Style="{StaticResource Hint}" />
+            <WrapPanel Margin="0,12,0,4">
+                <CheckBox IsChecked="{Binding UnreadOnly}" IsEnabled="{Binding CanRefresh, Mode=OneWay}" Margin="0,0,12,8" VerticalAlignment="Center"
+                          AutomationProperties.AutomationId="NotificationsUnreadOnly"><TextBlock Text="{loc:T 'Unread only'}" TextWrapping="Wrap" /></CheckBox>
+                <Button Content="{loc:T 'Apply filter'}" Click="OnApplyFilter" IsEnabled="{Binding CanRefresh, Mode=OneWay}" Margin="0,0,8,8" AutomationProperties.AutomationId="NotificationsApplyFilter" />
+                <Button Content="{loc:T 'Refresh'}" Click="OnRefresh" IsEnabled="{Binding CanRefresh, Mode=OneWay}" Margin="0,0,8,8" AutomationProperties.AutomationId="NotificationsRefresh" />
+            </WrapPanel>
+            <TextBlock Text="{Binding Message, Mode=OneWay}" TextWrapping="Wrap" AutomationProperties.AutomationId="NotificationsMessage" AutomationProperties.LiveSetting="Polite" />
+            <TextBlock Text="{Binding ListText, Mode=OneWay}" Style="{StaticResource Hint}" AutomationProperties.AutomationId="NotificationsStatus" />
+            <TextBlock Text="{Binding PageText, Mode=OneWay}" TextWrapping="Wrap" Margin="0,6,0,6" AutomationProperties.AutomationId="NotificationsPage" />
+            <ListBox ItemsSource="{Binding Rows, Mode=OneWay}" SelectedItem="{Binding SelectedNotification}" Height="240"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     HorizontalContentAlignment="Stretch" AutomationProperties.Name="{loc:T 'Local security notifications'}" AutomationProperties.AutomationId="NotificationsList">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="4,6">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Endpoint}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Occurrences}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Time}" TextWrapping="Wrap" FontSize="12" />
+                            <TextBlock Text="{Binding ReadState}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <WrapPanel Margin="0,8,0,8">
+                <Button Content="{loc:T 'Previous'}" Click="OnPrevious" IsEnabled="{Binding CanPreviousPage, Mode=OneWay}" Margin="0,0,8,8" AutomationProperties.AutomationId="NotificationsPrevious" />
+                <Button Content="{loc:T 'Next'}" Click="OnNext" IsEnabled="{Binding CanNextPage, Mode=OneWay}" Margin="0,0,8,8" AutomationProperties.AutomationId="NotificationsNext" />
+                <Button Content="{loc:T 'Mark as read'}" Click="OnMarkRead" IsEnabled="{Binding CanMarkRead, Mode=OneWay}" Margin="0,0,8,8" AutomationProperties.AutomationId="NotificationsMarkRead" />
+            </WrapPanel>
+            <TextBlock Text="{loc:T 'Delivery history'}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <WrapPanel Margin="0,8,0,0">
+                <Button Content="{loc:T 'Selected deliveries'}" Click="OnSelectedDeliveries" IsEnabled="{Binding CanShowSelectedDeliveries, Mode=OneWay}" Margin="0,0,8,8" AutomationProperties.AutomationId="NotificationsSelectedDeliveries" />
+                <Button Content="{loc:T 'All deliveries'}" Click="OnAllDeliveries" IsEnabled="{Binding CanRefresh, Mode=OneWay}" Margin="0,0,8,8" AutomationProperties.AutomationId="NotificationsAllDeliveries" />
+            </WrapPanel>
+            <TextBlock Text="{Binding DeliveryScopeText, Mode=OneWay}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding DeliveryText, Mode=OneWay}" Style="{StaticResource Hint}" />
+            <TextBlock Text="{Binding DeliveryPageText, Mode=OneWay}" TextWrapping="Wrap" Margin="0,6,0,6" />
+            <ListBox ItemsSource="{Binding DeliveryRows, Mode=OneWay}" Height="180" HorizontalContentAlignment="Stretch"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="{loc:T 'Delivery history'}" AutomationProperties.AutomationId="NotificationsDeliveries">
+                <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4,6">
+                    <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Time}" TextWrapping="Wrap" FontSize="12" />
+                    <TextBlock Text="{Binding Result}" TextWrapping="Wrap" FontSize="12" />
+                </StackPanel></DataTemplate></ListBox.ItemTemplate>
+            </ListBox>
+            <WrapPanel Margin="0,8,0,16">
+                <Button Content="{loc:T 'Previous'}" Click="OnPreviousDelivery" IsEnabled="{Binding CanPreviousDeliveryPage, Mode=OneWay}" Margin="0,0,8,8" AutomationProperties.AutomationId="NotificationsPreviousDelivery" />
+                <Button Content="{loc:T 'Next'}" Click="OnNextDelivery" IsEnabled="{Binding CanNextDeliveryPage, Mode=OneWay}" Margin="0,0,8,8" AutomationProperties.AutomationId="NotificationsNextDelivery" />
+            </WrapPanel>
+            <TextBlock Text="{loc:T 'Notification settings'}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding PolicyText, Mode=OneWay}" Style="{StaticResource Hint}" />
+            <TextBlock Text="{Binding CredentialText, Mode=OneWay}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,6,0,0" />
+            <StackPanel IsEnabled="{Binding CanEditPolicy, Mode=OneWay}" AutomationProperties.AutomationId="NotificationsPolicy">
+                <CheckBox IsChecked="{Binding CriticalAlerts}" Margin="0,12,0,8" AutomationProperties.AutomationId="NotificationsCritical"><TextBlock Text="{loc:T 'New, reopened and escalated critical alerts'}" TextWrapping="Wrap" /></CheckBox>
+                <CheckBox IsChecked="{Binding MonitoringChanges}" Margin="0,0,0,8" AutomationProperties.AutomationId="NotificationsMonitoring"><TextBlock Text="{loc:T 'Endpoint monitoring lost and recovered'}" TextWrapping="Wrap" /></CheckBox>
+                <TextBlock Text="{loc:T 'Offline threshold (5–120 minutes)'}" Style="{StaticResource Label}" />
+                <ComboBox Width="100" HorizontalAlignment="Left" ItemsSource="{x:Static foundation:NotificationsViewModel.OfflineOptions}" SelectedItem="{Binding OfflineMinutes}"
+                          AutomationProperties.Name="{loc:T 'Offline threshold (5–120 minutes)'}" AutomationProperties.AutomationId="NotificationsOfflineMinutes" />
+                <TextBlock Text="{loc:T 'Fixed grouping window (1–60 minutes)'}" Style="{StaticResource Label}" />
+                <ComboBox Width="100" HorizontalAlignment="Left" ItemsSource="{x:Static foundation:NotificationsViewModel.GroupOptions}" SelectedItem="{Binding GroupMinutes}"
+                          AutomationProperties.Name="{loc:T 'Fixed grouping window (1–60 minutes)'}" AutomationProperties.AutomationId="NotificationsGroupMinutes" />
+                <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="12" Margin="0,16,0,0" AutomationProperties.AutomationId="NotificationsExternalWarning">
+                    <StackPanel>
+                        <TextBlock Text="{loc:T 'Before enabling external delivery'}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="{loc:T 'Saving an enabled channel authorizes Core to send future matching notifications outside this computer. Payloads contain notification, endpoint, alert and rule IDs, event kind, severity, occurrence count and UTC times. They exclude evidence, account names, host names and finding text. Email also uses the sender and recipient you configure.'}" Style="{StaticResource Hint}" />
+                        <TextBlock Text="{loc:T 'Only public internet destinations are accepted: HTTPS on port 443, or SMTP on port 587 with required STARTTLS. No test message is sent. Retries may produce duplicates.'}" Style="{StaticResource Hint}" />
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="{Binding ProtectedValuesText, Mode=OneWay}" Style="{StaticResource Hint}" AutomationProperties.AutomationId="NotificationsProtectedValues" />
+                <TextBlock Text="{loc:T 'Blank protected inputs retain saved values. Use the clear choices to remove them. Inputs are cleared after submission and when you leave this page.'}" Style="{StaticResource Hint}" />
+                <TextBlock Text="{loc:T 'Webhook secret: 16–512 UTF-8 bytes. SMTP password: 8–512 UTF-8 bytes.'}" Style="{StaticResource Hint}" />
+                <CheckBox IsChecked="{Binding WebhookEnabled}" Margin="0,16,0,4" AutomationProperties.AutomationId="NotificationsWebhookEnabled"><TextBlock Text="{loc:T 'Enable HTTPS webhook'}" TextWrapping="Wrap" /></CheckBox>
+                <TextBlock Text="{loc:T 'New webhook URL (protected, write only)'}" Style="{StaticResource Label}" />
+                <PasswordBox x:Name="WebhookUrlInput" MaxLength="2048" AutomationProperties.Name="{loc:T 'New webhook URL (protected, write only)'}" AutomationProperties.AutomationId="NotificationsWebhookUrl" />
+                <CheckBox IsChecked="{Binding ClearWebhookDestination}" Margin="0,6,0,0" AutomationProperties.AutomationId="NotificationsClearWebhookDestination"><TextBlock Text="{loc:T 'Clear saved webhook destination (disable webhook first)'}" TextWrapping="Wrap" /></CheckBox>
+                <TextBlock Text="{loc:T 'New webhook secret (write only)'}" Style="{StaticResource Label}" />
+                <PasswordBox x:Name="WebhookSecretInput" MaxLength="512" AutomationProperties.Name="{loc:T 'New webhook secret (write only)'}" AutomationProperties.AutomationId="NotificationsWebhookSecret" />
+                <CheckBox IsChecked="{Binding ClearWebhookSecret}" Margin="0,6,0,0" AutomationProperties.AutomationId="NotificationsClearWebhookSecret"><TextBlock Text="{loc:T 'Clear saved webhook secret'}" TextWrapping="Wrap" /></CheckBox>
+                <CheckBox IsChecked="{Binding EmailEnabled}" Margin="0,16,0,4" AutomationProperties.AutomationId="NotificationsEmailEnabled"><TextBlock Text="{loc:T 'Enable email (SMTP 587, STARTTLS required)'}" TextWrapping="Wrap" /></CheckBox>
+                <TextBlock Text="{loc:T 'SMTP host'}" Style="{StaticResource Label}" />
+                <TextBox Text="{Binding SmtpHost, UpdateSourceTrigger=PropertyChanged}" MaxLength="253" AutomationProperties.Name="{loc:T 'SMTP host'}" AutomationProperties.AutomationId="NotificationsSmtpHost" />
+                <TextBlock Text="{loc:T 'SMTP username'}" Style="{StaticResource Label}" />
+                <TextBox Text="{Binding SmtpUsername, UpdateSourceTrigger=PropertyChanged}" MaxLength="254" AutomationProperties.Name="{loc:T 'SMTP username'}" AutomationProperties.AutomationId="NotificationsSmtpUsername" />
+                <TextBlock Text="{loc:T 'New SMTP password (write only)'}" Style="{StaticResource Label}" />
+                <PasswordBox x:Name="SmtpPasswordInput" MaxLength="512" AutomationProperties.Name="{loc:T 'New SMTP password (write only)'}" AutomationProperties.AutomationId="NotificationsSmtpPassword" />
+                <CheckBox IsChecked="{Binding ClearSmtpPassword}" Margin="0,6,0,0" AutomationProperties.AutomationId="NotificationsClearSmtpPassword"><TextBlock Text="{loc:T 'Clear saved SMTP password'}" TextWrapping="Wrap" /></CheckBox>
+                <TextBlock Text="{loc:T 'Email sender'}" Style="{StaticResource Label}" />
+                <TextBox Text="{Binding EmailFrom, UpdateSourceTrigger=PropertyChanged}" MaxLength="254" AutomationProperties.Name="{loc:T 'Email sender'}" AutomationProperties.AutomationId="NotificationsEmailFrom" />
+                <TextBlock Text="{loc:T 'Email recipient'}" Style="{StaticResource Label}" />
+                <TextBox Text="{Binding EmailTo, UpdateSourceTrigger=PropertyChanged}" MaxLength="254" AutomationProperties.Name="{loc:T 'Email recipient'}" AutomationProperties.AutomationId="NotificationsEmailTo" />
+            </StackPanel>
+            <Button Content="{loc:T 'Save notification settings'}" HorizontalAlignment="Left" Click="OnSave" IsEnabled="{Binding CanSavePolicy, Mode=OneWay}" Margin="0,16,0,8" AutomationProperties.AutomationId="NotificationsSave" />
+            <TextBlock Text="{Binding Message, Mode=OneWay}" TextWrapping="Wrap" AutomationProperties.AutomationId="NotificationsSaveMessage" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

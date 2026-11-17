@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SentinelAI.Rules;
+using SentinelAI.Core.Notifications;
 
 namespace SentinelAI.Core.Persistence;
 
@@ -9,7 +10,7 @@ public enum AlertStatusUpdateOutcome { Updated, NotFound, Conflict }
 public sealed record AlertStatusUpdateResult(AlertStatusUpdateOutcome Outcome, AlertDetail? Alert);
 
 /// <summary>A durable lifecycle for each endpoint/rule, separate from current rule findings.</summary>
-public sealed class AlertStore(AdminStore admins)
+public sealed class AlertStore(AdminStore admins, NotificationStore? notifications = null, TimeProvider? timeProvider = null)
 {
     private const string SelectColumns = """
         AlertId, EndpointId, EndpointName, RuleId, Title, Severity, Status,
@@ -69,14 +70,15 @@ public sealed class AlertStore(AdminStore admins)
         CancellationToken cancellationToken)
     {
         var observedTicks = finding.Timestamp.UtcDateTime.Ticks;
-        var now = DateTimeOffset.UtcNow;
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         string? alertId = null;
         string? status = null;
+        string? severity = null;
         await using (var query = connection.CreateCommand())
         {
             query.Transaction = transaction;
             query.CommandText = """
-                SELECT AlertId, Status, LastObservedUtcTicks FROM TrackedAlerts
+                SELECT AlertId, Status, LastObservedUtcTicks, Severity FROM TrackedAlerts
                 WHERE EndpointId = $endpointId AND RuleId = $ruleId;
                 """;
             query.Parameters.AddWithValue("$endpointId", finding.EndpointId.ToString("D"));
@@ -91,6 +93,7 @@ public sealed class AlertStore(AdminStore admins)
 
                 alertId = reader.GetString(0);
                 status = reader.GetString(1);
+                severity = reader.GetString(3);
             }
         }
 
@@ -135,6 +138,9 @@ public sealed class AlertStore(AdminStore admins)
         {
             await RecordHistoryAsync(connection, transaction, alertId, status, "open", now, "system", cancellationToken);
         }
+        if (notifications is not null && finding.Severity == "critical" && (isNew || reopen || severity != "critical"))
+            await notifications.RecordCriticalAsync(connection, transaction, Guid.Parse(alertId), finding.EndpointId,
+                endpointName, finding.RuleId, isNew ? "criticalAlertNew" : reopen ? "criticalAlertReopened" : "criticalAlertEscalated", cancellationToken);
     }
 
     public async Task<AlertPage> ListAsync(
@@ -266,7 +272,7 @@ public sealed class AlertStore(AdminStore admins)
             return new AlertStatusUpdateResult(AlertStatusUpdateOutcome.Updated, current);
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         await using (var update = connection.CreateCommand())
         {
             update.Transaction = transaction;
@@ -283,6 +289,9 @@ public sealed class AlertStore(AdminStore admins)
 
         await RecordHistoryAsync(connection, transaction, alertId.ToString("D"), current.Status, status,
             now, actor, cancellationToken);
+        if (notifications is not null && current.Status == "resolved" && (status is "open" or "investigating") && current.Severity == "critical")
+            await notifications.RecordCriticalAsync(connection, transaction, alertId, current.EndpointId,
+                current.EndpointName, current.RuleId, "criticalAlertReopened", cancellationToken);
         var detail = await FindAsync(connection, transaction, alertId, cancellationToken);
         transaction.Commit();
         return new AlertStatusUpdateResult(AlertStatusUpdateOutcome.Updated, detail);

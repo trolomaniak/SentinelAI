@@ -30,6 +30,7 @@ assertions += await CentralUpdateSettingsTests.RunAsync();
 assertions += await VulnerabilityTests.RunAsync();
 assertions += await DefenderDetectionTests.RunAsync();
 assertions += await BackupTests.RunAsync();
+assertions += await NotificationsTests.RunAsync();
 assertions += await RiskRegisterTests.RunAsync();
 assertions += await LocalizationTests.RunAsync();
 Console.WriteLine($"Desktop foundation: {assertions} assertions passed.");

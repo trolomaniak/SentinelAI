@@ -19,6 +19,7 @@ using SentinelAI.Contracts.Inventory;
 using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Backups;
+using SentinelAI.Core.Notifications;
 using SentinelAI.Localization;
 using SentinelAI.Core.Reports;
 using SentinelAI.Licensing;
@@ -102,6 +103,9 @@ public static class CoreHost
         builder.Services.AddSingleton<SecurityEventStore>();
         builder.Services.AddSingleton<DefenderDetectionReadStore>();
         builder.Services.AddSingleton<AlertStore>();
+        builder.Services.AddSingleton<INotificationCredentialProtection, WindowsNotificationCredentialProtection>();
+        builder.Services.AddSingleton<NotificationStore>();
+        builder.Services.AddSingleton<INotificationSender, NotificationSender>();
         builder.Services.AddSingleton(TelemetryRuleEngine.CreateDefault());
         builder.Services.AddSingleton<EndpointTelemetryStore>();
         builder.Services.AddSingleton(RuleEngine.CreateDefault());
@@ -146,6 +150,7 @@ public static class CoreHost
             new AiGatewayClient(services.GetRequiredService<AiOptions>()));
         builder.Services.AddSingleton<AiExplanationService>();
         builder.Services.AddHostedService<AdminInitializationService>();
+        builder.Services.AddHostedService<NotificationWorker>();
         builder.Services.AddHostedService(services => services.GetRequiredService<BackupService>());
         builder.Services.AddHostedService<LicenseRenewalWorker>();
         builder.Services.AddHostedService(services => services.GetRequiredService<CentralUpdateService>());
@@ -268,6 +273,15 @@ public static class CoreHost
         configureBeforeAuthentication?.Invoke(app);
         app.Use(async (context, next) =>
         {
+            if (context.Request.Path.StartsWithSegments("/api/admin/notifications"))
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                if (!NotificationEndpoints.IsLocal(context))
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return;
+                }
+            }
             // Reject remote plaintext before minimal-API body binding reads a password.
             if ((context.Request.Path.StartsWithSegments("/api/auth/login") ||
                  context.Request.Path.StartsWithSegments("/api/admin/me")) &&
@@ -290,6 +304,7 @@ public static class CoreHost
         app.UseAuthorization();
 
         app.MapBackupEndpoints(IsLocalOrHttps);
+        app.MapNotificationEndpoints();
 
         app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
             .AllowAnonymous();

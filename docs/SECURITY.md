@@ -27,6 +27,8 @@ Pilot package signatures are separate from Authenticode. The pilot uses the owne
 
 Inventory, minimized event observations, incidents and business risks are stored locally. The event catalog and endpoint telemetry contracts specify which fields are collected, bounded and retained; raw logs, arbitrary files and credential values are not included in cloud AI context. See [security events](SECURITY-EVENTS.md) and [endpoint telemetry](ENDPOINT-TELEMETRY.md).
 
+Optional notification delivery is disabled by default and requires explicit administrator configuration. Public HTTPS webhooks and authenticated SMTP STARTTLS send a fixed minimized payload; destination checks, credential protection, retry semantics and recovery suppression are described in [notifications](NOTIFICATIONS.md). The local notification center does not require external delivery.
+
 Optional cloud explanations require configuration, entitlement, session consent and an explicit request. Core sends only the supported minimized alert context; provider credentials stay in the gateway. Optional update checks contact the configured owner server when enabled. These are separate from local monitoring; see [AI configuration and privacy](AI.md).
 
 Central uninstall retains security history and configuration by default; destructive removal requires the existing explicit confirmation flow. Agent uninstall removes that computer's local Agent installation and enrollment state, while its retained history stays in Core. Reports and diagnostic artifacts may still contain customer identifiers or security findings and should be handled as customer data.
