@@ -42,6 +42,9 @@ internal static partial class Program
                     var view = Descendants<NotificationsView>(window).Single();
                     Ensure(ReferenceEquals(view.DataContext, notifications) && shell.CurrentPage.Title == (language == UiLanguage.Polish ? "Powiadomienia" : "Notifications"),
                         "The notification page/navigation did not use the real localized view model.");
+                    var heading = Descendants<TextBlock>(view).Single(t => AutomationProperties.GetAutomationId(t) == "PageHeading");
+                    Ensure(heading.IsVisible && heading.Text == shell.CurrentPage.Title && AutomationProperties.GetName(heading) == shell.CurrentPage.Title,
+                        "The notification page did not expose the shared localized navigation heading.");
                     Ensure(Descendants<TextBlock>(view).Any(t => t.Text == "{Binding hostile}<script>literal endpoint</script>") && Descendants<TextBlock>(view).All(t => !t.Inlines.OfType<System.Windows.Documents.Hyperlink>().Any()),
                         "The native page interpreted endpoint text as markup or provided hostile-link navigation.");
                     var url = (PasswordBox)view.FindName("WebhookUrlInput");

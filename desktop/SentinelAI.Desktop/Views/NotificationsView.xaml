@@ -8,7 +8,8 @@
     </UserControl.Resources>
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.AutomationId="NotificationsScroll">
         <StackPanel Margin="0,0,8,16">
-            <TextBlock Text="{loc:T 'Notifications'}" FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="{loc:T 'Notifications'}" FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="{loc:T 'Notifications'}" />
             <TextBlock Text="{loc:T 'Local critical-alert and monitoring notifications. External channels are optional and disabled by default.'}" Style="{StaticResource Hint}" />
             <WrapPanel Margin="0,12,0,4">
                 <CheckBox IsChecked="{Binding UnreadOnly}" IsEnabled="{Binding CanRefresh, Mode=OneWay}" Margin="0,0,12,8" VerticalAlignment="Center"
