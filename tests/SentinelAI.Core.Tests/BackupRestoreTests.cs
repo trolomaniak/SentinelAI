@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -341,6 +343,7 @@ internal static class BackupRestoreTests
         var identity = await enrollments.GetCoreIdentityAsync(); await app.StopAsync();
         var database = app.Services.GetRequiredService<AdminStore>().DatabasePath;
         BackupStorage.CreatePrivateDirectory(Path.Combine(data, "backups"));
+        Private(database);
         return new(database, identity, found);
     }
     private static string Clone(string root, string name, string snapshot, CoreIdentity identity, byte[] key)
@@ -381,7 +384,24 @@ internal static class BackupRestoreTests
     { await using var connection = Open(database); await connection.OpenAsync(); await using var command = connection.CreateCommand(); command.CommandText = sql; return Convert.ToInt64(await command.ExecuteScalarAsync()); }
     private static Task<long> CountAsync(string database, string table) => ScalarAsync(database, "SELECT COUNT(*) FROM " + table + ";");
     private static SqliteConnection Open(string database) => new(new SqliteConnectionStringBuilder { DataSource = database, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString());
-    private static void Private(string path) { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
+    private static void Private(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            return;
+        }
+        // Match installed mutable Core files. Runner-profile inheritance deliberately
+        // does not satisfy production recovery's administrators/SYSTEM/service boundary.
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(true, false);
+        security.SetOwner(new SecurityIdentifier("S-1-5-32-544"));
+        foreach (var sid in new[] { "S-1-5-18", "S-1-5-32-544" })
+            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid), FileSystemRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier("S-1-5-80-1772522954-4099193962-4247269631-2556497313-4219375900"),
+            FileSystemRights.Modify, AccessControlType.Allow));
+        new FileInfo(path).SetAccessControl(security);
+    }
     private static void Check(bool condition, string message) { _checks++; if (!condition) throw new InvalidOperationException(message); }
     private static async Task RejectAsync(Func<Task> action, string message)
     {
