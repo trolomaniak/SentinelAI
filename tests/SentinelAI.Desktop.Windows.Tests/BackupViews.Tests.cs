@@ -29,11 +29,16 @@ internal static partial class Program
         {
             window.Show();
             await WaitForAsync(() => auth.State == AuthenticationState.SignedOut, "Backup fixture did not reach sign-in.");
+            await FlushAsync();
+            var recoveryEntry = Descendants<Button>(window).Single(button =>
+                AutomationProperties.GetAutomationId(button) == "AuthenticationRecoveryButton");
+            Ensure(recoveryEntry.IsVisible, "Signed-out recovery was not available before Core authentication.");
             shell.CurrentPage = shell.Pages.Single(page => page.Id == PageId.Settings);
             auth.Username = "native-backup-admin";
             await auth.SignInAsync("Synthetic-Native-Backup!".AsMemory());
             await WaitForAsync(() => backup.State == BackupViewState.Ready, "Native Settings did not read backup status.");
             await FlushAsync();
+            Ensure(!recoveryEntry.IsVisible, "Signed-in recovery duplicated the authentication panel and consumed the workspace viewport.");
             var settings = Descendants<SettingsView>(window).Single();
             var card = Descendants<Border>(settings).Single(item => AutomationProperties.GetAutomationId(item) == "BackupSettings");
             card.BringIntoView(); await FlushAsync();
