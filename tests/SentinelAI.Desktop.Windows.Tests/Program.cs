@@ -191,6 +191,7 @@ internal static partial class Program
         await VulnerabilityViewsAsync();
         await DefenderDetectionViewsAsync();
         await BackupViewsAsync();
+        await NotificationsViewsAsync();
         await RiskRegisterViewsAsync();
         await PolishViewsAsync();
         await BrowserlessViewsAsync();

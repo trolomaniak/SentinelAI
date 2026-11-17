@@ -184,6 +184,9 @@ try
     await BackupApiTests.VerifyAsync(username, password);
     await BackupRestoreTests.RunAsync();
     await HeartbeatConcurrencyTests.RunAsync();
+    await NotificationStoreTests.RunAsync();
+    await NotificationTransportTests.RunAsync();
+    await NotificationApiTests.VerifyAsync(username, password);
     await EndpointTelemetryApiTests.VerifyAsync(username, password);
     await AgentUpdateApiTests.VerifyAsync();
     await CentralUpdateTests.VerifyAsync();

@@ -1,5 +1,6 @@
 using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Backups;
+using SentinelAI.Core.Notifications;
 
 namespace SentinelAI.Core;
 
@@ -17,6 +18,7 @@ internal sealed class AdminInitializationService(
     RiskRegisterStore riskRegister,
     InstallationLanguageStore language,
     BackupStore backups,
+    NotificationStore notifications,
     CoreHostingMode hostingMode) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -29,6 +31,7 @@ internal sealed class AdminInitializationService(
         await alerts.InitializeAsync(cancellationToken);
         await telemetry.InitializeAsync(cancellationToken);
         await inventories.BackfillAlertsAsync(cancellationToken);
+        await notifications.InitializeAsync(cancellationToken);
         await licenses.InitializeAsync(cancellationToken);
         await centralUpdates.InitializeAsync(cancellationToken);
         await vulnerabilities.InitializeAsync(cancellationToken);

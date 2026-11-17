@@ -5,7 +5,7 @@ Zakres zatwierdzony przez właściciela: realizacja kolejno, od backupu i odzysk
 | Kolejność | Obszar | Wynik dla użytkownika | Stan |
 | --- | --- | --- | --- |
 | 1 | Backup i odzyskiwanie | Szyfrowane kopie, harmonogram, retencja, eksport, weryfikacja i sprawdzone odtworzenie | Gotowe w PR #56; testy lokalne i Windows przeszły |
-| 2 | Powiadomienia bezpieczeństwa | Krytyczne wykrycia, utrata monitoringu, grupowanie, opcjonalny e-mail/webhook i historia dostarczenia | Zaplanowane |
+| 2 | Powiadomienia bezpieczeństwa | Krytyczne wykrycia, utrata monitoringu, grupowanie, opcjonalny e-mail/webhook i historia dostarczenia | W realizacji |
 | 3 | Pokrycie monitoringu | Dostępność źródeł, luki i wiek danych każdego urządzenia | Zaplanowane |
 | 4 | Pulpit operacyjny Overview | Problemy wymagające działania, zmiany i stan pracy administratora | Zaplanowane |
 | 5 | Historia i trendy | Snapshoty, wersja polityki, przyczyny zmian, okresy 7/30/90 dni | Zaplanowane |

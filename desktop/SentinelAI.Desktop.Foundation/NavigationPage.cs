@@ -8,6 +8,7 @@ public enum PageId
     Risk,
     RiskRegister,
     Reports,
+    Notifications,
     Settings
 }
 
