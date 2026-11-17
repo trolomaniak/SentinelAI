@@ -20,6 +20,10 @@ internal static class BackupWindowsAcceptance
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private sealed record FixtureInput(string Username, string Password, string? RecoveryKeyBase64);
     private sealed record WorkerReply(int ExitCode, BackupRecoveryResult Result);
+    private sealed class AcceptanceFailure(string code) : Exception
+    {
+        public string Code { get; } = code;
+    }
 
     public static async Task<int> RunAsync(string[] args, Stream input)
     {
@@ -35,7 +39,7 @@ internal static class BackupWindowsAcceptance
         void Check(bool condition, string message)
         {
             checks++;
-            if (!condition) throw new InvalidOperationException(message);
+            if (!condition) throw new AcceptanceFailure(message);
         }
         byte[]? key = null;
         byte[]? inputBytes = null;
@@ -50,6 +54,7 @@ internal static class BackupWindowsAcceptance
             inputBytes = await ReadBoundedAsync(input, 16 * 1024, cancellation);
             var fixture = JsonSerializer.Deserialize<FixtureInput>(inputBytes, Json) ?? throw new InvalidDataException();
             Check(fixture.Username.Length is > 0 and <= 128 && fixture.Password.Length is >= 12 and <= 1024, "fixture-input");
+            stage = "fixture-paths";
             core = Path.GetFullPath(args[1]); config = Path.GetFullPath(args[2]);
             var origin = new Uri(args[3]);
             Check(origin.IsLoopback && origin.Scheme == "http" && File.Exists(core) && File.Exists(config), "owned-fixture-paths");
@@ -59,9 +64,12 @@ internal static class BackupWindowsAcceptance
             var work = Path.Combine(privateRoot, "Backup-Recovery-Test-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(work);
             var protectedFiles = new[] { config, Path.Combine(data, "pilot-installation.json"), Path.Combine(data, "core-service-installation.json") };
+            stage = "protected-file-hashes";
             var protectedHashes = protectedFiles.ToDictionary(path => path, path => SHA256.HashData(File.ReadAllBytes(path)));
             var aclPaths = protectedFiles.Append(Path.Combine(data, "sentinelai.db")).ToArray();
+            stage = "protected-file-ACLs";
             var protectedAcls = aclPaths.ToDictionary(path => path, ReadSecurity);
+            stage = "protected-certificate";
             var certificate = ReadCertificate(config);
             using var http = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false })
             { BaseAddress = origin, Timeout = TimeSpan.FromSeconds(30) };
@@ -118,6 +126,8 @@ internal static class BackupWindowsAcceptance
             var status = await StatusAsync(bearer);
             key = fixture.RecoveryKeyBase64 is null ? RandomNumberGenerator.GetBytes(32) : Convert.FromBase64String(fixture.RecoveryKeyBase64);
             Check(key.Length == 32, "recovery-key-size");
+            if (fixture.RecoveryKeyBase64 is not null)
+                Check(BackupArchive.KeyId(key) == status.Policy.RecoveryKeyId, "configured-recovery-key-mismatch");
             var ownerPassphrase = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
             var ownerKey = RecoveryKeyFile.Create(key, ownerPassphrase);
             var keyPath = Path.Combine(work, "owner-recovery.sakey");
@@ -167,9 +177,13 @@ internal static class BackupWindowsAcceptance
             Check(await LanguageAsync() != originalLanguage, "post-snapshot-change-not-applied");
             var requestPreview = new BackupRecoveryRequest(BackupRecoveryContract.Preview, archivePath, keyPath, ownerPassphrase);
 
-            stage = "negative-recovery";
+            stage = "recovery-worker-status";
+            var ready = await WorkerAsync(core, config, new(BackupRecoveryContract.Status), cancellation);
+            Check(ready.ExitCode == 0 && ready.Result.Outcome == BackupRecoveryContract.Ready, "owned-worker-not-ready");
+            stage = "wrong-password-refusal";
             var badPassword = await WorkerAsync(core, config, requestPreview with { Passphrase = ownerPassphrase + "-wrong" }, cancellation);
             Check(badPassword.ExitCode != 0 && badPassword.Result.Outcome == BackupRecoveryContract.Rejected, "wrong-password-accepted");
+            stage = "tampered-archive-refusal";
             var tamperedPath = Path.Combine(work, "tampered.sab");
             File.Copy(archivePath, tamperedPath);
             await using (var tampered = new FileStream(tamperedPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
@@ -179,6 +193,7 @@ internal static class BackupWindowsAcceptance
             }
             var tamperedReply = await WorkerAsync(core, config, requestPreview with { ArchivePath = tamperedPath }, cancellation);
             Check(tamperedReply.ExitCode != 0 && tamperedReply.Result.Outcome == BackupRecoveryContract.Rejected, "tampered-archive-accepted");
+            stage = "valid-archive-preview";
             var preview = await WorkerAsync(core, config, requestPreview, cancellation);
             Check(preview.ExitCode == 0 && preview.Result is { Outcome: BackupRecoveryContract.Verified, Preview: not null }, "preview-rejected");
             var verified = preview.Result.Preview!;
@@ -189,6 +204,7 @@ internal static class BackupWindowsAcceptance
                 Operation = BackupRecoveryContract.Restore, ConfirmedArchiveId = verified.ArchiveId,
                 ExpectedArchiveSha256 = verified.ArchiveSha256, Confirmation = BackupRecoveryContract.RestoreConfirmation
             };
+            stage = "live-service-refusal";
             var activeReply = await WorkerAsync(core, config, restore, cancellation);
             Check(activeReply.ExitCode != 0 && activeReply.Result.Outcome == BackupRecoveryContract.ServiceRunning, "live-service-replacement-accepted");
 
@@ -231,9 +247,12 @@ internal static class BackupWindowsAcceptance
             Console.WriteLine($"Native backup restore acceptance passed ({checks} checks: encrypted owner key, wrong password/tamper/live-service refusal, cold point-in-time restore, identity, Agent credentials, revoked codes, protected metadata/ACL/certificate and health commit).");
             return 0;
         }
-        catch
+        catch (Exception exception)
         {
-            Console.Error.WriteLine("Native backup restore acceptance failed at " + stage + ".");
+            // Only fixed assertion codes and framework type names are emitted. Exception messages,
+            // worker stderr, stdin, secrets, certificates and installation paths stay private.
+            var code = exception is AcceptanceFailure failure ? failure.Code : exception.GetType().Name;
+            Console.Error.WriteLine("Native backup restore acceptance failed at " + stage + " (" + code + ").");
             return 1;
         }
         finally

@@ -596,14 +596,34 @@ function Test-SetupNativeBackupRecovery {
     $start.UseShellExecute = $false; $start.CreateNoWindow = $true
     $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
     $start.Arguments = (($arguments | ForEach-Object { '"' + $_.TrimEnd('\') + '"' }) -join ' ')
-    $process = [Diagnostics.Process]::Start($start)
+    $stdinEncoding = [Text.UTF8Encoding]::new($false, $true)
+    $previousInputEncoding = [Console]::InputEncoding
+    $changeConsoleInput = $null -eq $start.PSObject.Properties['StandardInputEncoding'] -and $previousInputEncoding.GetPreamble().Length -gt 0
+    try {
+        if ($null -ne $start.PSObject.Properties['StandardInputEncoding']) { $start.StandardInputEncoding = $stdinEncoding }
+        elseif ($changeConsoleInput) {
+            # .NET Framework creates and flushes its stdin writer during Start,
+            # using Console.InputEncoding rather than a per-process encoding.
+            [Console]::InputEncoding = $stdinEncoding
+        }
+        $process = [Diagnostics.Process]::Start($start)
+    } finally { if ($changeConsoleInput) { [Console]::InputEncoding = $previousInputEncoding } }
     $payload = $null
+    $payloadBytes = $null
     try {
         $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
         # The harness saves the encrypted owner key before enabling its use in
         # Core. No key, password or bearer is supplied as an argument or environment variable.
         $payload = @{ username = $script:username; password = $script:password; recoveryKeyBase64 = $null } | ConvertTo-Json -Compress
-        $process.StandardInput.WriteLine($payload); $process.StandardInput.Close(); $payload = $null
+        $payloadBytes = $stdinEncoding.GetBytes($payload)
+        try {
+            $process.StandardInput.BaseStream.Write($payloadBytes, 0, $payloadBytes.Length)
+            $process.StandardInput.BaseStream.Flush()
+            $process.StandardInput.Close()
+        } finally {
+            [Array]::Clear($payloadBytes, 0, $payloadBytes.Length)
+            $payloadBytes = $null; $payload = $null
+        }
         if (-not $process.WaitForExit(450000)) { $process.Kill(); throw 'Native backup recovery acceptance exceeded its deadline.' }
         $output = $stdout.GetAwaiter().GetResult(); $errors = $stderr.GetAwaiter().GetResult()
         if ($output.Length -gt 32768 -or $errors.Length -gt 32768) { throw 'Native backup recovery acceptance output exceeded its bound.' }
@@ -613,6 +633,7 @@ function Test-SetupNativeBackupRecovery {
         Write-Host $output.Trim()
     } finally {
         $payload = $null
+        if ($null -ne $payloadBytes) { [Array]::Clear($payloadBytes, 0, $payloadBytes.Length) }
         if ($null -ne $process) { if (-not $process.HasExited) { $process.Kill() }; $process.Dispose() }
     }
 }

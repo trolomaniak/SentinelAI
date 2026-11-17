@@ -19,7 +19,9 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $installerDirectory = Join-Path $repositoryRoot 'installer/pilot'
 $managementScript = Join-Path $PSScriptRoot 'Manage-SentinelAICoreService.ps1'
-Import-Module (Join-Path $installerDirectory 'PilotInstaller.psm1') -Force -DisableNameChecking
+# The actual managed installation has no per-operator writer on its ancestors.
+# Keep the fixture's container equally protected for the offline ownership check.
+Import-Module (Join-Path $installerDirectory 'PilotInstaller.psm1') -Force -DisableNameChecking -ArgumentList $true
 Assert-PilotSupportedHost
 if (-not [Environment]::UserInteractive) { throw 'Desktop-exit acceptance requires an interactive Windows session.' }
 $BundleDirectory = (Resolve-Path -LiteralPath $BundleDirectory).ProviderPath
@@ -454,13 +456,29 @@ function Invoke-TestNativeBackupRecovery {
     $start.UseShellExecute = $false; $start.CreateNoWindow = $true
     $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
     $start.Arguments = (($arguments | ForEach-Object { '"' + $_.TrimEnd('\') + '"' }) -join ' ')
-    $process = [Diagnostics.Process]::Start($start)
+    $stdinEncoding = [Text.UTF8Encoding]::new($false, $true)
+    $previousInputEncoding = [Console]::InputEncoding
+    $changeConsoleInput = $null -eq $start.PSObject.Properties['StandardInputEncoding'] -and $previousInputEncoding.GetPreamble().Length -gt 0
+    try {
+        if ($null -ne $start.PSObject.Properties['StandardInputEncoding']) { $start.StandardInputEncoding = $stdinEncoding }
+        elseif ($changeConsoleInput) { [Console]::InputEncoding = $stdinEncoding }
+        $process = [Diagnostics.Process]::Start($start)
+    } finally { if ($changeConsoleInput) { [Console]::InputEncoding = $previousInputEncoding } }
     $payload = $null
+    $payloadBytes = $null
     try {
         $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
         $payload = @{ username = $script:credential.UserName; password = $script:credential.GetNetworkCredential().Password;
             recoveryKeyBase64 = [Convert]::ToBase64String($script:backupRecoveryKey) } | ConvertTo-Json -Compress
-        $process.StandardInput.WriteLine($payload); $process.StandardInput.Close(); $payload = $null
+        $payloadBytes = $stdinEncoding.GetBytes($payload)
+        try {
+            $process.StandardInput.BaseStream.Write($payloadBytes, 0, $payloadBytes.Length)
+            $process.StandardInput.BaseStream.Flush()
+            $process.StandardInput.Close()
+        } finally {
+            [Array]::Clear($payloadBytes, 0, $payloadBytes.Length)
+            $payloadBytes = $null; $payload = $null
+        }
         if (-not $process.WaitForExit(450000)) { $process.Kill(); throw 'Native backup recovery acceptance exceeded its deadline.' }
         $output = $stdout.GetAwaiter().GetResult(); $errors = $stderr.GetAwaiter().GetResult()
         if ($output.Length -gt 32768 -or $errors.Length -gt 32768) { throw 'Native backup recovery acceptance output exceeded its bound.' }
@@ -470,6 +488,7 @@ function Invoke-TestNativeBackupRecovery {
         Write-Host $output.Trim()
     } finally {
         $payload = $null
+        if ($null -ne $payloadBytes) { [Array]::Clear($payloadBytes, 0, $payloadBytes.Length) }
         if ($null -ne $script:backupRecoveryKey) { [Array]::Clear($script:backupRecoveryKey, 0, $script:backupRecoveryKey.Length); $script:backupRecoveryKey = $null }
         if ($null -ne $process) { if (-not $process.HasExited) { $process.Kill() }; $process.Dispose() }
     }
