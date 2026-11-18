@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using System.Reflection;
 using System.Windows;
 using SentinelAI.Desktop.Foundation;
@@ -24,6 +25,7 @@ public partial class App : Application
     private VulnerabilityFeedViewModel? _vulnerabilityFeed;
     private DeviceVulnerabilitiesViewModel? _deviceVulnerabilities;
     private DefenderDetectionsViewModel? _defenderDetections;
+    private BackupViewModel? _backups;
     private RiskRegisterViewModel? _riskRegister;
     private LanguageSettingsViewModel? _language;
     private AiExplanationViewModel? _aiExplanation;
@@ -43,6 +45,14 @@ public partial class App : Application
         {
             if (e.Args.Length != 0)
             {
+                if (e.Args.Length == 1 && e.Args[0] == "--recover-core")
+                {
+                    if (!WindowsBackupRecoveryLauncher.IsElevated() || !string.Equals(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "SentinelAI.Desktop.exe")), Path.GetFullPath(WindowsInstallationTrust.InstalledDesktopPath), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException();
+                    using (WindowsInstallationTrust.ValidateInstalledDesktop()) { }
+                    MainWindow = new BackupRecoveryWindow();
+                    MainWindow.Show();
+                    return;
+                }
                 if (e.Args.Length != 1 || e.Args[0] != "--setup-administrator") throw new InvalidOperationException();
                 MainWindow = new SetupWindow(new WindowsCoreServices().CreateAdministratorSetupClient());
                 MainWindow.Show();
@@ -82,6 +92,7 @@ public partial class App : Application
             _vulnerabilityFeed = new VulnerabilityFeedViewModel((IVulnerabilityClient)authenticationClient, new WindowsVulnerabilityFeedPicker());
             _deviceVulnerabilities = new DeviceVulnerabilitiesViewModel((IVulnerabilityClient)authenticationClient);
             _defenderDetections = new DefenderDetectionsViewModel((IDefenderDetectionsClient)authenticationClient);
+            _backups = new BackupViewModel((IBackupClient)authenticationClient, new WindowsBackupFileService(() => MainWindow), new WindowsBackupRecoveryLauncher());
             // TASK-032: business risks; Core validates, versions and keeps their history.
             _riskRegister = new RiskRegisterViewModel((IRiskRegisterClient)authenticationClient, (IDevicesClient)authenticationClient,
                 (IAlertsClient)authenticationClient);
@@ -97,7 +108,7 @@ public partial class App : Application
             _serviceStatus = new WindowsServiceStatusModel();
             var window = new MainWindow(_shell, _authentication, _devices, _alerts, _risk, _reports, _license, _aiExplanation,
                 integration, _serviceStatus, _localNetwork, _computerEnrollment, _pilot, _centralUpdate, _vulnerabilityFeed, _deviceVulnerabilities,
-                _riskRegister, _language, _defenderDetections);
+                _riskRegister, _language, _defenderDetections, _backups);
             MainWindow = window;
             _tray = new WindowsDesktopTray(window, integration, _serviceStatus, OpenSentinelAi, () => Shutdown());
             window.DesktopTray = _tray;
@@ -148,6 +159,7 @@ public partial class App : Application
         _vulnerabilityFeed?.Dispose();
         _deviceVulnerabilities?.Dispose();
         _defenderDetections?.Dispose();
+        _backups?.Dispose();
         _riskRegister?.Dispose();
         _aiExplanation?.Dispose();
         _authentication?.Dispose();

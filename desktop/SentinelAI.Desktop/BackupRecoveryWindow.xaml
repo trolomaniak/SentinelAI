@@ -1,0 +1,32 @@
+<Window x:Class="SentinelAI.Desktop.BackupRecoveryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:SentinelAI.Desktop.Localization" Title="{loc:T 'SentinelAI — Recovery'}" Width="760" Height="760" MinWidth="500" MinHeight="480"
+        WindowStartupLocation="CenterScreen" AutomationProperties.AutomationId="BackupRecoveryWindow">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24">
+        <StackPanel x:Name="RecoveryControls">
+            <TextBlock Text="{loc:T 'Restore Core from an encrypted backup'}" FontSize="23" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,14" />
+            <TextBlock Text="{loc:T 'Recovery runs locally with Windows administrator permission. Preview verifies the archive before Core is stopped. Restoring replaces Core data with the selected restore point; later changes are lost. The current data is retained until the restored service is healthy.'}" TextWrapping="Wrap" Margin="0,0,0,16" />
+            <WrapPanel><Button x:Name="ChooseArchiveButton" Content="{loc:T 'Choose encrypted backup'}" Click="OnChooseArchive" Margin="0,0,8,8" AutomationProperties.AutomationId="ChooseRecoveryArchive" /><Button x:Name="ChooseKeyButton" Content="{loc:T 'Choose recovery key'}" Click="OnChooseKey" Margin="0,0,8,8" AutomationProperties.AutomationId="ChooseRecoveryKey" /></WrapPanel>
+            <TextBlock x:Name="ArchiveText" TextWrapping="Wrap" Margin="0,0,0,6" AutomationProperties.AutomationId="RecoveryArchiveName" />
+            <TextBlock x:Name="KeyText" TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="RecoveryKeyName" />
+            <Label Content="{loc:T 'Recovery mode'}" Target="{Binding ElementName=ModeBox}" Padding="0" />
+            <ComboBox x:Name="ModeBox" SelectedIndex="0" SelectionChanged="OnModeChanged" Margin="0,4,0,12" AutomationProperties.AutomationId="RecoveryMode">
+                <ComboBoxItem Content="{loc:T 'Recover this installation'}" Tag="sameMachine" /><ComboBoxItem Content="{loc:T 'Migrate to a fresh central installation'}" Tag="migration" />
+            </ComboBox>
+            <TextBlock x:Name="MigrationText" TextWrapping="Wrap" Margin="0,0,0,12" />
+            <Label Content="{loc:T 'Recovery password'}" Target="{Binding ElementName=RecoveryPassword}" Padding="0" />
+            <PasswordBox x:Name="RecoveryPassword" MaxLength="1024" Margin="0,4,0,8" AutomationProperties.AutomationId="RecoveryPassword" />
+            <TextBlock Text="{loc:T 'Enter the password again before restoring. It is cleared after each operation.'}" TextWrapping="Wrap" Margin="0,0,0,12" />
+            <Button x:Name="PreviewButton" Content="{loc:T 'Verify and preview restore point'}" Click="OnPreview" HorizontalAlignment="Left" Margin="0,0,0,12" AutomationProperties.AutomationId="PreviewRecovery" />
+            <TextBlock x:Name="PreviewText" TextWrapping="Wrap" Margin="0,0,0,12" AutomationProperties.AutomationId="RecoveryPreview" />
+            <TextBlock x:Name="ConfirmationLabel" TextWrapping="Wrap" Margin="0,0,0,4" />
+            <TextBox x:Name="ConfirmationText" MaxLength="7" Margin="0,0,0,12" AutomationProperties.AutomationId="RecoveryConfirmation" />
+            <WrapPanel>
+                <Button x:Name="RestoreButton" Content="{loc:T 'Restore and start Core'}" Click="OnRestore" IsEnabled="False" Margin="0,0,8,8" AutomationProperties.AutomationId="RestoreCoreBackup" />
+                <Button x:Name="RollbackButton" Content="{loc:T 'Undo unfinished restore'}" Click="OnRollback" IsEnabled="False" Margin="0,0,8,8" AutomationProperties.AutomationId="RollbackCoreBackup" />
+                <Button x:Name="RefreshRecoveryButton" Content="{loc:T 'Refresh recovery status'}" Click="OnRefreshStatus" Margin="0,0,8,8" AutomationProperties.AutomationId="RefreshRecoveryStatus" />
+            </WrapPanel>
+            <TextBlock x:Name="RecoveryStatus" TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.AutomationId="RecoveryStatus" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+    </ScrollViewer>
+</Window>

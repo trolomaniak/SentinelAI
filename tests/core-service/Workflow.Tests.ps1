@@ -80,15 +80,16 @@ function New-Fixture {
             $script:TestState.Events.Add('register')
             if ($script:TestState.FailRegister) { throw 'Synthetic registration failure.' }
             $script:TestState.Service = [pscustomobject]@{ Name = 'SentinelAICore'; StartName = 'NT SERVICE\SentinelAICore';
-                PathName = (Get-PilotAgentImagePath -ExecutablePath $ExecutablePath -ConfigurationPath $ConfigurationPath); State = 'Stopped'; ProcessId = 1717 }
+                PathName = (Get-PilotAgentImagePath -ExecutablePath $ExecutablePath -ConfigurationPath $ConfigurationPath); State = 'Stopped'; ProcessId = 0 }
         }
         function script:Invoke-PilotSc { param([string[]]$Arguments); $script:TestState.ScArguments.Add($Arguments) }
         function script:Start-CoreService {
             $script:TestState.Events.Add('start')
             if ($script:TestState.FailStart) { throw 'Synthetic start failure.' }
             $script:TestState.Service.State = 'Running'
+            $script:TestState.Service.ProcessId = 1717
         }
-        function script:Stop-CoreService { $script:TestState.Events.Add('stop'); $script:TestState.Service.State = 'Stopped' }
+        function script:Stop-CoreService { $script:TestState.Events.Add('stop'); $script:TestState.Service.State = 'Stopped'; $script:TestState.Service.ProcessId = 0 }
         function script:Remove-CoreService { $script:TestState.Events.Add('remove'); $script:TestState.Service = $null }
         function script:Assert-CoreServiceListenerAvailable {
             $script:TestState.Events.Add('probe-listener')
@@ -154,26 +155,41 @@ function Assert-Preserved {
 
 try {
     $fixture = New-Fixture
-    foreach ($kind in @('Code','DataDirectory','DataFile','ProtectedFile')) {
-        $rules = @(Get-CoreServiceAclRules -Kind $kind -Directory:($kind -in 'Code','DataDirectory'))
+    foreach ($kind in @('Code','DataDirectory','BackupDirectory','DataFile','ProtectedFile')) {
+        $rules = @(Get-CoreServiceAclRules -Kind $kind -Directory:($kind -in 'Code','DataDirectory','BackupDirectory'))
         $serviceRules = @($rules | Where-Object { $_.Sid -like 'S-1-5-80-*' })
         Assert-Test ($serviceRules.Count -gt 0) ('Missing explicit virtual identity ACL: ' + $kind)
         foreach ($rule in $serviceRules) {
             $rights = [Security.AccessControl.FileSystemRights]$rule.Rights
             Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::ChangePermissions) -eq 0) 'Service can change filesystem permissions.'
             Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::TakeOwnership) -eq 0) 'Service can take filesystem ownership.'
-            Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles) -eq 0) 'Service can delete protected directory children.'
+            if ($kind -ne 'BackupDirectory') {
+                Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles) -eq 0) 'Service can delete protected directory children.'
+            }
             if ($kind -eq 'ProtectedFile' -or $kind -eq 'Code') {
                 Assert-Test (($rights -band ([Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete)) -eq 0) 'Service can overwrite/delete trusted code or metadata.'
             }
             if ($kind -eq 'DataDirectory' -and $rule.Propagation -ne 'InheritOnly') {
                 Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::Delete) -eq 0) 'Service can delete its data directory.'
                 Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::CreateFiles) -ne 0) 'Service cannot create SQLite sidecars.'
+                Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::CreateDirectories) -eq 0) 'Service can create directories outside its backup subtree.'
+            }
+            if ($kind -eq 'BackupDirectory' -and $rule.Propagation -ne 'InheritOnly') {
+                Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::Delete) -eq 0) 'Service can replace its backup root.'
+                Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::WriteAttributes) -eq 0) 'Service can change backup-root reparse attributes.'
+                Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::CreateDirectories) -ne 0) 'Service cannot create isolated backup work directories.'
+                Assert-Test (($rights -band [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles) -ne 0) 'Service cannot retire its backup work.'
             }
         }
     }
     $preserved = Get-PreservedState $fixture
     $output = Invoke-Action $fixture
+    $backupDirectory = Join-Path $fixture.State.Data 'backups'
+    Assert-Test (Test-Path -LiteralPath $backupDirectory -PathType Container) 'Install did not provision private backup storage.'
+    Assert-Test ($fixture.State.Events.Contains('acl-BackupDirectory')) 'Backup storage did not receive its scoped service ACL.'
+    $archive = Join-Path $backupDirectory ('a' * 32 + '.sab')
+    [IO.File]::WriteAllText($archive, 'synthetic-encrypted-archive-fixture')
+    $archiveDigest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
     Assert-Test ($fixture.State.Service.State -eq 'Running') 'Installation did not start Core.'
     Assert-Test ($fixture.State.Service.StartName -ceq 'NT SERVICE\SentinelAICore') 'Core did not select its fixed virtual account.'
     Assert-Test ($fixture.State.Events.IndexOf('verify-package') -lt $fixture.State.Events.IndexOf('acl-Code')) 'ACLs changed before signed verification.'
@@ -189,6 +205,18 @@ try {
     $fixture.State.Events.Clear(); $fixture.State.BusyListener = $true
     Invoke-Action $fixture 'Start' | Out-Null
     Assert-Test (-not $fixture.State.Events.Contains('probe-listener')) 'Idempotent start treats the owned listener as a conflict.'
+    Assert-Test (-not $fixture.State.Events.Contains('acl-DataFile')) 'Online Start rewrites writable backup child ACLs.'
+    foreach ($state in @('StartPending','StopPending','ContinuePending','PausePending','Paused','Stopped')) {
+        $fixture.State.Service.State = $state
+        $fixture.State.Service.ProcessId = 1717
+        $fixture.State.Events.Clear()
+        Initialize-CoreServiceBackupStorage -DataDirectory $fixture.State.Data
+        Assert-Test (-not $fixture.State.Events.Contains('acl-DataFile') -and -not $fixture.State.Events.Contains('acl-BackupDirectory')) ('Backup ACLs changed while a service process could still run: ' + $state)
+    }
+    $fixture.State.Service.State = 'Stopped'; $fixture.State.Service.ProcessId = 0
+    Initialize-CoreServiceBackupStorage -DataDirectory $fixture.State.Data
+    Assert-Test ($fixture.State.Events.Contains('acl-DataFile') -and $fixture.State.Events.Contains('acl-BackupDirectory')) 'A fully stopped service did not allow backup ACL repair.'
+    $fixture.State.Service.State = 'Running'; $fixture.State.Service.ProcessId = 1717
     $fixture.State.BusyListener = $false
     Invoke-Action $fixture 'Stop' | Out-Null
     Assert-Test ($fixture.State.Service.State -eq 'Stopped') 'Graceful stop did not stop the owned service.'
@@ -197,14 +225,53 @@ try {
     Invoke-Action $fixture 'Restart' | Out-Null
     Assert-Test ($fixture.State.Events.IndexOf('stop') -lt $fixture.State.Events.IndexOf('start')) 'Restart did not gracefully stop before starting.'
     Assert-Test ($fixture.State.Events.Contains('health')) 'Restart did not require health.'
+    Assert-Test ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ceq $archiveDigest) 'Restart changed retained encrypted archive bytes.'
     Invoke-Action $fixture 'Uninstall' | Out-Null
     Assert-Test ($null -eq $fixture.State.Service) 'Uninstall did not remove its owned service.'
     Assert-Test ($fixture.State.Events.Contains('restore-CoreData')) 'Uninstall did not restore console data ACLs.'
     Assert-Preserved $fixture $preserved
     Assert-Test ([IO.File]::ReadAllText((Join-Path $fixture.State.Data 'core-service-installation.json')) -ceq $serviceReceipt) 'Uninstall deleted/changed its ownership receipt.'
+    Assert-Test ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ceq $archiveDigest) 'Service uninstall removed retained backup data.'
     Invoke-Action $fixture | Out-Null
     Assert-Test ($fixture.State.Service.State -eq 'Running') 'Same-package reinstall failed.'
     Assert-Preserved $fixture $preserved
+
+    # Installer validates only the documented bounded backup tree, including
+    # interrupted-publication names, without adopting arbitrary data directories.
+    $fixture = New-Fixture
+    Invoke-Action $fixture | Out-Null
+    $backupDirectory = Join-Path $fixture.State.Data 'backups'
+    $work = Join-Path $backupDirectory ('work-' + [Guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory((Join-Path $work 'extracted'))
+    foreach ($name in @('snapshot.db','snapshot.db-journal','payload.tmp','archive.tmp','verify.tmp','manifest.json','configuration.json','core.db')) {
+        [IO.File]::WriteAllText((Join-Path $work $name), 'bounded-work-fixture')
+    }
+    foreach ($name in @('core.db','configuration.json')) { [IO.File]::WriteAllText((Join-Path (Join-Path $work 'extracted') $name), 'extracted-fixture') }
+    foreach ($name in @('backup-identity.json','restore-journal.json','restore-old.db','restore.lock',('restore-journal.json.' + ('b' * 32) + '.tmp'))) {
+        [IO.File]::WriteAllText((Join-Path $backupDirectory $name), 'interrupted-work-fixture')
+    }
+    Assert-CoreServiceBackupStorage -DataDirectory $fixture.State.Data
+    Assert-Test (@(Get-CoreServiceBackupEntries -DataDirectory $fixture.State.Data).Count -eq 17) 'A supported interrupted backup tree was rejected or incompletely inspected.'
+    foreach ($relative in @('foreign.txt','work-INVALID','work-00000000000000000000000000000000/foreign.txt')) {
+        $foreign = Join-Path $backupDirectory $relative
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($foreign))
+        [IO.File]::WriteAllText($foreign, 'foreign-data')
+        Assert-Rejected { Assert-CoreServiceBackupStorage -DataDirectory $fixture.State.Data } ('Unsupported backup state accepted: ' + $relative)
+        [IO.File]::Delete($foreign)
+        if ($relative.Contains('/')) { [IO.Directory]::Delete([IO.Path]::GetDirectoryName($foreign)) }
+    }
+    $nested = Join-Path $work 'untrusted'
+    [void][IO.Directory]::CreateDirectory($nested)
+    Assert-Rejected { Assert-CoreServiceBackupStorage -DataDirectory $fixture.State.Data } 'An arbitrary work directory was accepted.'
+    [IO.Directory]::Delete($nested)
+    $link = Join-Path $work 'payload.tmp.link'
+    New-Item -ItemType SymbolicLink -Path $link -Target (Join-Path $fixture.State.Data 'pilot-config.json') | Out-Null
+    Assert-Rejected { Assert-CoreServiceBackupStorage -DataDirectory $fixture.State.Data } 'A link in writable backup storage was accepted.'
+    Remove-Item -LiteralPath $link -Force
+    for ($index = 0; $index -lt 31; $index++) { [IO.File]::WriteAllText((Join-Path $backupDirectory ($index.ToString('x32') + '.sab')), 'encrypted-fixture') }
+    Assert-CoreServiceBackupStorage -DataDirectory $fixture.State.Data
+    [IO.File]::WriteAllText((Join-Path $backupDirectory ('f' * 32 + '.sab')), 'excess-fixture')
+    Assert-Rejected { Assert-CoreServiceBackupStorage -DataDirectory $fixture.State.Data } 'The installer accepted unbounded archive retention.'
 
     foreach ($failure in @('FailPrepare','FailRegister','FailStart','FailHealth','BusyListener')) {
         $fixture = New-Fixture; $before = Get-PreservedState $fixture; $fixture.State[$failure] = $true

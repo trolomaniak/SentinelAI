@@ -251,7 +251,7 @@ try {
     & $setupPilot { param($Sid) $script:TestOperatorSid = $Sid; function script:Get-PilotCurrentOperatorSid { $script:TestOperatorSid } } $operator
     Assert-SetupTest (-not (& $setupPilot { $script:OperatorAccess })) 'Setup loads the pilot module administrators-only'
     Assert-SetupTest (@(& $setupPilot { Get-PilotTrustedAccountSids }).Count -eq 0 -and @(& $setupPilot { Get-PilotOperatorAccessSid }).Count -eq 0) 'Setup trusts and grants no Windows account'
-    foreach ($kind in @('Code', 'DataDirectory', 'DataFile', 'ProtectedFile', 'RetainedFile')) {
+    foreach ($kind in @('Code', 'DataDirectory', 'BackupDirectory', 'DataFile', 'ProtectedFile', 'RetainedFile')) {
         Assert-SetupTest (@(Get-SetupTestAclSids $setupCore $kind | Where-Object { $_ -cnotin $builtIn }).Count -eq 0) ('Setup Core ACL names a Windows account: ' + $kind)
     }
     & $setupPilot { param($Sid) Set-PilotLegacyOperatorSid -Sid $Sid } $legacy
@@ -269,7 +269,7 @@ try {
     Assert-SetupTest ((& $consolePilot { $script:OperatorAccess }) -and (@(& $consolePilot { Get-PilotTrustedAccountSids }) -join ',') -ceq $operator) 'the console pilot trusts its installing operator'
     Reject-SetupTest { & $consolePilot { param($Sid) Set-PilotLegacyOperatorSid -Sid $Sid } $legacy } 'the console pilot accepts no legacy account'
     # The service-managed Core names no account even in the console pilot; files restored to the console return to its operator.
-    foreach ($kind in @('Code', 'DataDirectory', 'DataFile', 'ProtectedFile')) {
+    foreach ($kind in @('Code', 'DataDirectory', 'BackupDirectory', 'DataFile', 'ProtectedFile')) {
         Assert-SetupTest (@(Get-SetupTestAclSids $consoleCore $kind | Where-Object { $_ -cnotin $builtIn }).Count -eq 0) ('service-managed Core ACL names a Windows account: ' + $kind)
     }
     Assert-SetupTest ((@(Get-SetupTestAclSids $consoleCore 'RetainedFile') -join ',') -ceq ('S-1-5-32-544,S-1-5-18,' + $operator)) 'console-restored Core files return to the operator'

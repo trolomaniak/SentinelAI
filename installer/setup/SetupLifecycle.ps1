@@ -56,6 +56,7 @@ function Assert-SetupLifecycleOwnership {
         if ($entry.PSIsContainer -or ($entry.Name -cnotin @('public-key.pem','setup-installation.json','lifecycle-context.json','retained-installation.json') -and -not $receiptTemporary)) { throw 'Foreign Setup state.' }
     }
     Assert-PilotTrustedPath -Path $Locations.CoreData -Tree -AllowServiceWrite -ServiceWriteSid $coreSid -ServiceWriteRoot $Locations.CoreData
+    Assert-CoreServiceBackupStorage -DataDirectory $Locations.CoreData
     Assert-PilotTrustedPath -Path $Locations.AgentData -Tree -AllowServiceWrite
     $context = if ($UseContext) { Read-SetupLifecycleContext $Locations } else { $null }
     if ($null -ne $context) {
@@ -359,6 +360,7 @@ function Start-SetupLifecycleServices {
     # Data/configuration/DPAPI files are never replaced or re-enrolled. Repair and upgrade keep (or add) the
     # Agent's Security log access and audit setting.
     Grant-PilotSecurityLogAccess
+    Initialize-CoreServiceBackupStorage -DataDirectory $Locations.CoreData
     Start-CoreService -TimeoutSeconds 30
     Start-PilotService -TimeoutSeconds 30
 }

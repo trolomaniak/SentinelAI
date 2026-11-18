@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     public VulnerabilityFeedViewModel? VulnerabilityFeed { get; }
     public DeviceVulnerabilitiesViewModel? DeviceVulnerabilities { get; }
     public DefenderDetectionsViewModel? DefenderDetections { get; }
+    public BackupViewModel? Backups { get; }
     public AiExplanationViewModel? AiExplanation { get; }
     public DesktopIntegrationViewModel? DesktopIntegration { get; }
     public WindowsServiceStatusModel? ServiceStatus { get; }
@@ -62,7 +63,7 @@ public partial class MainWindow : Window
         PilotLicenseViewModel? pilot = null, CentralUpdateViewModel? centralUpdate = null,
         VulnerabilityFeedViewModel? vulnerabilityFeed = null, DeviceVulnerabilitiesViewModel? deviceVulnerabilities = null,
         RiskRegisterViewModel? riskRegister = null, LanguageSettingsViewModel? language = null,
-        DefenderDetectionsViewModel? defenderDetections = null)
+        DefenderDetectionsViewModel? defenderDetections = null, BackupViewModel? backups = null)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
@@ -82,6 +83,7 @@ public partial class MainWindow : Window
         VulnerabilityFeed = vulnerabilityFeed;
         DeviceVulnerabilities = deviceVulnerabilities;
         DefenderDetections = defenderDetections;
+        Backups = backups;
         AiExplanation = aiExplanation;
         DesktopIntegration = desktopIntegration;
         ServiceStatus = serviceStatus;
@@ -104,6 +106,7 @@ public partial class MainWindow : Window
         if (vulnerabilityFeed is not null) vulnerabilityFeed.SessionExpired += OnWorkspaceSessionExpired;
         if (deviceVulnerabilities is not null) deviceVulnerabilities.SessionExpired += OnWorkspaceSessionExpired;
         if (defenderDetections is not null) defenderDetections.SessionExpired += OnWorkspaceSessionExpired;
+        if (backups is not null) backups.SessionExpired += OnWorkspaceSessionExpired;
         if (pilot is not null)
         {
             pilot.SessionExpired += OnWorkspaceSessionExpired;
@@ -162,7 +165,7 @@ public partial class MainWindow : Window
         if (!authorized)
         {
             AiExplanation?.Clear(); License?.Clear(); LocalNetwork?.Clear(); ComputerEnrollment?.Clear(); Pilot?.Clear(); CentralUpdate?.Clear();
-            VulnerabilityFeed?.Clear(); DeviceVulnerabilities?.Clear(); DefenderDetections?.Clear();
+            VulnerabilityFeed?.Clear(); DeviceVulnerabilities?.Clear(); DefenderDetections?.Clear(); Backups?.Clear();
             Devices?.Clear(); Alerts?.Clear(); Risk?.Clear(); RiskRegister?.Clear(); Reports?.Clear();
         }
         else if (authorizationChanged)
@@ -177,6 +180,7 @@ public partial class MainWindow : Window
     {
         if (!_closed && e.PropertyName == nameof(ShellViewModel.CurrentPage))
         {
+            if (_viewModel.CurrentPage.Id != PageId.Settings) Backups?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Reports) Reports?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Devices) DefenderDetections?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Alerts) AiExplanation?.SetAlert(null);
@@ -203,6 +207,7 @@ public partial class MainWindow : Window
         if (LocalNetwork is not null && _viewModel.CurrentPage.Id == PageId.Settings) _ = LocalNetwork.RefreshAsync();
         if (CentralUpdate is not null && _viewModel.CurrentPage.Id == PageId.Settings) _ = CentralUpdate.RefreshAsync();
         if (VulnerabilityFeed is not null && _viewModel.CurrentPage.Id == PageId.Settings) _ = VulnerabilityFeed.RefreshAsync();
+        if (Backups is not null && _viewModel.CurrentPage.Id == PageId.Settings) _ = Backups.RefreshAsync();
         // The pilot notice belongs to every page; Core reads the key offline, so this stays local and cheap.
         if (Pilot is not null) _ = Pilot.RefreshAsync();
         if (Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
@@ -289,6 +294,7 @@ public partial class MainWindow : Window
         if (VulnerabilityFeed is not null) { VulnerabilityFeed.SessionExpired -= OnWorkspaceSessionExpired; VulnerabilityFeed.Dispose(); }
         if (DeviceVulnerabilities is not null) { DeviceVulnerabilities.SessionExpired -= OnWorkspaceSessionExpired; DeviceVulnerabilities.Dispose(); }
         if (DefenderDetections is not null) { DefenderDetections.SessionExpired -= OnWorkspaceSessionExpired; DefenderDetections.Dispose(); }
+        if (Backups is not null) { Backups.SessionExpired -= OnWorkspaceSessionExpired; Backups.Dispose(); }
         _pilotTimer.Stop();
         _pilotTimer.Tick -= OnPilotTick;
         if (Pilot is not null) { Pilot.SessionExpired -= OnWorkspaceSessionExpired; Pilot.Dispose(); }

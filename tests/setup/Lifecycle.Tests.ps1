@@ -44,7 +44,8 @@ Import-LifecycleTestFunctions (Join-Path $repo 'installer/pilot/PilotInstaller.p
     'Get-PilotAgentImagePath','Assert-PilotOwnedService','Get-PilotServiceAccountSid',
     'Get-PilotCoreLocalNetworkSettings','Get-PilotCoreLocalNetwork')
 Import-LifecycleTestFunctions (Join-Path $repo 'installer/pilot/CoreServiceInstaller.psm1') @('Assert-CoreServiceOwned','Assert-CoreServiceDatabase',
-    'Get-CoreServiceLocalNetwork','Get-CoreServiceLocalNetworkPort','Read-CoreServiceReceipt')
+    'Get-CoreServiceLocalNetwork','Get-CoreServiceLocalNetworkPort','Read-CoreServiceReceipt',
+    'Get-CoreServiceBackupEntries','Assert-CoreServiceBackupStorage','Initialize-CoreServiceBackupStorage')
 . (Join-Path $repo 'installer/setup/SetupLifecycle.ps1')
 
 function Assert-PilotPath {
@@ -192,12 +193,16 @@ function New-LifecycleTestFixture([switch]$LocalNetwork) {
     [Text.Encoding]::ASCII.GetBytes(('SQLite format 3' + [char]0)).CopyTo($database, 0)
     [IO.File]::WriteAllBytes((Join-Path $locations.CoreData 'sentinelai.db'), $database)
     [IO.File]::WriteAllText((Join-Path $locations.CoreData 'license-state'), 'synthetic-retained-lease')
+    $backups = Join-Path $locations.CoreData 'backups'
+    [void][IO.Directory]::CreateDirectory($backups)
+    [IO.File]::WriteAllText((Join-Path $backups ('a' * 32 + '.sab')), 'synthetic-retained-encrypted-backup')
+    [IO.File]::WriteAllText((Join-Path $backups 'backup-identity.json'), 'synthetic-retained-identity-anchor')
     foreach ($name in @('endpoint-id','installation-id')) { [IO.File]::WriteAllText((Join-Path $locations.AgentData $name), [Guid]::NewGuid().ToString('D')) }
     [IO.File]::WriteAllBytes((Join-Path $locations.AgentData 'enrollment-state'), [byte[]]@(10,20,30,40))
     $neighbor = Join-Path $root 'ProgramData/OtherApplication'
     New-Item -ItemType Directory -Path $neighbor | Out-Null
     [IO.File]::WriteAllText((Join-Path $neighbor 'state'), 'foreign-neighbor-state')
-    $coreService = [pscustomobject]@{ Name = 'SentinelAICore'; StartName = 'NT SERVICE\SentinelAICore'; PathName = Get-PilotAgentImagePath (Join-Path $locations.CoreCode 'SentinelAI.Core.exe') (Join-Path $locations.CoreData 'pilot-config.json') }
+    $coreService = [pscustomobject]@{ Name = 'SentinelAICore'; State = 'Stopped'; ProcessId = 0; StartName = 'NT SERVICE\SentinelAICore'; PathName = Get-PilotAgentImagePath (Join-Path $locations.CoreCode 'SentinelAI.Core.exe') (Join-Path $locations.CoreData 'pilot-config.json') }
     $agentService = [pscustomobject]@{ Name = 'SentinelAIAgent'; StartName = 'NT AUTHORITY\LocalService'; PathName = Get-PilotAgentImagePath (Join-Path $locations.AgentCode 'SentinelAI.Agent.exe') (Join-Path $locations.AgentData 'pilot-config.json') }
     $script:events.Clear()
     $script:fixture = [pscustomobject]@{ Root = $root; Locations = $locations; CoreService = $coreService; AgentService = $agentService; Neighbor = $neighbor;
@@ -207,6 +212,7 @@ function New-LifecycleTestFixture([switch]$LocalNetwork) {
 function Get-LifecycleTestDataHashes($Locations) {
     $hashes = @{}
     foreach ($path in @((Join-Path $Locations.CoreData 'sentinelai.db'),(Join-Path $Locations.CoreData 'license-state'),
+        (Join-Path (Join-Path $Locations.CoreData 'backups') ('a' * 32 + '.sab')),(Join-Path (Join-Path $Locations.CoreData 'backups') 'backup-identity.json'),
         (Join-Path $Locations.CoreData 'pilot-config.json'),(Join-Path $Locations.AgentData 'pilot-config.json'),
         (Join-Path $Locations.AgentData 'endpoint-id'),(Join-Path $Locations.AgentData 'installation-id'),(Join-Path $Locations.AgentData 'enrollment-state'))) {
         $hashes[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash

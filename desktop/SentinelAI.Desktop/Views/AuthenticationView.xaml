@@ -63,6 +63,15 @@
                     </Style>
                 </Button.Style>
             </Button>
+            <Button Content="{loc:T 'Open Core recovery'}" Click="OnRecovery" Margin="0,12,0,0" AutomationProperties.AutomationId="AuthenticationRecoveryButton">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSignedIn}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
             <Button Content="{loc:T 'Check again'}" Click="OnRefresh" Margin="0,12,0,0" AutomationProperties.AutomationId="RefreshAuthenticationButton" />
             <StackPanel>
                 <StackPanel.Style>

@@ -16,7 +16,7 @@ $script:CoreServiceSid = 'S-1-5-80-1772522954-4099193962-4247269631-2556497313-4
 $script:CoreFirewallRuleName = 'SentinelAI-Core-LocalNetwork'
 
 function Get-CoreServiceAclRules {
-    param([ValidateSet('Code','DataDirectory','DataFile','ProtectedFile','RetainedFile')][string]$Kind, [bool]$Directory = $false)
+    param([ValidateSet('Code','DataDirectory','BackupDirectory','DataFile','ProtectedFile','RetainedFile')][string]$Kind, [bool]$Directory = $false)
     $inheritance = if ($Directory) { 'ContainerInherit, ObjectInherit' } else { 'None' }
     # The service-managed Core names no Windows account: any administrator maintains it, and no
     # non-elevated program can change what runs as the Core service. Only files restored to the
@@ -31,6 +31,11 @@ function Get-CoreServiceAclRules {
         # Create SQLite sidecars without granting deletion of protected metadata.
         [pscustomobject]@{ Sid = $script:CoreServiceSid; Rights = 'ReadAndExecute, CreateFiles'; Inheritance = 'None'; Propagation = 'None' }
         [pscustomobject]@{ Sid = $script:CoreServiceSid; Rights = 'Modify'; Inheritance = 'ObjectInherit'; Propagation = 'InheritOnly' }
+    } elseif ($Kind -eq 'BackupDirectory') {
+        # Only this administrator-owned runtime subtree permits work directories.
+        # No Delete on its root: the service cannot replace it with a link.
+        [pscustomobject]@{ Sid = $script:CoreServiceSid; Rights = 'ReadAndExecute, CreateFiles, CreateDirectories, DeleteSubdirectoriesAndFiles'; Inheritance = 'None'; Propagation = 'None' }
+        [pscustomobject]@{ Sid = $script:CoreServiceSid; Rights = 'Modify'; Inheritance = 'ContainerInherit, ObjectInherit'; Propagation = 'InheritOnly' }
     } else {
         $rights = switch ($Kind) { Code { 'ReadAndExecute' }; DataFile { 'Modify' }; ProtectedFile { 'Read' } }
         [pscustomobject]@{ Sid = $script:CoreServiceSid; Rights = $rights; Inheritance = $inheritance; Propagation = 'None' }
@@ -38,7 +43,7 @@ function Get-CoreServiceAclRules {
 }
 
 function Set-CoreServiceAcl {
-    param([string]$Path, [ValidateSet('Code','DataDirectory','DataFile','ProtectedFile','RetainedFile')][string]$Kind)
+    param([string]$Path, [ValidateSet('Code','DataDirectory','BackupDirectory','DataFile','ProtectedFile','RetainedFile')][string]$Kind)
     $directory = (Get-Item -LiteralPath $Path -Force).PSIsContainer
     $acl = if ($directory) { New-Object Security.AccessControl.DirectorySecurity } else { New-Object Security.AccessControl.FileSecurity }
     $acl.SetAccessRuleProtection($true, $false)
@@ -68,9 +73,99 @@ function Set-CoreServiceInstallationAcl {
         Set-CoreServiceAcl -Path $DataDirectory -Kind DataDirectory
     }
     foreach ($item in @(Get-ChildItem -LiteralPath $DataDirectory -Force)) {
+        if ($item.Name -ceq 'backups') {
+            if (-not $item.PSIsContainer) { throw 'The Core backup storage is not a directory.' }
+            if ($RestoreConsole) {
+                foreach ($entry in @(Get-CoreServiceBackupEntries -DataDirectory $DataDirectory)) { Set-CoreServiceAcl -Path $entry.Path -Kind RetainedFile }
+                Set-CoreServiceAcl -Path $item.FullName -Kind RetainedFile
+            } else { Initialize-CoreServiceBackupStorage -DataDirectory $DataDirectory }
+            continue
+        }
         $kind = if ($RestoreConsole) { 'RetainedFile' } elseif ($item.Name -match '\Asentinelai\.db(?:-wal|-shm|-journal)?\z') { 'DataFile' } else { 'ProtectedFile' }
         Set-CoreServiceAcl -Path $item.FullName -Kind $kind
     }
+    if (-not $RestoreConsole -and -not (Test-Path -LiteralPath (Join-Path $DataDirectory 'backups'))) {
+        Initialize-CoreServiceBackupStorage -DataDirectory $DataDirectory
+    }
+}
+
+function Get-CoreServiceBackupEntries {
+    param([Parameter(Mandatory=$true)][string]$DataDirectory)
+    $root = Join-Path $DataDirectory 'backups'
+    if (-not (Test-Path -LiteralPath $root)) { return }
+    [void](Assert-PilotPath -Path $root -MustExist)
+    if (([IO.File]::GetAttributes($root) -band [IO.FileAttributes]::Directory) -eq 0) { throw 'Invalid Core backup storage.' }
+    Assert-PilotTrustedPath -Path $root -Tree -AllowServiceWrite -ServiceWriteSid $script:CoreServiceSid -ServiceWriteRoot $DataDirectory
+    $pending = New-Object 'System.Collections.Generic.Queue[object]'
+    $pending.Enqueue([pscustomobject]@{ Path = $root; Kind = 'root' })
+    $entries = New-Object 'System.Collections.Generic.List[object]'
+    $archives = 0; $workDirectories = 0
+    while ($pending.Count -ne 0) {
+        $parent = $pending.Dequeue()
+        try { $children = @(Get-ChildItem -LiteralPath $parent.Path -Force) }
+        catch {
+            $failure = $_.Exception.GetBaseException()
+            if ($parent.Kind -cne 'root' -and ($failure -is [IO.FileNotFoundException] -or $failure -is [IO.DirectoryNotFoundException])) { continue }
+            throw
+        }
+        foreach ($child in $children) {
+            try { $attributes = [IO.File]::GetAttributes($child.FullName) }
+            catch {
+                $failure = $_.Exception.GetBaseException()
+                if ($failure -is [IO.FileNotFoundException] -or $failure -is [IO.DirectoryNotFoundException]) { continue }
+                throw
+            }
+            if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Links in Core backup storage are unsupported.' }
+            $directory = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+            if ($entries.Count -ge 256) { throw 'Core backup storage is too large to validate.' }
+            if ($parent.Kind -ceq 'root') {
+                if ($directory) {
+                    if ($child.Name -cnotmatch '\Awork-[0-9a-f]{32}\z' -or ++$workDirectories -gt 4) { throw 'Unsupported Core backup directory.' }
+                    $pending.Enqueue([pscustomobject]@{ Path = $child.FullName; Kind = 'work' })
+                } elseif ($child.Name -cmatch '\A[0-9a-f]{32}\.sab\z') {
+                    # One verified new archive can exist before retention removes the oldest.
+                    if (++$archives -gt 31 -or $child.Length -gt (1GB + 4MB)) { throw 'Core backup archive bounds exceeded.' }
+                } elseif ($child.Name -cnotmatch '\A(?:backup-identity\.json|restore-journal\.json|restore-old\.db(?:-wal|-shm|-journal)?|restore\.lock|(?:backup-identity\.json|restore-journal\.json|restore-old\.db)\.[0-9a-f]{32}\.tmp)\z') {
+                    throw 'Unsupported Core backup file.'
+                }
+            } elseif ($parent.Kind -ceq 'work') {
+                if ($directory) {
+                    if ($child.Name -cne 'extracted') { throw 'Unsupported Core backup work directory.' }
+                    $pending.Enqueue([pscustomobject]@{ Path = $child.FullName; Kind = 'extracted' })
+                } elseif ($child.Name -cnotmatch '\A(?:(?:snapshot|core)\.db(?:-wal|-shm|-journal)?|payload\.tmp|archive\.tmp|verify\.tmp|configuration\.json|manifest\.json)\z') {
+                    throw 'Unsupported Core backup work file.'
+                }
+            } elseif ($directory -or $child.Name -cnotmatch '\A(?:core\.db(?:-wal|-shm|-journal)?|configuration\.json)\z') { throw 'Unsupported extracted Core backup file.' }
+            $entries.Add([pscustomobject]@{ Path = $child.FullName; Directory = $directory })
+        }
+    }
+    return $entries
+}
+
+function Assert-CoreServiceBackupStorage {
+    param([Parameter(Mandatory=$true)][string]$DataDirectory)
+    [void]@(Get-CoreServiceBackupEntries -DataDirectory $DataDirectory)
+}
+
+function Initialize-CoreServiceBackupStorage {
+    param([Parameter(Mandatory=$true)][string]$DataDirectory)
+    $root = Join-Path $DataDirectory 'backups'
+    $created = -not (Test-Path -LiteralPath $root)
+    if ($created) {
+        # Parent grants Core file creation only; this directory is provisioned by Setup.
+        [void](New-Item -ItemType Directory -Path $root -ErrorAction Stop)
+        Set-CoreServiceAcl -Path $root -Kind BackupDirectory
+    }
+    $entries = @(Get-CoreServiceBackupEntries -DataDirectory $DataDirectory)
+    $service = Get-CoreService
+    # Existing live work is only inspected. Rewriting writable child ACLs while
+    # Core runs would permit a hard-link substitution race across the trust scan.
+    if ($null -ne $service -and ($service.State -ne 'Stopped' -or
+        $null -eq $service.PSObject.Properties['ProcessId'] -or $service.ProcessId -ne 0)) { return }
+    foreach ($entry in $entries) {
+        Set-CoreServiceAcl -Path $entry.Path -Kind $(if ($entry.Directory) { 'BackupDirectory' } else { 'DataFile' })
+    }
+    Set-CoreServiceAcl -Path $root -Kind BackupDirectory
 }
 
 function Get-CoreService { Get-CimInstance -ClassName Win32_Service -Filter "Name='SentinelAICore'" }
@@ -412,6 +507,10 @@ function Invoke-CoreServiceManagement {
     Assert-PilotTrustedPath -Path $DataDirectory -Tree -AllowServiceWrite -ServiceWriteSid $script:CoreServiceSid -ServiceWriteRoot $DataDirectory
     if ($Action -in 'Install','Start','Restart') {
         foreach ($item in @(Get-ChildItem -LiteralPath $DataDirectory -Force)) {
+            if ($item.PSIsContainer -and $item.Name -ceq 'backups') {
+                Assert-CoreServiceBackupStorage -DataDirectory $DataDirectory
+                continue
+            }
             if ($item.PSIsContainer -or $item.Name -cnotin @('pilot-config.json','pilot-installation.json','core-service-installation.json','sentinelai.db','sentinelai.db-wal','sentinelai.db-shm','sentinelai.db-journal')) {
                 throw 'The Core data directory contains unsupported files; no state will be moved or deleted.'
             }
@@ -482,6 +581,7 @@ function Invoke-CoreServiceManagement {
             if ($Action -eq 'Restart' -or ($Action -eq 'Start' -and $service.State -ne 'Running')) {
                 Assert-CoreServiceListenerAvailable -Origin $origin
             }
+            Initialize-CoreServiceBackupStorage -DataDirectory $DataDirectory
             Start-CoreService -TimeoutSeconds $TimeoutSeconds
             Wait-CoreServiceHealth -Origin $origin -TimeoutSeconds $TimeoutSeconds -LocalNetworkPort $localNetworkPort
         }
