@@ -1,0 +1,151 @@
+<UserControl x:Class="SentinelAI.Desktop.Views.MonitoringCoverageView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:SentinelAI.Desktop.Localization"
+             AutomationProperties.AutomationId="MonitoringCoverageView">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="VisibleWhenTrue" />
+        <Style x:Key="Wrapped" TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap" /></Style>
+        <Style x:Key="Hint" TargetType="TextBlock" BasedOn="{StaticResource Wrapped}">
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+            <Setter Property="Margin" Value="0,4,0,0" />
+        </Style>
+        <Style x:Key="Section" TargetType="TextBlock" BasedOn="{StaticResource Wrapped}">
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,16,0,4" />
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+    </UserControl.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.AutomationId="MonitoringCoverageScroll">
+        <StackPanel Margin="0,0,8,16">
+            <TextBlock Text="{loc:T 'Monitoring coverage'}" FontSize="26" FontWeight="SemiBold" Style="{StaticResource Wrapped}"
+                       AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="{loc:T 'Monitoring coverage'}" />
+            <WrapPanel Margin="0,12,0,0">
+                <CheckBox IsChecked="{Binding IssuesOnly, Mode=TwoWay}" Margin="0,0,12,8" VerticalAlignment="Center"
+                          Content="{loc:T 'Coverage issues only'}" AutomationProperties.AutomationId="MonitoringIssuesOnly" />
+                <Button Content="{loc:T 'Refresh'}" Click="OnRefresh" IsEnabled="{Binding CanRefresh, Mode=OneWay}" Margin="0,0,8,8"
+                        AutomationProperties.AutomationId="MonitoringRefresh" />
+            </WrapPanel>
+            <TextBlock Text="{Binding StatusText}" Style="{StaticResource Hint}" AutomationProperties.LiveSetting="Polite" />
+            <TextBlock Text="{Binding PageText}" Style="{StaticResource Wrapped}" Margin="0,4,0,6"
+                       AutomationProperties.AutomationId="MonitoringPage" />
+            <WrapPanel Margin="0,0,0,4">
+                <Button Content="{loc:T 'Previous'}" Click="OnPrevious" IsEnabled="{Binding CanPreviousPage, Mode=OneWay}" Margin="0,0,8,8"
+                        AutomationProperties.AutomationId="MonitoringPrevious" />
+                <Button Content="{loc:T 'Next'}" Click="OnNext" IsEnabled="{Binding CanNextPage, Mode=OneWay}" Margin="0,0,8,8"
+                        AutomationProperties.AutomationId="MonitoringNext" />
+            </WrapPanel>
+            <ListBox ItemsSource="{Binding Rows, Mode=OneWay}" SelectedItem="{Binding SelectedEndpoint, Mode=OneWay}"
+                     SelectionChanged="OnSelectionChanged" Height="200" HorizontalContentAlignment="Stretch"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="{loc:T 'Monitored computers'}"
+                     AutomationProperties.AutomationId="MonitoringEndpoints">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="4,6">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Style="{StaticResource Wrapped}" />
+                            <TextBlock Text="{Binding Heartbeat}" Style="{StaticResource Wrapped}" />
+                            <TextBlock Text="{Binding Inventory}" Style="{StaticResource Wrapped}" />
+                            <TextBlock Text="{Binding Telemetry}" Style="{StaticResource Wrapped}" />
+                            <TextBlock Text="{Binding Coverage}" Style="{StaticResource Wrapped}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Text="{Binding FreshnessText}" Style="{StaticResource Hint}" />
+            <TextBlock Text="{Binding DetailStatusText}" Style="{StaticResource Hint}" Margin="0,12,0,4" AutomationProperties.LiveSetting="Polite" />
+            <StackPanel Visibility="{Binding HasSelection, Converter={StaticResource VisibleWhenTrue}}">
+                <TextBlock Text="{Binding SelectedEndpoint.Name}" Style="{StaticResource Section}" AutomationProperties.AutomationId="MonitoringSelection" />
+                <Button Content="{loc:T 'Refresh sources'}" Click="OnRefreshDetail" IsEnabled="{Binding CanRefreshDetail, Mode=OneWay}"
+                        HorizontalAlignment="Left" Margin="0,0,0,8" AutomationProperties.AutomationId="MonitoringRefreshSources" />
+                <ContentControl Content="{Binding SourceDetail}" HorizontalContentAlignment="Stretch" AutomationProperties.AutomationId="MonitoringSources">
+                    <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SourceDetail}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ContentControl.Style>
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate>
+                            <StackPanel>
+                                <TextBlock Text="{Binding Endpoint.Heartbeat}" Style="{StaticResource Wrapped}" />
+                                <TextBlock Text="{Binding Endpoint.Inventory}" Style="{StaticResource Wrapped}" />
+                                <TextBlock Text="{Binding TelemetryReport}" Style="{StaticResource Wrapped}" />
+                                <TextBlock Text="{loc:T 'Endpoint telemetry'}" Style="{StaticResource Section}" />
+                                <ItemsControl ItemsSource="{Binding Telemetry}" AutomationProperties.Name="{loc:T 'Endpoint telemetry'}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource Card}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Style="{StaticResource Wrapped}" />
+                                                    <TextBlock Text="{Binding Availability}" Style="{StaticResource Wrapped}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="{loc:T 'Windows event channels'}" Style="{StaticResource Section}" />
+                                <ItemsControl ItemsSource="{Binding EventChannels}" AutomationProperties.Name="{loc:T 'Windows event channels'}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource Card}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Style="{StaticResource Wrapped}" />
+                                                    <TextBlock Text="{Binding Availability}" Style="{StaticResource Wrapped}" />
+                                                    <TextBlock Text="{Binding Report}" Style="{StaticResource Wrapped}" />
+                                                    <TextBlock Text="{Binding Checkpoint}" Style="{StaticResource Wrapped}" />
+                                                    <TextBlock Text="{Binding Counters}" Style="{StaticResource Wrapped}" />
+                                                    <TextBlock Text="{Binding Drops}" Style="{StaticResource Wrapped}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+                <TextBlock Text="{loc:T 'Continuity notices'}" Style="{StaticResource Section}" />
+                <TextBlock Text="{loc:T 'These notices describe record ranges. The duration of any outage is unknown.'}" Style="{StaticResource Hint}" />
+                <TextBlock Text="{Binding GapStatusText}" Style="{StaticResource Hint}" AutomationProperties.LiveSetting="Polite" />
+                <TextBlock Text="{Binding GapPageText}" Style="{StaticResource Wrapped}" Margin="0,6,0,6" />
+                <WrapPanel Margin="0,0,0,4">
+                    <Button Content="{loc:T 'Previous'}" Click="OnPreviousGap" IsEnabled="{Binding CanPreviousGapPage, Mode=OneWay}" Margin="0,0,8,8"
+                            AutomationProperties.Name="{loc:T 'Previous continuity page'}" AutomationProperties.AutomationId="MonitoringPreviousGap" />
+                    <Button Content="{loc:T 'Next'}" Click="OnNextGap" IsEnabled="{Binding CanNextGapPage, Mode=OneWay}" Margin="0,0,8,8"
+                            AutomationProperties.Name="{loc:T 'Next continuity page'}" AutomationProperties.AutomationId="MonitoringNextGap" />
+                    <Button Content="{loc:T 'Refresh notices'}" Click="OnRefreshGaps" IsEnabled="{Binding CanRefreshGaps, Mode=OneWay}" Margin="0,0,8,8"
+                            AutomationProperties.AutomationId="MonitoringRefreshGaps" />
+                </WrapPanel>
+                <ItemsControl ItemsSource="{Binding GapRows}" AutomationProperties.AutomationId="MonitoringGaps"
+                              AutomationProperties.Name="{loc:T 'Continuity notices'}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Style="{StaticResource Wrapped}" />
+                                    <TextBlock Text="{Binding Cause}" Style="{StaticResource Wrapped}" />
+                                    <TextBlock Text="{Binding Records}" Style="{StaticResource Wrapped}" />
+                                    <TextBlock Text="{Binding Times}" Style="{StaticResource Wrapped}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

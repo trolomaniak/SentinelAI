@@ -27,6 +27,7 @@ public partial class App : Application
     private DefenderDetectionsViewModel? _defenderDetections;
     private BackupViewModel? _backups;
     private NotificationsViewModel? _notifications;
+    private MonitoringCoverageViewModel? _monitoringCoverage;
     private RiskRegisterViewModel? _riskRegister;
     private LanguageSettingsViewModel? _language;
     private AiExplanationViewModel? _aiExplanation;
@@ -95,6 +96,7 @@ public partial class App : Application
             _defenderDetections = new DefenderDetectionsViewModel((IDefenderDetectionsClient)authenticationClient);
             _backups = new BackupViewModel((IBackupClient)authenticationClient, new WindowsBackupFileService(() => MainWindow), new WindowsBackupRecoveryLauncher());
             _notifications = new NotificationsViewModel((INotificationsClient)authenticationClient);
+            _monitoringCoverage = new MonitoringCoverageViewModel((IMonitoringCoverageClient)authenticationClient);
             // TASK-032: business risks; Core validates, versions and keeps their history.
             _riskRegister = new RiskRegisterViewModel((IRiskRegisterClient)authenticationClient, (IDevicesClient)authenticationClient,
                 (IAlertsClient)authenticationClient);
@@ -110,7 +112,7 @@ public partial class App : Application
             _serviceStatus = new WindowsServiceStatusModel();
             var window = new MainWindow(_shell, _authentication, _devices, _alerts, _risk, _reports, _license, _aiExplanation,
                 integration, _serviceStatus, _localNetwork, _computerEnrollment, _pilot, _centralUpdate, _vulnerabilityFeed, _deviceVulnerabilities,
-                _riskRegister, _language, _defenderDetections, _backups, _notifications);
+                _riskRegister, _language, _defenderDetections, _backups, _notifications, _monitoringCoverage);
             MainWindow = window;
             _tray = new WindowsDesktopTray(window, integration, _serviceStatus, OpenSentinelAi, () => Shutdown());
             window.DesktopTray = _tray;
@@ -163,6 +165,7 @@ public partial class App : Application
         _defenderDetections?.Dispose();
         _backups?.Dispose();
         _notifications?.Dispose();
+        _monitoringCoverage?.Dispose();
         _riskRegister?.Dispose();
         _aiExplanation?.Dispose();
         _authentication?.Dispose();
