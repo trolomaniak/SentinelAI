@@ -1,10 +1,10 @@
 # Plan rozbudowanego pilota SentinelAI
 
-Zakres zatwierdzony przez właściciela: realizacja kolejno, od backupu i odzyskiwania. Punktem wyjścia jest `main` po PR #55: poprawki raportów, warunków CVE i SQLite oraz historia Defendera. Ta lista jest planem; nie oznacza dostarczenia wszystkich funkcji.
+Zakres zatwierdzony przez właściciela: realizacja kolejno, od backupu i odzyskiwania. Plan rozpoczął się po PR #55: poprawki raportów, warunków CVE i SQLite oraz historia Defendera. Ta lista jest planem; nie oznacza dostarczenia wszystkich funkcji.
 
 | Kolejność | Obszar | Wynik dla użytkownika | Stan |
 | --- | --- | --- | --- |
-| 1 | Backup i odzyskiwanie | Szyfrowane kopie, harmonogram, retencja, eksport, weryfikacja i sprawdzone odtworzenie | Gotowe w PR #56; testy lokalne i Windows przeszły |
+| 1 | Backup i odzyskiwanie | Szyfrowane kopie, harmonogram, retencja, eksport, weryfikacja i sprawdzone odtworzenie | Scalone w PR #56. Testy lokalne i Windows przeszły |
 | 2 | Powiadomienia bezpieczeństwa | Krytyczne wykrycia, utrata monitoringu, grupowanie, opcjonalny e-mail/webhook i historia dostarczenia | W realizacji |
 | 3 | Pokrycie monitoringu | Dostępność źródeł, luki i wiek danych każdego urządzenia | Zaplanowane |
 | 4 | Pulpit operacyjny Overview | Problemy wymagające działania, zmiany i stan pracy administratora | Zaplanowane |
