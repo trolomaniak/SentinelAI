@@ -32,6 +32,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
             new NavigationPage(PageId.RiskRegister, T("Risk Register"), T("Business risks, owners, treatment and reviews.")),
             new NavigationPage(PageId.Reports, T("Reports"), T("Local security reports.")),
             new NavigationPage(PageId.Notifications, T("Notifications"), T("Local security notifications and optional delivery.")),
+            new NavigationPage(PageId.MonitoringCoverage, T("Monitoring coverage"), T("Endpoint data freshness, source availability and continuity.")),
             new NavigationPage(PageId.Settings, T("Settings"), T("Local application settings and licensing."))
         });
         _currentPage = Pages.Single(page => page.Id == PageId.Devices);

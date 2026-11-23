@@ -9,6 +9,7 @@ public enum PageId
     RiskRegister,
     Reports,
     Notifications,
+    MonitoringCoverage,
     Settings
 }
 

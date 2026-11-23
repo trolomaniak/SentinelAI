@@ -31,6 +31,9 @@
         <DataTemplate x:Key="NotificationsTemplate">
             <views:NotificationsView DataContext="{Binding Notifications, RelativeSource={RelativeSource AncestorType=Window}}" />
         </DataTemplate>
+        <DataTemplate x:Key="MonitoringCoverageTemplate">
+            <views:MonitoringCoverageView DataContext="{Binding MonitoringCoverage, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </DataTemplate>
     </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions>

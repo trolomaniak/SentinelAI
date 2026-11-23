@@ -179,6 +179,7 @@ try
     await RiskApiTests.VerifyAsync(username, password);
     await SecurityEventApiTests.VerifyAsync(username, password);
     await DefenderDetectionApiTests.VerifyAsync(username, password);
+    await MonitoringCoverageApiTests.VerifyAsync(username, password);
     await BackupCryptographyTests.RunAsync();
     await BackupDatabaseTests.RunAsync();
     await BackupApiTests.VerifyAsync(username, password);
