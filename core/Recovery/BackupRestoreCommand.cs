@@ -284,6 +284,7 @@ internal static class BackupRestoreCommand
             await using var connection = OpenDatabase(staged, writable: true);
             await connection.OpenAsync(cancellationToken);
             using var transaction = connection.BeginTransaction(deferred: false);
+            await SentinelAI.Core.Notifications.NotificationStore.SuppressAfterRecoveryAsync(connection, transaction, cancellationToken);
             await using (var command = connection.CreateCommand())
             {
                 command.Transaction = transaction;

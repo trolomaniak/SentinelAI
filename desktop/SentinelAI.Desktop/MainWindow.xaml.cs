@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     public DeviceVulnerabilitiesViewModel? DeviceVulnerabilities { get; }
     public DefenderDetectionsViewModel? DefenderDetections { get; }
     public BackupViewModel? Backups { get; }
+    public NotificationsViewModel? Notifications { get; }
     public AiExplanationViewModel? AiExplanation { get; }
     public DesktopIntegrationViewModel? DesktopIntegration { get; }
     public WindowsServiceStatusModel? ServiceStatus { get; }
@@ -63,7 +64,8 @@ public partial class MainWindow : Window
         PilotLicenseViewModel? pilot = null, CentralUpdateViewModel? centralUpdate = null,
         VulnerabilityFeedViewModel? vulnerabilityFeed = null, DeviceVulnerabilitiesViewModel? deviceVulnerabilities = null,
         RiskRegisterViewModel? riskRegister = null, LanguageSettingsViewModel? language = null,
-        DefenderDetectionsViewModel? defenderDetections = null, BackupViewModel? backups = null)
+        DefenderDetectionsViewModel? defenderDetections = null, BackupViewModel? backups = null,
+        NotificationsViewModel? notifications = null)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
@@ -84,6 +86,7 @@ public partial class MainWindow : Window
         DeviceVulnerabilities = deviceVulnerabilities;
         DefenderDetections = defenderDetections;
         Backups = backups;
+        Notifications = notifications;
         AiExplanation = aiExplanation;
         DesktopIntegration = desktopIntegration;
         ServiceStatus = serviceStatus;
@@ -107,6 +110,7 @@ public partial class MainWindow : Window
         if (deviceVulnerabilities is not null) deviceVulnerabilities.SessionExpired += OnWorkspaceSessionExpired;
         if (defenderDetections is not null) defenderDetections.SessionExpired += OnWorkspaceSessionExpired;
         if (backups is not null) backups.SessionExpired += OnWorkspaceSessionExpired;
+        if (notifications is not null) notifications.SessionExpired += OnWorkspaceSessionExpired;
         if (pilot is not null)
         {
             pilot.SessionExpired += OnWorkspaceSessionExpired;
@@ -166,6 +170,7 @@ public partial class MainWindow : Window
         {
             AiExplanation?.Clear(); License?.Clear(); LocalNetwork?.Clear(); ComputerEnrollment?.Clear(); Pilot?.Clear(); CentralUpdate?.Clear();
             VulnerabilityFeed?.Clear(); DeviceVulnerabilities?.Clear(); DefenderDetections?.Clear(); Backups?.Clear();
+            Notifications?.Clear();
             Devices?.Clear(); Alerts?.Clear(); Risk?.Clear(); RiskRegister?.Clear(); Reports?.Clear();
         }
         else if (authorizationChanged)
@@ -181,6 +186,7 @@ public partial class MainWindow : Window
         if (!_closed && e.PropertyName == nameof(ShellViewModel.CurrentPage))
         {
             if (_viewModel.CurrentPage.Id != PageId.Settings) Backups?.Clear();
+            if (_viewModel.CurrentPage.Id != PageId.Notifications) Notifications?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Reports) Reports?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Devices) DefenderDetections?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Alerts) AiExplanation?.SetAlert(null);
@@ -196,6 +202,7 @@ public partial class MainWindow : Window
         Risk is not null && _viewModel.CurrentPage.Id == PageId.Risk ? "RiskTemplate" :
         RiskRegister is not null && _viewModel.CurrentPage.Id == PageId.RiskRegister ? "RiskRegisterTemplate" :
         Reports is not null && _viewModel.CurrentPage.Id == PageId.Reports ? "ReportsTemplate" :
+        Notifications is not null && _viewModel.CurrentPage.Id == PageId.Notifications ? "NotificationsTemplate" :
         License is not null && _viewModel.CurrentPage.Id == PageId.Settings ? "SettingsTemplate" : "PlaceholderTemplate");
 
     private async void RefreshCurrentPage()
@@ -214,6 +221,7 @@ public partial class MainWindow : Window
         else if (Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts) await Alerts.RefreshAsync();
         else if (Risk is not null && _viewModel.CurrentPage.Id == PageId.Risk) await Risk.RefreshAsync();
         else if (RiskRegister is not null && _viewModel.CurrentPage.Id == PageId.RiskRegister) await RiskRegister.RefreshAsync();
+        else if (Notifications is not null && _viewModel.CurrentPage.Id == PageId.Notifications) await Notifications.RefreshAsync();
     }
 
     private void OnLicenseChanged(object? sender, PropertyChangedEventArgs e)
@@ -295,6 +303,7 @@ public partial class MainWindow : Window
         if (DeviceVulnerabilities is not null) { DeviceVulnerabilities.SessionExpired -= OnWorkspaceSessionExpired; DeviceVulnerabilities.Dispose(); }
         if (DefenderDetections is not null) { DefenderDetections.SessionExpired -= OnWorkspaceSessionExpired; DefenderDetections.Dispose(); }
         if (Backups is not null) { Backups.SessionExpired -= OnWorkspaceSessionExpired; Backups.Dispose(); }
+        if (Notifications is not null) { Notifications.SessionExpired -= OnWorkspaceSessionExpired; Notifications.Dispose(); }
         _pilotTimer.Stop();
         _pilotTimer.Tick -= OnPilotTick;
         if (Pilot is not null) { Pilot.SessionExpired -= OnWorkspaceSessionExpired; Pilot.Dispose(); }

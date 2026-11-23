@@ -39,6 +39,16 @@ internal sealed class BackupService : BackgroundService
     internal string StorageDirectory => _storage.DirectoryPath;
     internal async Task<BackupStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
+        await _commands.WaitAsync(cancellationToken);
+        try { return await ReadStatusUnderCommandLockAsync(cancellationToken); }
+        finally { _commands.Release(); }
+    }
+
+    private async Task<BackupStatus> ReadStatusUnderCommandLockAsync(CancellationToken cancellationToken)
+    {
+        // The command lock prevents another job from starting during this read. Capture busy
+        // before the catalog so a snapshot taken during pruning cannot be reported as idle.
+        var busy = Volatile.Read(ref _busy) != 0;
         var state = await _store.ReadAsync(cancellationToken);
         var identity = await _enrollments.GetCoreIdentityAsync(cancellationToken);
         var archives = state.Archives.Take(30).Select(archive =>
@@ -46,7 +56,7 @@ internal sealed class BackupService : BackgroundService
             try { BackupStorage.AssertFile(_storage.ArchivePath(archive.ArchiveId), BackupArchive.MaximumArchiveBytes); return archive; }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return archive with { VerificationState = "missing" }; }
         }).ToArray();
-        return new(identity.CoreInstallationId, identity.OrganizationId, Availability(state), Volatile.Read(ref _busy) != 0,
+        return new(identity.CoreInstallationId, identity.OrganizationId, Availability(state), busy,
             state.Policy, state.NextDueUtc, state.LastSuccessfulUtc, state.LastAttempt, archives);
     }
     private string Availability(BackupStoredState state)
@@ -76,23 +86,25 @@ internal sealed class BackupService : BackgroundService
         await _commands.WaitAsync(cancellationToken);
         try
         {
+            if (Volatile.Read(ref _busy) != 0)
+                return new(BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
             var state = await _store.ReadAsync(cancellationToken);
-            if (Volatile.Read(ref _busy) != 0 || state.Policy.Version != version || state.Policy.RecoveryKeyId is not null)
-                return new(BackupMutationOutcome.Conflict, await GetStatusAsync(cancellationToken));
-            if (!_protection.IsSupported || key.Length != 32) return new(BackupMutationOutcome.Unavailable, await GetStatusAsync(cancellationToken));
+            if (state.Policy.Version != version || state.Policy.RecoveryKeyId is not null)
+                return new(BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
+            if (!_protection.IsSupported || key.Length != 32) return new(BackupMutationOutcome.Unavailable, await ReadStatusUnderCommandLockAsync(cancellationToken));
             _storage.EnsureAvailable();
             if (File.Exists(Path.Combine(_storage.DirectoryPath, "restore-journal.json")))
-                return new(BackupMutationOutcome.Conflict, await GetStatusAsync(cancellationToken));
+                return new(BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
             var identity = await _enrollments.GetCoreIdentityAsync(cancellationToken);
             if (File.Exists(Path.Combine(_storage.DirectoryPath, "backup-identity.json")) &&
                 BackupIdentityAnchor.Read(_storage.DirectoryPath, key.Span) != identity)
-                return new(BackupMutationOutcome.Conflict, await GetStatusAsync(cancellationToken));
+                return new(BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
             var protectedKey = _protection.Protect(key.Span);
             try
             {
                 var changed = await _store.ConfigureKeyAsync(version, BackupArchive.KeyId(key.Span), protectedKey, cancellationToken);
                 if (changed) BackupIdentityAnchor.Ensure(_storage.DirectoryPath, identity, key.Span);
-                return new(changed ? BackupMutationOutcome.Accepted : BackupMutationOutcome.Conflict, await GetStatusAsync(cancellationToken));
+                return new(changed ? BackupMutationOutcome.Accepted : BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
             }
             finally { CryptographicOperations.ZeroMemory(protectedKey); }
         }
@@ -103,15 +115,17 @@ internal sealed class BackupService : BackgroundService
         await _commands.WaitAsync(cancellationToken);
         try
         {
+            if (Volatile.Read(ref _busy) != 0)
+                return new(BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
             var state = await _store.ReadAsync(cancellationToken);
-            if (Volatile.Read(ref _busy) != 0 || state.Policy.Version != request.ExpectedVersion)
-                return new(BackupMutationOutcome.Conflict, await GetStatusAsync(cancellationToken));
+            if (state.Policy.Version != request.ExpectedVersion)
+                return new(BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
             if (request.Enabled && Availability(state) != BackupContract.Available)
-                return new(BackupMutationOutcome.Unavailable, await GetStatusAsync(cancellationToken));
+                return new(BackupMutationOutcome.Unavailable, await ReadStatusUnderCommandLockAsync(cancellationToken));
             var next = !request.Enabled ? null : state.Policy.Enabled && state.Policy.IntervalHours == request.IntervalHours
                 ? state.NextDueUtc ?? _time.GetUtcNow().AddHours(request.IntervalHours) : (DateTimeOffset?)_time.GetUtcNow().AddHours(request.IntervalHours);
             var changed = await _store.ConfigurePolicyAsync(request, next, cancellationToken);
-            return new(changed ? BackupMutationOutcome.Accepted : BackupMutationOutcome.Conflict, await GetStatusAsync(cancellationToken));
+            return new(changed ? BackupMutationOutcome.Accepted : BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
         }
         finally { _commands.Release(); }
     }
@@ -120,14 +134,15 @@ internal sealed class BackupService : BackgroundService
         await _commands.WaitAsync(cancellationToken);
         try
         {
+            if (Volatile.Read(ref _busy) != 0)
+                return new(BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
             var state = await _store.ReadAsync(cancellationToken);
-            if (Volatile.Read(ref _busy) != 0) return new(BackupMutationOutcome.Conflict, await GetStatusAsync(cancellationToken));
             if (!scheduled && Availability(state) != BackupContract.Available)
-                return new(BackupMutationOutcome.Unavailable, await GetStatusAsync(cancellationToken));
+                return new(BackupMutationOutcome.Unavailable, await ReadStatusUnderCommandLockAsync(cancellationToken));
             if (archiveId is { } id && !state.Archives.Any(archive => archive.ArchiveId == id))
-                return new(BackupMutationOutcome.NotFound, await GetStatusAsync(cancellationToken));
+                return new(BackupMutationOutcome.NotFound, await ReadStatusUnderCommandLockAsync(cancellationToken));
             if (scheduled && (!state.Policy.Enabled || state.NextDueUtc is not { } due || due > _time.GetUtcNow()))
-                return new(BackupMutationOutcome.Conflict, await GetStatusAsync(cancellationToken));
+                return new(BackupMutationOutcome.Conflict, await ReadStatusUnderCommandLockAsync(cancellationToken));
             var work = new Work(Guid.NewGuid(), archiveId is null ? "create" : "verify", archiveId ?? Guid.NewGuid());
             var now = _time.GetUtcNow();
             var next = state.Policy.Enabled && work.Kind == "create" ? now.AddHours(state.Policy.IntervalHours) : state.NextDueUtc;
@@ -137,9 +152,9 @@ internal sealed class BackupService : BackgroundService
             {
                 Volatile.Write(ref _busy, 0);
                 await _store.CompleteAttemptAsync(work.OperationId, "interrupted", now, null, null, false, CancellationToken.None);
-                return new(BackupMutationOutcome.Unavailable, await GetStatusAsync(cancellationToken));
+                return new(BackupMutationOutcome.Unavailable, await ReadStatusUnderCommandLockAsync(cancellationToken));
             }
-            return new(BackupMutationOutcome.Accepted, await GetStatusAsync(cancellationToken));
+            return new(BackupMutationOutcome.Accepted, await ReadStatusUnderCommandLockAsync(cancellationToken));
         }
         finally { _commands.Release(); }
     }
