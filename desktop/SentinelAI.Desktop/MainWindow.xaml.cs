@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer? _sessionTimer;
     // The pilot can end while Desktop stays open on one page.
     private readonly DispatcherTimer _pilotTimer = new() { Interval = TimeSpan.FromHours(1) };
+    public OperationsOverviewViewModel? Overview { get; }
     public DevicesViewModel? Devices { get; }
     public AlertsViewModel? Alerts { get; }
     public RiskViewModel? Risk { get; }
@@ -66,12 +67,14 @@ public partial class MainWindow : Window
         VulnerabilityFeedViewModel? vulnerabilityFeed = null, DeviceVulnerabilitiesViewModel? deviceVulnerabilities = null,
         RiskRegisterViewModel? riskRegister = null, LanguageSettingsViewModel? language = null,
         DefenderDetectionsViewModel? defenderDetections = null, BackupViewModel? backups = null,
-        NotificationsViewModel? notifications = null, MonitoringCoverageViewModel? monitoringCoverage = null)
+        NotificationsViewModel? notifications = null, MonitoringCoverageViewModel? monitoringCoverage = null,
+        OperationsOverviewViewModel? overview = null)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         InitializeComponent();
         _viewModel = viewModel;
         _authentication = authentication;
+        Overview = overview;
         Devices = devices;
         Alerts = alerts;
         Risk = risk;
@@ -93,6 +96,7 @@ public partial class MainWindow : Window
         DesktopIntegration = desktopIntegration;
         ServiceStatus = serviceStatus;
         _viewModel.PropertyChanged += OnShellPageChanged;
+        if (overview is not null) overview.SessionExpired += OnWorkspaceSessionExpired;
         if (devices is not null) devices.SessionExpired += OnWorkspaceSessionExpired;
         if (alerts is not null) alerts.SessionExpired += OnWorkspaceSessionExpired;
         if (risk is not null) risk.SessionExpired += OnWorkspaceSessionExpired;
@@ -171,6 +175,7 @@ public partial class MainWindow : Window
         PageRow.Height = authorized ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         if (!authorized)
         {
+            Overview?.Clear();
             AiExplanation?.Clear(); License?.Clear(); LocalNetwork?.Clear(); ComputerEnrollment?.Clear(); Pilot?.Clear(); CentralUpdate?.Clear();
             VulnerabilityFeed?.Clear(); DeviceVulnerabilities?.Clear(); DefenderDetections?.Clear(); Backups?.Clear();
             Notifications?.Clear();
@@ -189,6 +194,7 @@ public partial class MainWindow : Window
     {
         if (!_closed && e.PropertyName == nameof(ShellViewModel.CurrentPage))
         {
+            if (_viewModel.CurrentPage.Id != PageId.Overview) Overview?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Settings) Backups?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Notifications) Notifications?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.MonitoringCoverage) MonitoringCoverage?.Clear();
@@ -223,7 +229,8 @@ public partial class MainWindow : Window
         if (Backups is not null && _viewModel.CurrentPage.Id == PageId.Settings) _ = Backups.RefreshAsync();
         // The pilot notice belongs to every page; Core reads the key offline, so this stays local and cheap.
         if (Pilot is not null) _ = Pilot.RefreshAsync();
-        if (Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
+        if (Overview is not null && _viewModel.CurrentPage.Id == PageId.Overview) await Overview.RefreshAsync();
+        else if (Devices is not null && _viewModel.CurrentPage.Id == PageId.Devices) await Devices.RefreshAsync();
         else if (Alerts is not null && _viewModel.CurrentPage.Id == PageId.Alerts) await Alerts.RefreshAsync();
         else if (Risk is not null && _viewModel.CurrentPage.Id == PageId.Risk) await Risk.RefreshAsync();
         else if (RiskRegister is not null && _viewModel.CurrentPage.Id == PageId.RiskRegister) await RiskRegister.RefreshAsync();
@@ -288,6 +295,7 @@ public partial class MainWindow : Window
         _closed = true;
         Loaded -= OnLoaded;
         _viewModel.PropertyChanged -= OnShellPageChanged;
+        if (Overview is not null) { Overview.SessionExpired -= OnWorkspaceSessionExpired; Overview.Dispose(); }
         if (Devices is not null) { Devices.SessionExpired -= OnWorkspaceSessionExpired; Devices.Dispose(); }
         if (Alerts is not null)
         {

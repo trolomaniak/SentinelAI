@@ -87,8 +87,8 @@ internal static class LocalizationTests
         Ensure(Localizer.T("Refresh") == "Odśwież" && Localizer.T("Risk Register") == "Rejestr ryzyk", "Polish texts were not used.");
         Ensure(Localizer.F("{0} of {1} enrolled endpoints", 2, 5) == "2 z 5 dołączonych komputerów", "A Polish format did not place its values.");
         Ensure(Localizer.T("A text no catalog contains") == "A text no catalog contains", "An unknown text did not stay English.");
-        Ensure(Localizer.T("Review computers, investigate alerts, prioritize findings and save a local report.").StartsWith("Sprawdź komputery", StringComparison.Ordinal),
-            "The Overview workflow guide was not translated into Polish.");
+        Ensure(Localizer.F("Active computers · {0} · Monitoring issues · {1}", 2, 1) == "Aktywne komputery · 2 · Problemy z monitoringiem · 1",
+            "The Overview monitoring counts were not translated into Polish.");
         using (var register = new RiskRegisterViewModel(new NoRegister()))
             Ensure(register.DistinctionText.StartsWith("Oceny w rejestrze", StringComparison.Ordinal), "A view model did not speak Polish.");
         Ensure(VulnerabilityRemediation("Update Example Viewer to 2.5.0 or later.") == "Zaktualizuj Example Viewer do wersji 2.5.0 lub nowszej." &&

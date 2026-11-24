@@ -433,10 +433,17 @@ public sealed class RiskRegisterStore(AdminStore admins, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(query);
         var today = Today();
+        await using var connection = await OpenAsync(cancellationToken);
+        return await ListAsync(connection, transaction: null, today, query, cancellationToken);
+    }
+
+    internal static async Task<RiskRegisterPage> ListAsync(SqliteConnection connection, SqliteTransaction? transaction,
+        DateOnly today, RiskRegisterQuery query, CancellationToken cancellationToken)
+    {
         var rows = new List<(RiskRecordSummary Summary, StoredRiskRecord Record, long Number)>();
-        await using (var connection = await OpenAsync(cancellationToken))
         await using (var command = connection.CreateCommand())
         {
+            command.Transaction = transaction;
             command.CommandText = "SELECT RiskId, Number, Version, RecordJson, UpdatedUtcTicks FROM RiskRegister;";
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -456,10 +463,12 @@ public sealed class RiskRegisterStore(AdminStore admins, TimeProvider time)
                 (!query.AttentionOnly || row.Summary.Flags.NeedsAttention) &&
                 (query.EndpointId is not { } endpointId || row.Record.EndpointIds.Contains(endpointId)) &&
                 (query.AlertId is not { } alertId || row.Record.AlertIds.Contains(alertId)))
+            .ToArray();
+        var page = matching
             .OrderByDescending(row => row.Summary.Flags.NeedsAttention).ThenByDescending(row => row.Summary.Residual.Score)
             .ThenByDescending(row => row.Summary.Inherent.Score).ThenBy(row => row.Number)
-            .Select(row => row.Summary).ToArray();
-        return new RiskRegisterPage(matching.Skip(query.Offset).Take(query.Limit).ToArray(), matching.LongLength, query.Offset, query.Limit, counts,
+            .Skip(query.Offset).Take(query.Limit).Select(row => row.Summary).ToArray();
+        return new RiskRegisterPage(page, matching.LongLength, query.Offset, query.Limit, counts,
             RiskRegisterValidation.Iso(today));
     }
 

@@ -13,6 +13,7 @@ public partial class App : Application
 {
     private ShellViewModel? _shell;
     private AuthenticationViewModel? _authentication;
+    private OperationsOverviewViewModel? _overview;
     private DevicesViewModel? _devices;
     private AlertsViewModel? _alerts;
     private RiskViewModel? _risk;
@@ -77,6 +78,7 @@ public partial class App : Application
             var coreServices = new WindowsCoreServices();
             var authenticationClient = coreServices.CreateAuthenticationClient();
             _authentication = new AuthenticationViewModel(authenticationClient, coreServices.CreateAdministratorSetupClient());
+            _overview = new OperationsOverviewViewModel((IOperationsOverviewClient)authenticationClient);
             _devices = new DevicesViewModel((IDevicesClient)authenticationClient);
             _alerts = new AlertsViewModel((IAlertsClient)authenticationClient, (IDevicesClient)authenticationClient);
             _risk = new RiskViewModel((IRiskClient)authenticationClient);
@@ -112,7 +114,7 @@ public partial class App : Application
             _serviceStatus = new WindowsServiceStatusModel();
             var window = new MainWindow(_shell, _authentication, _devices, _alerts, _risk, _reports, _license, _aiExplanation,
                 integration, _serviceStatus, _localNetwork, _computerEnrollment, _pilot, _centralUpdate, _vulnerabilityFeed, _deviceVulnerabilities,
-                _riskRegister, _language, _defenderDetections, _backups, _notifications, _monitoringCoverage);
+                _riskRegister, _language, _defenderDetections, _backups, _notifications, _monitoringCoverage, _overview);
             MainWindow = window;
             _tray = new WindowsDesktopTray(window, integration, _serviceStatus, OpenSentinelAi, () => Shutdown());
             window.DesktopTray = _tray;
@@ -151,6 +153,7 @@ public partial class App : Application
         _tray?.Dispose();
         _serviceStatus?.Dispose();
         _shell?.Dispose();
+        _overview?.Dispose();
         _devices?.Dispose();
         _alerts?.Dispose();
         _risk?.Dispose();
