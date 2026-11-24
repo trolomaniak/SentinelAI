@@ -161,7 +161,7 @@
 
 - [EXPANDED-04](tasks/EXPANDED-04-operations-overview.md) turns the native English/Polish Overview into a work queue. It shows complete counts, bounded previews and workspace shortcuts for critical/high alerts, monitoring issues, unread notifications and Risk Register deadlines. Recent alert decisions and the last recorded successful backup are shown separately.
 - The local administrator read-only API uses one SQLite transaction and one evaluation time. Monitoring coverage and Risk Register use their authoritative rules in the same snapshot. The response excludes raw evidence, credentials and actors, uses no-store and is refused on the Agent listener. Existing navigation and session boundaries are preserved.
-- Release solution build passed with zero warnings/errors. The focused Core API suite and 40 Desktop assertions passed. Native Windows acceptance and the complete local regression are in progress. See [operations overview](../docs/OPERATIONS-OVERVIEW.md) and the [Polish guide](../docs/pilot/PRZEGLAD-OPERACYJNY.pl.md).
+- The full local regression and Release solution build passed with zero warnings/errors, including the focused Core API suite, 40 Overview Desktop checks (3,722 Desktop assertions total) and 652 Setup assertions. Initial Windows WPF CI found a Polish fixture assertion for obsolete guide text. The fixture now checks the new Polish headings and shortcuts. The updated native test project compiled with zero warnings/errors. Final Windows acceptance is in progress. See [operations overview](../docs/OPERATIONS-OVERVIEW.md) and the [Polish guide](../docs/pilot/PRZEGLAD-OPERACYJNY.pl.md).
 
 ## 2026-11-24 — Expanded pilot 03: monitoring coverage (merged)
 

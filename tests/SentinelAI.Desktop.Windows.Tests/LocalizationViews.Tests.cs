@@ -28,9 +28,11 @@ internal static partial class Program
                 shell.CurrentPage = shell.Pages.Single(page => page.Id == PageId.Overview);
                 await FlushAsync();
                 var overview = Descendants<OverviewView>(window).Single();
-                Ensure(Descendants<Button>(overview).Any(button => button.Content as string == "Urządzenia") &&
-                       Descendants<TextBlock>(overview).Any(text => text.Text.StartsWith("Sprawdź komputery", StringComparison.Ordinal)),
-                    "The Overview guide and navigation shortcuts were not shown in Polish.");
+                var overviewButtons = Descendants<Button>(overview).Select(button => button.Content as string).ToArray();
+                var overviewText = Descendants<TextBlock>(overview).Select(text => text.Text).ToArray();
+                Ensure(overviewButtons.Contains("Urządzenia") && overviewButtons.Contains("Pokrycie monitoringu") &&
+                       overviewText.Contains("Przegląd") && overviewText.Contains("Alerty priorytetowe"),
+                    "The Operations Overview headings and workspace shortcuts were not shown in Polish.");
                 shell.CurrentPage = shell.Pages.Single(page => page.Id == PageId.RiskRegister);
                 await WaitForAsync(() => register.ListState == RiskRegisterListState.Ready, "The Polish Risk Register page did not read Core's records.");
                 await FlushAsync();
