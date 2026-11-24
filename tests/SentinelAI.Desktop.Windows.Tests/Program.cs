@@ -141,7 +141,7 @@ internal static partial class Program
                 model.CurrentPage = model.Pages.Single(page => page.Id == PageId.Overview);
                 await FlushAsync();
                 Ensure(Descendants<OverviewView>(content).Count() == 1 && !Descendants<PlaceholderPage>(content).Any(),
-                    "Overview still displayed a placeholder instead of the local workflow guide.");
+                    "Overview displayed a placeholder instead of the native summary.");
                 var shortcut = Descendants<Button>(content).Single(button => System.Windows.Automation.AutomationProperties.GetAutomationId(button) == id);
                 Ensure(shortcut.IsEnabled && shortcut.Command?.CanExecute(shortcut.CommandParameter) == true,
                     "An Overview shortcut was not bound to the shell navigation command.");
@@ -193,6 +193,7 @@ internal static partial class Program
         await BackupViewsAsync();
         await NotificationsViewsAsync();
         await MonitoringCoverageViewsAsync();
+        await OperationsOverviewViewsAsync();
         await RiskRegisterViewsAsync();
         await PolishViewsAsync();
         await BrowserlessViewsAsync();

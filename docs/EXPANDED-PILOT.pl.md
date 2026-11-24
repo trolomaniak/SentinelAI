@@ -5,9 +5,9 @@ Zakres zatwierdzony przez właściciela: realizacja kolejno, od backupu i odzysk
 | Kolejność | Obszar | Wynik dla użytkownika | Stan |
 | --- | --- | --- | --- |
 | 1 | Backup i odzyskiwanie | Szyfrowane kopie, harmonogram, retencja, eksport, weryfikacja i sprawdzone odtworzenie | Scalone w PR #56. Testy lokalne i Windows przeszły |
-| 2 | Powiadomienia bezpieczeństwa | Krytyczne wykrycia, utrata monitoringu, grupowanie, opcjonalny e-mail/webhook i historia dostarczenia | W realizacji |
-| 3 | Pokrycie monitoringu | Dostępność źródeł, luki i wiek danych każdego urządzenia | W realizacji |
-| 4 | Pulpit operacyjny Overview | Problemy wymagające działania, zmiany i stan pracy administratora | Zaplanowane |
+| 2 | Powiadomienia bezpieczeństwa | Krytyczne wykrycia, utrata monitoringu, grupowanie, opcjonalny e-mail/webhook i historia dostarczenia | Scalone w PR #57 |
+| 3 | Pokrycie monitoringu | Dostępność źródeł, luki i wiek danych każdego urządzenia | Scalone w PR #59 |
+| 4 | Pulpit operacyjny Overview | Problemy wymagające działania, zmiany i stan pracy administratora | W realizacji |
 | 5 | Historia i trendy | Snapshoty, wersja polityki, przyczyny zmian, okresy 7/30/90 dni | Zaplanowane |
 | 6 | Katalog oprogramowania | Wyszukiwanie aplikacji w firmie, wersje i historia zmian | Zaplanowane |
 | 7 | Centrum podatności | CVE i produkty w skali firmy, dotknięte urządzenia i priorytety aktualizacji | Zaplanowane |

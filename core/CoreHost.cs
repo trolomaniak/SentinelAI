@@ -103,6 +103,7 @@ public static class CoreHost
         builder.Services.AddSingleton<SecurityEventStore>();
         builder.Services.AddSingleton<DefenderDetectionReadStore>();
         builder.Services.AddSingleton<MonitoringCoverageReadStore>();
+        builder.Services.AddSingleton<OperationsOverviewReadStore>();
         builder.Services.AddSingleton<AlertStore>();
         builder.Services.AddSingleton<INotificationCredentialProtection, WindowsNotificationCredentialProtection>();
         builder.Services.AddSingleton<NotificationStore>();
@@ -275,7 +276,8 @@ public static class CoreHost
         app.Use(async (context, next) =>
         {
             if (context.Request.Path.StartsWithSegments("/api/admin/notifications") ||
-                context.Request.Path.StartsWithSegments(MonitoringCoverageEndpoints.Route))
+                context.Request.Path.StartsWithSegments(MonitoringCoverageEndpoints.Route) ||
+                context.Request.Path.StartsWithSegments(OperationsOverviewEndpoints.Route))
             {
                 context.Response.Headers.CacheControl = "no-store";
                 if (!NotificationEndpoints.IsLocal(context))
@@ -308,6 +310,7 @@ public static class CoreHost
         app.MapBackupEndpoints(IsLocalOrHttps);
         app.MapNotificationEndpoints();
         app.MapMonitoringCoverageEndpoints();
+        app.MapOperationsOverviewEndpoints();
 
         app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
             .AllowAnonymous();

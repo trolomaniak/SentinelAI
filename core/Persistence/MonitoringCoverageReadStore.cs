@@ -43,6 +43,14 @@ internal sealed class MonitoringCoverageReadStore(AdminStore admins, RiskScoring
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction(deferred: true);
+        var page = await ListAsync(connection, transaction, now, offset, limit, issuesOnly, cancellationToken);
+        transaction.Commit();
+        return page;
+    }
+
+    internal async Task<MonitoringEndpointPage> ListAsync(SqliteConnection connection, SqliteTransaction transaction,
+        DateTimeOffset now, int offset, int limit, bool issuesOnly, CancellationToken cancellationToken)
+    {
         var total = await CountAsync(connection, transaction, "SELECT COUNT(*) FROM EndpointEnrollments AS e WHERE " + ActiveEndpoint,
             cancellationToken);
         var predicate = issuesOnly ? " WHERE HasIssue = 1" : string.Empty;
@@ -65,7 +73,6 @@ internal sealed class MonitoringCoverageReadStore(AdminStore admins, RiskScoring
             while (await reader.ReadAsync(cancellationToken)) items.Add(ReadSummary(reader));
         }
 
-        transaction.Commit();
         return new MonitoringEndpointPage(now, total, matching, offset, limit, risk.InventoryFreshForHours, items);
     }
 

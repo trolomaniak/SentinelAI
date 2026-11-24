@@ -71,13 +71,13 @@ internal static class MonitoringCoveragePresentation
 
     private static string Number(long? value) => value?.ToString(CultureInfo.InvariantCulture) ?? T("Unknown");
 
-    private static string Heartbeat(string value) => value switch
+    internal static string Heartbeat(string value) => value switch
     {
         "healthy" => T("Healthy"), "warning" => T("Warning"), "offline" => T("Offline"),
         "future" => T("Future timestamp"), _ => T("Unknown")
     };
 
-    private static string Freshness(string value) => value switch
+    internal static string Freshness(string value) => value switch
     {
         "current" => T("Current"), "stale" => T("Stale"), "future" => T("Future timestamp"), _ => T("Missing")
     };

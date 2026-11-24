@@ -306,7 +306,7 @@ public sealed class NotificationsViewModel(INotificationsClient client) : INotif
     private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static string Saved(bool value) => value ? T("Saved") : T("None");
     private static string Date(DateTimeOffset? value) => value?.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? T("None");
-    private static string Kind(string value) => value switch
+    internal static string Kind(string value) => value switch
     {
         "criticalAlertNew" => T("New critical alert"), "criticalAlertReopened" => T("Critical alert reopened"), "criticalAlertEscalated" => T("Alert escalated to critical"),
         "monitoringOffline" => T("Endpoint monitoring lost"), "monitoringRecovered" => T("Endpoint monitoring recovered"), _ => T("Unknown")
