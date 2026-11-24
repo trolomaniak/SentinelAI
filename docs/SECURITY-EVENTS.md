@@ -221,6 +221,8 @@ Retention is measured by Core's receipt time, so an endpoint's clock cannot defe
 
 Retention is fixed for installed Core. No API returns raw observations. The status route below returns channel metadata; the Defender history route returns a separate allowlisted projection of malware metadata. Alert evidence that a [runtime rule](EVENT-RULES.md#privacy-ai-and-reports) copies from observations is part of the tracked alert, returned by alert detail and incident export, and kept until a newer detection of the same rule on the endpoint replaces it, independent of this retention.
 
+The Desktop monitoring coverage page brings channel availability and retained gaps together with heartbeat, inventory and telemetry. It evaluates freshness for each source and separates the initial coverage boundary from a later interruption. See [Monitoring coverage](MONITORING-COVERAGE.md).
+
 ## Microsoft Defender detection history
 
 Desktop **Devices → select a computer → Microsoft Defender** shows the retained events for detections (1116), reported actions (1117) and failed actions (1118/1119). Each row shows its original event time, threat name/ID when reported, Defender severity/category IDs, and the reported action/error IDs where available. These are historical reports from Defender. A reported action does not establish that the endpoint is currently clean, and multiple rows can describe the same detection. SentinelAI does not start scans or change quarantine through this view.
