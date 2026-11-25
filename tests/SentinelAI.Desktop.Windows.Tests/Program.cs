@@ -183,6 +183,7 @@ internal static partial class Program
         await DevicesViewsAsync();
         await AlertsViewsAsync();
         await RiskReportsViewsAsync();
+        await RiskHistoryViewsAsync();
         await AiLicenseSettingsViewsAsync();
         await LocalNetworkSettingsViewsAsync();
         await ComputerEnrollmentViewsAsync();

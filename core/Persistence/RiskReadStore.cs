@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SentinelAI.Contracts.EndpointTelemetry;
 using SentinelAI.Contracts.Inventory;
+using SentinelAI.Contracts.RiskHistory;
 using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Rules;
 using SentinelAI.Rules.Vulnerabilities;
@@ -64,6 +65,22 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         return snapshot.Count == 0 ? null : Score(snapshot[0], timeProvider.GetUtcNow());
     }
 
+    internal async Task<(DateTimeOffset EvaluatedUtc, OrganizationRiskScore Organization, ScoringPolicySnapshot Policy,
+        EndpointRiskScore[] Endpoints)> EvaluateFleetAsync(CancellationToken cancellationToken)
+    {
+        var snapshot = await ReadSnapshotAsync(null, cancellationToken, scoringOnly: true);
+        var now = timeProvider.GetUtcNow().ToUniversalTime();
+        var endpoints = new EndpointRiskScore[snapshot.Count];
+        for (var index = 0; index < snapshot.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var endpoint = snapshot[index];
+            endpoints[index] = ScoreEndpoint(endpoint.EndpointId, endpoint.InventoryCollectedUtc, endpoint.Alerts,
+                now, endpoint.Telemetry?.CollectedUtc);
+        }
+        return (now, options.Scorer.ScoreOrganization(endpoints), options.Scorer.Policy, endpoints);
+    }
+
     private EndpointRiskDetail Score(SnapshotEndpoint endpoint, DateTimeOffset now) =>
         ScoreSnapshot(endpoint.EndpointId, endpoint.EndpointName, endpoint.InventoryCollectedUtc,
             endpoint.Inventory, endpoint.Alerts, now, endpoint.EventChannels, endpoint.Telemetry);
@@ -79,15 +96,19 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         endpointId,
         endpointName,
         inventoryCollectedUtc,
-        options.Scorer.ScoreEndpoint(endpointId,
-            alerts.Select(alert => new ScoringAlert(alert.AlertId, alert.RuleId, alert.Severity,
-                alert.Status, alert.LastObservedUtc, EventRuleEngine.DefaultRuleIds.Contains(alert.RuleId),
-                TelemetryRuleEngine.DefaultRuleIds.Contains(alert.RuleId) || VulnerabilityRules.RuleIds.Contains(alert.RuleId), telemetry?.CollectedUtc)),
-            options.ContextFor(endpointId, inventoryCollectedUtc), now),
+        ScoreEndpoint(endpointId, inventoryCollectedUtc, alerts, now, telemetry?.CollectedUtc),
         AssessCoverage(inventory, eventChannels, telemetry, now),
         alerts,
         options.Scorer.Policy,
         options.InventoryFreshForHours);
+
+    private EndpointRiskScore ScoreEndpoint(Guid endpointId, DateTimeOffset? inventoryCollectedUtc,
+        IReadOnlyList<RiskAlertView> alerts, DateTimeOffset now, DateTimeOffset? telemetryCollectedUtc) =>
+        options.Scorer.ScoreEndpoint(endpointId,
+            alerts.Select(alert => new ScoringAlert(alert.AlertId, alert.RuleId, alert.Severity,
+                alert.Status, alert.LastObservedUtc, EventRuleEngine.DefaultRuleIds.Contains(alert.RuleId),
+                TelemetryRuleEngine.DefaultRuleIds.Contains(alert.RuleId) || VulnerabilityRules.RuleIds.Contains(alert.RuleId), telemetryCollectedUtc)),
+            options.ContextFor(endpointId, inventoryCollectedUtc), now);
 
     private static EndpointRiskSummary Summarize(EndpointRiskDetail endpoint)
     {
@@ -188,7 +209,7 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
     }
 
     private async Task<IReadOnlyList<SnapshotEndpoint>> ReadSnapshotAsync(
-        Guid? endpointId, CancellationToken cancellationToken)
+        Guid? endpointId, CancellationToken cancellationToken, bool scoringOnly = false)
     {
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
@@ -203,21 +224,24 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         {
             query.Transaction = transaction;
             query.CommandText = """
-                SELECT e.EndpointId, i.CollectedUtcTicks, i.ReportJson
+                SELECT e.EndpointId, i.CollectedUtcTicks, CASE WHEN $scoringOnly = 0 THEN i.ReportJson END
                 FROM EndpointEnrollments AS e
                 LEFT JOIN EndpointInventories AS i ON i.EndpointId = e.EndpointId
                 WHERE e.RemovedUtcTicks IS NULL AND ($endpointId IS NULL OR e.EndpointId = $endpointId)
                 ORDER BY e.EndpointId;
                 """;
             query.Parameters.AddWithValue("$endpointId", endpointId?.ToString("D") ?? (object)DBNull.Value);
+            query.Parameters.AddWithValue("$scoringOnly", scoringOnly);
             await using var reader = await query.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
+                if (scoringOnly && endpoints.Count == RiskHistoryContract.MaximumEndpointPoints)
+                    throw new InvalidDataException("The fleet exceeds the history endpoint limit.");
                 var id = Guid.Parse(reader.GetString(0));
                 var inventory = reader.IsDBNull(2) ? null
                     : JsonSerializer.Deserialize<InventoryReport>(reader.GetString(2));
                 endpoints.Add(id, new SnapshotEndpoint(id,
-                    inventory?.Hostname ?? $"Endpoint {id.ToString("N")[..8]}",
+                    scoringOnly ? string.Empty : inventory?.Hostname ?? $"Endpoint {id.ToString("N")[..8]}",
                     reader.IsDBNull(1) ? null : new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero), inventory, [], []));
             }
         }
@@ -226,7 +250,7 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         {
             query.Transaction = transaction;
             query.CommandText = $"""
-                SELECT t.EndpointId, {TelemetryState.Columns}
+                SELECT t.EndpointId, {(scoringOnly ? "t.CollectedUtcTicks" : TelemetryState.Columns)}
                 FROM EndpointSecurityTelemetry AS t
                 INNER JOIN EndpointEnrollments AS e ON e.EndpointId = t.EndpointId AND e.RemovedUtcTicks IS NULL
                 WHERE ($endpointId IS NULL OR t.EndpointId = $endpointId);
@@ -236,12 +260,16 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
             while (await reader.ReadAsync(cancellationToken))
             {
                 var id = Guid.Parse(reader.GetString(0));
-                endpoints[id] = endpoints[id] with { Telemetry = TelemetryState.Read(reader, 1) };
+                var telemetry = scoringOnly
+                    ? new TelemetryState(new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero), EmptyTelemetrySections)
+                    : TelemetryState.Read(reader, 1);
+                endpoints[id] = endpoints[id] with { Telemetry = telemetry };
             }
         }
 
-        await using (var query = connection.CreateCommand())
+        if (!scoringOnly)
         {
+            await using var query = connection.CreateCommand();
             query.Transaction = transaction;
             query.CommandText = """
                 SELECT s.EndpointId, s.Channel, s.State, s.ReceivedUtcTicks
@@ -262,14 +290,15 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         {
             query.Transaction = transaction;
             query.CommandText = """
-                SELECT a.AlertId, a.EndpointId, a.RuleId, a.Title, a.Severity, a.Status,
-                    a.LastObservedUtcTicks, a.Reason
+                SELECT a.AlertId, a.EndpointId, a.RuleId, CASE WHEN $scoringOnly = 0 THEN a.Title ELSE '' END,
+                    a.Severity, a.Status, a.LastObservedUtcTicks, CASE WHEN $scoringOnly = 0 THEN a.Reason ELSE '' END
                 FROM TrackedAlerts AS a
                 INNER JOIN EndpointEnrollments AS e ON e.EndpointId = a.EndpointId AND e.RemovedUtcTicks IS NULL
                 WHERE ($endpointId IS NULL OR a.EndpointId = $endpointId)
                 ORDER BY a.EndpointId, a.AlertId;
                 """;
             query.Parameters.AddWithValue("$endpointId", endpointId?.ToString("D") ?? (object)DBNull.Value);
+            query.Parameters.AddWithValue("$scoringOnly", scoringOnly);
             await using var reader = await query.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -283,6 +312,8 @@ public sealed class RiskReadStore(AdminStore admins, RiskScoringOptions options,
         transaction.Commit();
         return endpoints.Values.ToArray();
     }
+
+    private static readonly IReadOnlyDictionary<string, string?> EmptyTelemetrySections = new Dictionary<string, string?>();
 
     private sealed record SnapshotEndpoint(Guid EndpointId, string EndpointName,
         DateTimeOffset? InventoryCollectedUtc, InventoryReport? Inventory, List<RiskAlertView> Alerts,

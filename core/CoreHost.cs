@@ -19,6 +19,7 @@ using SentinelAI.Contracts.Inventory;
 using SentinelAI.Contracts.SecurityEvents;
 using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Backups;
+using SentinelAI.Core.History;
 using SentinelAI.Core.Notifications;
 using SentinelAI.Localization;
 using SentinelAI.Core.Reports;
@@ -115,6 +116,7 @@ public static class CoreHost
         builder.Services.AddSingleton(riskOptions);
         builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
         builder.Services.AddSingleton<RiskReadStore>();
+        builder.Services.AddSingleton<RiskHistoryStore>();
         builder.Services.AddSingleton<SecurityReportReadStore>();
         var licenseOptions = LicenseVerificationOptions.Load(builder.Configuration);
         builder.Services.AddSingleton(licenseOptions);
@@ -152,6 +154,7 @@ public static class CoreHost
             new AiGatewayClient(services.GetRequiredService<AiOptions>()));
         builder.Services.AddSingleton<AiExplanationService>();
         builder.Services.AddHostedService<AdminInitializationService>();
+        builder.Services.AddHostedService<RiskHistoryWorker>();
         builder.Services.AddHostedService<NotificationWorker>();
         builder.Services.AddHostedService(services => services.GetRequiredService<BackupService>());
         builder.Services.AddHostedService<LicenseRenewalWorker>();
@@ -277,7 +280,8 @@ public static class CoreHost
         {
             if (context.Request.Path.StartsWithSegments("/api/admin/notifications") ||
                 context.Request.Path.StartsWithSegments(MonitoringCoverageEndpoints.Route) ||
-                context.Request.Path.StartsWithSegments(OperationsOverviewEndpoints.Route))
+                context.Request.Path.StartsWithSegments(OperationsOverviewEndpoints.Route) ||
+                context.Request.Path.StartsWithSegments(RiskHistoryEndpoints.Route))
             {
                 context.Response.Headers.CacheControl = "no-store";
                 if (!NotificationEndpoints.IsLocal(context))
@@ -311,6 +315,7 @@ public static class CoreHost
         app.MapNotificationEndpoints();
         app.MapMonitoringCoverageEndpoints();
         app.MapOperationsOverviewEndpoints();
+        app.MapRiskHistoryEndpoints();
 
         app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
             .AllowAnonymous();
@@ -1231,7 +1236,8 @@ public static class CoreHost
                 try
                 {
                     // Local reporting is independent of cloud AI and optional licensing permissions.
-                    var report = await reports.GenerateAsync(period!, cancellationToken);
+                    var report = await reports.GenerateAsync(period!, cancellationToken,
+                        includeRiskHistory: IsLoopback(context.Connection.RemoteIpAddress));
                     var html = SecurityReportRenderer.Render(report, language.Current);
                     const int maximumBytes = 8 * 1024 * 1024;
                     if (System.Text.Encoding.UTF8.GetByteCount(html) > maximumBytes)

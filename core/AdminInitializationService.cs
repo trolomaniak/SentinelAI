@@ -1,5 +1,6 @@
 using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Backups;
+using SentinelAI.Core.History;
 using SentinelAI.Core.Notifications;
 
 namespace SentinelAI.Core;
@@ -16,6 +17,7 @@ internal sealed class AdminInitializationService(
     CentralUpdateStore centralUpdates,
     VulnerabilityService vulnerabilities,
     RiskRegisterStore riskRegister,
+    RiskHistoryStore riskHistory,
     InstallationLanguageStore language,
     BackupStore backups,
     NotificationStore notifications,
@@ -36,6 +38,7 @@ internal sealed class AdminInitializationService(
         await centralUpdates.InitializeAsync(cancellationToken);
         await vulnerabilities.InitializeAsync(cancellationToken);
         await riskRegister.InitializeAsync(cancellationToken);
+        await riskHistory.InitializeAsync(cancellationToken);
         await language.InitializeAsync(cancellationToken);
         await backups.InitializeAsync(cancellationToken);
     }

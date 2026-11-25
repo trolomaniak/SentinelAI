@@ -43,6 +43,8 @@ public sealed record ReportIncident(Guid AlertId, Guid EndpointId, string Endpoi
     bool ReopenedAfterPeriodResolution, decimal CurrentRiskContribution);
 public sealed record ReportPriorityAction(string Priority, string RuleId, string Action,
     int AffectedEndpointCount, string Reason, decimal CurrentRiskContribution);
+public sealed record ReportRiskMeasurement(DateTimeOffset CapturedUtc, int Score, decimal RawScore,
+    string PolicyVersion, string PolicyFingerprint);
 
 /// <summary>Period activity and current evaluated state remain explicitly separate.</summary>
 public sealed record SecurityReport(ReportPeriod Period, DateTimeOffset GeneratedAtUtc,
@@ -51,13 +53,14 @@ public sealed record SecurityReport(ReportPeriod Period, DateTimeOffset Generate
     IReadOnlyList<ReportIncident> MajorPostureFindings, IReadOnlyList<ReportPriorityAction> PriorityActions,
     ScoringPolicySnapshot Policy, int InventoryFreshForHours)
 {
+    /// <summary>Retained organization measurements, or null when history is excluded from the export.</summary>
+    public IReadOnlyList<ReportRiskMeasurement>? OrganizationRiskHistory { get; init; } = [];
     public const int DetailedItemLimit = 200;
     public const string ChronologyCaution = "Period activity uses retained first/latest observations and all stored status transitions. " +
         "SentinelAI stores only the latest inventory and heartbeat and one alert per endpoint/rule, not a complete observation history. " +
         "An alert observed only between its retained first/latest timestamps may be absent from this period. " +
         "Activity counts are distinct retained alerts, not detection-event totals or proof of historical posture. " +
-        "Risk, health, status and technical evidence below are current stored state evaluated at report generation, not the selected period's historical state.";
-    public const string UnavailableTrend = "Unavailable: historical risk scores are not stored. No score trend or historical security posture can be reconstructed.";
+        "Current risk, health, status and technical evidence use the latest stored state evaluated at report generation.";
 
     // Fixed texts Core stores in the report; the renderer translates them by their exact English text.
     public const string UnsupportedRuleTitle = "Unsupported stored rule";

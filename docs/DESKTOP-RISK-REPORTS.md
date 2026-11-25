@@ -20,11 +20,11 @@ Select **Save HTML** to open the native destination picker. The suggested name d
 
 Editing either date, leaving Reports, signing out, losing the session or closing Desktop cancels pending work and disposes/erases retained report bytes. Stale downloads cannot become a new session's report; temporary save buffers are erased and unfinished temporary files are removed where possible. Files already explicitly saved remain the operator's exported documents. Offline viewing or browser printing/PDF of a saved export is optional document handling outside the normal browserless SentinelAI workflow; Desktop never opens a browser.
 
-Core's privacy projection, capacity checks and Safe Mode behavior are unchanged. Generation calls neither AI nor the License API and needs no premium entitlement. Selected-period incident activity is distinct from current risk/health/coverage. No historical score trend, historical fleet snapshot or intermediate positive-observation history is invented. The report excludes raw inventory, credentials, license material and status-history administrator identities; its evidence is allowlisted and dynamic HTML is encoded. See [report semantics and privacy](REPORTING.md).
+Generation uses local Core data and is available in Safe Mode. The HTML lists retained organization risk measurements from the selected UTC dates alongside a separately labeled current score and period incident activity. The report uses allowlisted evidence and encodes dynamic HTML. It excludes raw inventory, credentials, license material and status-history administrator identities. See [report semantics and privacy](REPORTING.md).
 
 ## Transport and memory bounds
 
-Passwords/bearers stay behind the existing authentication owner; views never receive a token or access SQLite. Requests use the fixed local origin and verified connected Core peer, with redirects, proxies, cookies and ambient authentication disabled. Risk strings render as native literal text. No new package, Core calculation, scoring policy, database history, AI operation or endpoint mutation is introduced.
+Passwords/bearers stay behind the existing authentication owner; views never receive a token or access SQLite. Requests use the fixed local origin and verified connected Core peer, with redirects, proxies, cookies and ambient authentication disabled. Risk strings render as native literal text.
 
 | Operation | Complete-response deadline | Accepted body and data limits |
 | --- | --- | --- |

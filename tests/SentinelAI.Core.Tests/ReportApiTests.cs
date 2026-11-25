@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using SentinelAI.Contracts.Ai;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Contracts.Inventory;
+using SentinelAI.Contracts.RiskHistory;
 using SentinelAI.Core;
 using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Reports;
@@ -22,10 +23,19 @@ internal static class ReportApiTests
 {
     private const string PathRoot = "/api/admin/reports/security";
     private const string PeriodPath = PathRoot + "?from=2026-09-01&to=2026-09-30";
+    private const string SyntheticRemoteSchemeHeader = "Synthetic-Report-Remote-Scheme";
     private const string HostileName = "synthetic-report-<img src=x onerror=alert(1)>";
     private const string PrivateText = "synthetic-report-private-evidence";
     private const string PrivateActor = "synthetic-report-private-actor";
     private const string PrivateLease = "synthetic-report-private-lease";
+    private const string HistoryOnlyRule = "SA-TST-999";
+    private const string HistoryOnlyEndpoint = "dc8559b3-879c-4439-9104-ac43c66a1a0f";
+    private const string OutsidePeriodPolicy = "risk-outside-report-period";
+    private const string EarlierPolicy = "risk-v10";
+    private const string LaterPolicy = "risk-v11-<img src=x onerror=alert(1)>";
+    private static readonly string EarlierFingerprint = new('1', 64);
+    private static readonly string LaterFingerprint = new('2', 64);
+    private static readonly string OutsidePeriodFingerprint = new('3', 64);
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-10-02T12:00:00Z", CultureInfo.InvariantCulture);
     private static readonly ReportPeriod September = new(new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30));
     private static int assertions;
@@ -73,14 +83,17 @@ internal static class ReportApiTests
                 await SeedHeartbeatAsync(admins.DatabasePath, warning.EndpointId, Now.AddMinutes(-3));
                 await SeedHeartbeatAsync(admins.DatabasePath, offlineEndpoint.EndpointId, Now.AddMinutes(-6));
                 await SeedLeaseAsync(admins.DatabasePath);
+                await SeedRiskHistoryAsync(admins.DatabasePath);
 
                 // The deliberately invalid synthetic lease leaves Core in Safe Mode.
                 using (var license = await ReadAsync(client, "/api/admin/license", token))
                     Check(license.RootElement.GetProperty("mode").GetString() == "SAFE_MODE",
                         "The local report fixture did not exercise Safe Mode.");
 
-                var report = await app.Services.GetRequiredService<SecurityReportReadStore>().GenerateAsync(September);
+                var store = app.Services.GetRequiredService<SecurityReportReadStore>();
+                var report = await store.GenerateAsync(September);
                 VerifyStoredActivity(report);
+                await VerifyRiskHistoryAsync(store, report);
                 Check(report.Endpoints.Count == 4 && report.Health == new ReportHealthSummary(1, 1, 1, 1),
                     "Report health did not evaluate enrolled endpoint heartbeats at the single injected UTC time.");
                 Check(report.Endpoints.Single(endpoint => endpoint.EndpointId == missing.EndpointId)
@@ -92,6 +105,8 @@ internal static class ReportApiTests
                 VerifyEvidence(report);
                 persistedHtml = await DownloadAsync(client, token);
                 VerifyContent(persistedHtml);
+                VerifyHistoryHtml(persistedHtml);
+                await VerifyRemoteReportsAsync(client, token, report);
                 var passwordHash = await ScalarAsync(admins.DatabasePath,
                     "SELECT PasswordHash FROM Administrators LIMIT 1;");
                 foreach (var secret in new[] { username, password, token, risky.AgentCredential, passwordHash,
@@ -135,7 +150,6 @@ internal static class ReportApiTests
                 await VerifyCapacityAsync(restarted, client, token);
                 await restarted.StopAsync();
             }
-            await VerifyRemoteHttpAsync(directory, username, password, offline);
             Check(offline.Requests == 0, "Report generation used an AI request during offline verification.");
             Console.WriteLine($"Report API tests passed ({assertions} assertions, stored chronology, offline Safe Mode, HTML safety, deterministic restart and access boundaries).");
         }
@@ -164,12 +178,16 @@ internal static class ReportApiTests
     {
         var report = await app.Services.GetRequiredService<SecurityReportReadStore>().GenerateAsync(September);
         Check(report.Endpoints.Count == 0 && report.OrganizationRisk.Score == 0 && report.Activity.AssociatedAlertCount == 0 &&
-              report.Activity.ResolvedAlertCount == 0 && report.PriorityActions.Count == 0,
+              report.Activity.ResolvedAlertCount == 0 && report.PriorityActions.Count == 0 && report.OrganizationRiskHistory is { Count: 0 },
             "An empty installation fabricated security observations, incidents or priority actions.");
         var html = await DownloadAsync(client, token);
         Check(html.Contains("2026-09-01", StringComparison.Ordinal) && html.Contains("2026-09-30", StringComparison.Ordinal) &&
-              html.Contains("historical risk scores are not stored", StringComparison.Ordinal),
-            "An empty report concealed its period or fabricated a historical score trend.");
+              html.Contains("No retained organization risk measurements for the selected UTC period.", StringComparison.Ordinal) &&
+              !html.Contains("Recorded at (UTC)", StringComparison.Ordinal),
+            "An empty report concealed its period or rendered an empty measurements table.");
+        Check(SecurityReportRenderer.Render(report, UiLanguage.Polish)
+                .Contains("Brak zachowanych pomiarów ryzyka organizacji w wybranym okresie UTC.", StringComparison.Ordinal),
+            "An empty Polish report omitted its risk history message.");
     }
 
     private static async Task VerifyQueryValidationAsync(HttpClient client, string token)
@@ -247,6 +265,23 @@ internal static class ReportApiTests
         }
     }
 
+    private static async Task VerifyRiskHistoryAsync(SecurityReportReadStore store, SecurityReport report)
+    {
+        Check(report.OrganizationRiskHistory is { } points && points.SequenceEqual([
+            new(September.StartUtc, 5, 4.625m, EarlierPolicy, EarlierFingerprint),
+            new(September.EndExclusiveUtc.AddTicks(-1), 100, 109.625m, LaterPolicy, LaterFingerprint)
+        ]), "The report changed recorded scores or policies, or selected the wrong UTC date bounds.");
+
+        var broad = await store.GenerateAsync(new ReportPeriod(
+            DateOnly.FromDateTime(Now.AddDays(-92).UtcDateTime), DateOnly.FromDateTime(Now.AddDays(1).UtcDateTime)));
+        Check(broad.OrganizationRiskHistory is { } broadPoints &&
+              broadPoints.Any(point => point.CapturedUtc == September.StartUtc.AddTicks(-1)) &&
+              broadPoints.Any(point => point.CapturedUtc == September.EndExclusiveUtc) &&
+              broadPoints.All(point => point.CapturedUtc >= Now.AddDays(-RiskHistoryContract.RetentionDays) &&
+                  point.CapturedUtc <= Now),
+            "The report exposed an expired or future capture or omitted points from the broader selected period.");
+    }
+
     private static void VerifyEvidence(SecurityReport report)
     {
         var domain = report.PeriodIncidents.Single(item => item.RuleId == "SA-FW-001");
@@ -272,11 +307,25 @@ internal static class ReportApiTests
             "Management summary", "Retained activity in the selected UTC period", "Current endpoint health and risk",
             "Critical/high incidents associated with the period", "Incidents resolved during the period",
             "Current major security posture findings", "Recommended priority actions", "SA-FW-001", "SA-LOGON-001",
-            "historical risk scores are not stored", "evaluated at report generation", "historical state"
+            "Current organization risk score (security prioritization)", "Retained organization risk measurements",
+            "Recorded at (UTC)", "Recorded score", "Raw score", "Policy version", "Policy fingerprint (SHA-256)",
+            "evaluated at report generation", "Missing intervals have no retained measurement."
         }) Check(html.Contains(text, StringComparison.Ordinal), "Report omitted required content or a material current/historical limitation: " + text);
         Check(!html.Contains("<script", StringComparison.OrdinalIgnoreCase) &&
               !html.Contains("https://", StringComparison.OrdinalIgnoreCase) && !html.Contains("http://", StringComparison.OrdinalIgnoreCase),
             "The offline report included executable code or an external resource dependency.");
+    }
+
+    private static void VerifyHistoryHtml(string html)
+    {
+        var first = html.IndexOf($"<tr><td>2026-09-01T00:00:00.0000000Z</td><td>5 / 100</td><td>4.625</td><td>{EarlierPolicy}</td><td>{EarlierFingerprint}</td></tr>",
+            StringComparison.Ordinal);
+        var last = html.IndexOf($"<tr><td>2026-09-30T23:59:59.9999999Z</td><td>100 / 100</td><td>109.625</td><td>risk-v11-&lt;img src=x onerror=alert(1)&gt;</td><td>{LaterFingerprint}</td></tr>",
+            StringComparison.Ordinal);
+        Check(first >= 0 && last > first, "The report lost ordered UTC measurements, raw precision, a recorded policy or safe HTML encoding.");
+        Check(!html.Contains(OutsidePeriodPolicy, StringComparison.Ordinal) && !html.Contains(HistoryOnlyRule, StringComparison.Ordinal) &&
+              !html.Contains(HistoryOnlyEndpoint, StringComparison.Ordinal) && !html.Contains(OutsidePeriodFingerprint, StringComparison.Ordinal),
+            "The report exported an out-of-period measurement or unrelated capture details.");
     }
 
     /// <summary>The report in Polish: the same data and safety, every fixed text translated, and English unchanged afterwards.</summary>
@@ -284,11 +333,14 @@ internal static class ReportApiTests
     {
         var polish = SecurityReportRenderer.Render(report, UiLanguage.Polish);
         foreach (var text in new[] { "<html lang=\"pl\">", "<title>Lokalny raport bezpieczeństwa SentinelAI</title>", "Podsumowanie dla kierownictwa",
-                     "Zalecane działania priorytetowe", "Bieżące deterministyczne zasady oceny", "najwyższy wynik komputera", "&lt;img" })
+                     "Zalecane działania priorytetowe", "Bieżące deterministyczne zasady oceny", "najwyższy wynik komputera", "&lt;img",
+                     "Bieżący wynik ryzyka organizacji", "Zachowane pomiary ryzyka organizacji", "Czas pomiaru (UTC)", "Zapisany wynik",
+                     "Wynik surowy", "Wersja zasad", "Odcisk zasad (SHA-256)", "Luki oznaczają okresy bez zachowanego pomiaru." })
             Check(polish.Contains(text, StringComparison.Ordinal), "The Polish report omitted: " + text);
         foreach (var text in new[] { "<html lang=\"en\">", "Management summary", "Recommended priority actions", "Recommended action:", "<img",
-                     SecurityReport.ChronologyCaution, SecurityReport.UnavailableTrend, report.OrganizationRisk.Explanation })
+                     SecurityReport.ChronologyCaution, "Retained organization risk measurements", report.OrganizationRisk.Explanation })
             Check(!polish.Contains(text, StringComparison.Ordinal), "The Polish report kept English or unsafe text: " + text);
+        VerifyHistoryHtml(polish);
         // Every fixed text a report can carry, from Core and from the rules, has a Polish translation.
         var texts = typeof(SecurityReport).GetFields(BindingFlags.Public | BindingFlags.Static)
             .Where(field => field.IsLiteral && field.FieldType == typeof(string)).Select(field => (string)field.GetRawConstantValue()!)
@@ -594,6 +646,45 @@ internal static class ReportApiTests
         await command.ExecuteNonQueryAsync();
     }
 
+    private static async Task SeedRiskHistoryAsync(string database)
+    {
+        await using var connection = Connection(database);
+        await connection.OpenAsync();
+        using var transaction = connection.BeginTransaction();
+        var captures = new ReportRiskMeasurement[]
+        {
+            new(Now.AddDays(-91), 1, 1m, OutsidePeriodPolicy, OutsidePeriodFingerprint),
+            new(September.StartUtc.AddTicks(-1), 1, 1m, OutsidePeriodPolicy, OutsidePeriodFingerprint),
+            new(September.StartUtc, 5, 4.625m, EarlierPolicy, EarlierFingerprint),
+            new(September.EndExclusiveUtc.AddTicks(-1), 100, 109.625m, LaterPolicy, LaterFingerprint),
+            new(September.EndExclusiveUtc, 1, 1m, OutsidePeriodPolicy, OutsidePeriodFingerprint),
+            new(Now.AddHours(RiskHistoryContract.CaptureIntervalHours), 1, 1m, OutsidePeriodPolicy, OutsidePeriodFingerprint)
+        };
+        foreach (var capture in captures)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT OR IGNORE INTO RiskHistoryPolicies (Fingerprint, Version, CanonicalJson)
+                VALUES ($fingerprint, $version, '{}');
+                INSERT INTO RiskHistoryCaptures (Bucket, CapturedUtcTicks, Score, RawScore, PolicyFingerprint,
+                    ComparedWithUtcTicks, CausesJson, PrincipalRuleIdsJson, EndpointCount, GoverningEndpointId, FleetFingerprint)
+                VALUES ($bucket, $ticks, $score, $raw, $fingerprint, NULL, '["firstCapture"]', $rules, 1, $endpoint, $fleet);
+                """;
+            command.Parameters.AddWithValue("$bucket", capture.CapturedUtc.UtcTicks / TimeSpan.FromHours(RiskHistoryContract.CaptureIntervalHours).Ticks);
+            command.Parameters.AddWithValue("$ticks", capture.CapturedUtc.UtcTicks);
+            command.Parameters.AddWithValue("$score", capture.Score);
+            command.Parameters.AddWithValue("$raw", capture.RawScore.ToString(CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$fingerprint", capture.PolicyFingerprint);
+            command.Parameters.AddWithValue("$version", capture.PolicyVersion);
+            command.Parameters.AddWithValue("$rules", JsonSerializer.Serialize(new[] { HistoryOnlyRule }));
+            command.Parameters.AddWithValue("$endpoint", HistoryOnlyEndpoint);
+            command.Parameters.AddWithValue("$fleet", OutsidePeriodFingerprint);
+            await command.ExecuteNonQueryAsync();
+        }
+        transaction.Commit();
+    }
+
     private static async Task VerifyCapacityAsync(WebApplication app, HttpClient client, string token)
     {
         await using var connection = Connection(app.Services.GetRequiredService<AdminStore>().DatabasePath);
@@ -639,29 +730,39 @@ internal static class ReportApiTests
             "Report silently truncated or attempted unlimited work above the tracked-alert capacity.");
     }
 
-    private static async Task VerifyRemoteHttpAsync(string directory, string username, string password, OfflineGateway gateway)
+    private static async Task VerifyRemoteReportsAsync(HttpClient client, string token, SecurityReport report)
     {
-        await using var app = Build(directory, gateway);
-        app.Use(async (context, next) =>
-        {
-            context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.13");
-            await next(context);
-        });
-        using var client = await StartAsync(app);
-        var token = await LoginAsync(client, username, password);
-        using var response = await SendAsync(client, PeriodPath, "Bearer", token);
-        Check(response.StatusCode == HttpStatusCode.Forbidden, "Core exposed a security report over remote cleartext HTTP.");
-        await app.StopAsync();
+        using var cleartext = await SendAsync(client, PeriodPath, "Bearer", token, remoteScheme: "http");
+        Check(cleartext.StatusCode == HttpStatusCode.Forbidden, "Core exposed a security report over remote cleartext HTTP.");
+
+        using var secure = await SendAsync(client, PeriodPath, "Bearer", token, remoteScheme: "https");
+        Check(secure.StatusCode == HttpStatusCode.OK && secure.Headers.CacheControl?.NoStore == true &&
+              secure.Content.Headers.ContentDisposition?.DispositionType == "attachment",
+            "The administrator could not download a no-store report over remote HTTPS.");
+        var html = await secure.Content.ReadAsStringAsync();
+        Check(html == SecurityReportRenderer.Render(report with { OrganizationRiskHistory = null }) &&
+              !html.Contains("Retained organization risk measurements", StringComparison.Ordinal) &&
+              !html.Contains(EarlierFingerprint, StringComparison.Ordinal) && !html.Contains(LaterFingerprint, StringComparison.Ordinal),
+            "A remote HTTPS report included loopback-only risk history or changed the current report.");
     }
 
     private static WebApplication Build(string directory, OfflineGateway gateway) => CoreHost.Build(
-        [$"--SentinelAI:DataDirectory={directory}"], builder =>
+        [$"--SentinelAI:DataDirectory={directory}"], false, builder =>
         {
             builder.Logging.ClearProviders();
             builder.Services.AddSingleton<TimeProvider>(new FixedTime());
             builder.Services.AddSingleton<IAiGatewayClient>(gateway);
             builder.Services.AddSingleton<ILicenseLeaseClient>(new OfflineLicenseClient());
-        });
+        }, configureBeforeAuthentication: application => application.Use((context, next) =>
+        {
+            var scheme = context.Request.Headers[SyntheticRemoteSchemeHeader].ToString();
+            if (scheme is "http" or "https")
+            {
+                context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.13");
+                context.Request.Scheme = scheme;
+            }
+            return next(context);
+        }));
 
     private static async Task<HttpClient> StartAsync(WebApplication app)
     {
@@ -702,10 +803,12 @@ internal static class ReportApiTests
         Check(response.StatusCode == HttpStatusCode.NoContent, "The synthetic report inventory was rejected.");
     }
 
-    private static async Task<HttpResponseMessage> SendAsync(HttpClient client, string path, string scheme, string token)
+    private static async Task<HttpResponseMessage> SendAsync(HttpClient client, string path, string scheme, string token,
+        string? remoteScheme = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Authorization = new AuthenticationHeaderValue(scheme, token);
+        if (remoteScheme is not null) request.Headers.Add(SyntheticRemoteSchemeHeader, remoteScheme);
         return await client.SendAsync(request);
     }
 

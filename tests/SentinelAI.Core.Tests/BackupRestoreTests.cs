@@ -5,12 +5,14 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SentinelAI.Backup;
 using SentinelAI.Contracts.Backups;
 using SentinelAI.Contracts.Enrollment;
 using SentinelAI.Core;
 using SentinelAI.Core.Backups;
+using SentinelAI.Core.History;
 using SentinelAI.Core.Persistence;
 using SentinelAI.Core.Recovery;
 
@@ -32,7 +34,7 @@ internal static class BackupRestoreTests
         {
             Environment.SetEnvironmentVariable("SENTINELAI_BOOTSTRAP_USERNAME", "synthetic-recovery-admin");
             Environment.SetEnvironmentVariable("SENTINELAI_BOOTSTRAP_PASSWORD", Password);
-            var source = await CreateDatabaseAsync(Path.Combine(root, "source"), endpoints: 2);
+            var source = await CreateDatabaseAsync(Path.Combine(root, "source"), endpoints: 2, captureHistory: true);
             var snapshot = Path.Combine(root, "snapshot.db");
             File.Copy(source.Database, snapshot); Private(snapshot);
             var archive = await CreateArchiveAsync(root, "point", snapshot, key);
@@ -40,6 +42,7 @@ internal static class BackupRestoreTests
             await File.WriteAllBytesAsync(keyFile, RecoveryKeyFile.Create(key, Password)); Private(keyFile);
             await VerifyProtocolAsync();
             await VerifyRestoreRollbackAndCommitAsync(root, snapshot, archive, keyFile, key, source);
+            await VerifyLegacyHistoryArchiveAsync(root, snapshot, keyFile, key, source.Identity);
             foreach (var phase in new[] { "capturing", "captured", "prepared", "databaseReplaced", "applied" })
                 await VerifyInterruptedAsync(root, snapshot, archive, keyFile, key, phase);
             await VerifyTerminalCleanupAsync(root, snapshot, archive, keyFile, key);
@@ -104,6 +107,10 @@ internal static class BackupRestoreTests
         Check(restored.Outcome == "restored" && restored.PendingArchiveId == archive.Id, "Confirmed restore did not leave a recoverable pending transaction.");
         Check(await CountAsync(data, "Administrators") == 1 && await ScalarAsync(data, "SELECT Enabled FROM BackupSettings WHERE Singleton=1;") == 0,
             "Restore did not restore business data and disable its schedule.");
+        Check(await CountAsync(data, "RiskHistoryCaptures") == 1 && await CountAsync(data, "RiskHistoryEndpointPoints") == 2 &&
+              await ScalarAsync(data, "SELECT CapturedUtcTicks FROM RiskHistoryCaptures;") ==
+              await ScalarAsync(snapshot, "SELECT CapturedUtcTicks FROM RiskHistoryCaptures;"),
+            "Restore did not preserve the actual capture in the archive.");
         Check(await ScalarAsync(data, "SELECT HighWaterUtcTicks FROM LicenseState WHERE Singleton=1;") >= future &&
               await ScalarAsync(data, "SELECT ClockRollbackDetected FROM LicenseState WHERE Singleton=1;") == 1,
             "Restore erased the license clock floor or an already detected rollback.");
@@ -326,10 +333,43 @@ internal static class BackupRestoreTests
 
     private sealed record Fixture(string Database, CoreIdentity Identity, IReadOnlyList<EnrollmentResponse> Endpoints);
     private sealed record Archive(Guid Id, string Path);
-    private static async Task<Fixture> CreateDatabaseAsync(string data, int endpoints)
+    private static async Task VerifyLegacyHistoryArchiveAsync(string root, string snapshot, string keyFile,
+        byte[] key, CoreIdentity identity)
+    {
+        var legacy = Path.Combine(root, "before-risk-history.db");
+        File.Copy(snapshot, legacy); Private(legacy);
+        await SqlAsync(legacy, """
+            DROP TABLE RiskHistoryBaselines;
+            DROP TABLE RiskHistoryEndpointPoints;
+            DROP TABLE RiskHistoryCaptures;
+            DROP TABLE RiskHistoryPolicies;
+            """);
+        var archive = await CreateArchiveAsync(root, "before-risk-history", legacy, key);
+        var data = Clone(root, "legacy-history-recovery", snapshot, identity, key);
+        var directory = Path.GetDirectoryName(data)!;
+        var environment = new BackupRestoreEnvironment(directory, () => RecoveryServiceState.Stopped, new TestProtection());
+        var request = Preview(archive, keyFile);
+        var preview = await BackupRestoreCommand.ExecuteAsync(request, environment);
+        Check(preview is { Outcome: "verified", Preview: not null }, "An archive without risk history tables was rejected.");
+        var restored = await BackupRestoreCommand.ExecuteAsync(Apply(request, preview.Preview!), environment);
+        Check(restored.Outcome == "restored", "An archive without risk history tables could not be applied.");
+        await using var app = CoreHost.Build(["--SentinelAI:DataDirectory=" + directory]);
+        await app.Services.GetRequiredService<RiskHistoryStore>().InitializeAsync(default);
+        Check(await CountAsync(data, "RiskHistoryCaptures") == 0 && await CountAsync(data, "RiskHistoryEndpointPoints") == 0,
+            "Initializing history after restoring a legacy archive invented past measurements.");
+    }
+
+    private static async Task<Fixture> CreateDatabaseAsync(string data, int endpoints, bool captureHistory = false)
     {
         await using var app = CoreHost.Build(["--SentinelAI:DataDirectory=" + data],
-            configureBuilder: builder => { builder.Logging.ClearProviders(); builder.Services.AddSingleton<IBackupKeyProtection>(new TestProtection()); });
+            configureBuilder: builder =>
+            {
+                builder.Logging.ClearProviders();
+                builder.Services.AddSingleton<IBackupKeyProtection>(new TestProtection());
+                if (captureHistory)
+                    builder.Services.Remove(builder.Services.Single(service => service.ServiceType == typeof(IHostedService) &&
+                        service.ImplementationType == typeof(RiskHistoryWorker)));
+            });
         app.Urls.Clear(); app.Urls.Add("http://127.0.0.1:0"); await app.StartAsync();
         var enrollments = app.Services.GetRequiredService<EnrollmentStore>(); var found = new List<EnrollmentResponse>();
         for (var index = 0; index < endpoints; index++)
@@ -339,6 +379,8 @@ internal static class BackupRestoreTests
             var item = result.Response ?? throw new InvalidOperationException("Synthetic enrollment failed."); found.Add(item);
             await app.Services.GetRequiredService<DeviceStore>().RecordEnrolledHeartbeatAsync(item.InstallationId);
         }
+        if (captureHistory)
+            Check(await app.Services.GetRequiredService<RiskHistoryStore>().CaptureAsync(), "The archived fixture did not record a fleet sample.");
         _ = await enrollments.IssueTokenAsync();
         var identity = await enrollments.GetCoreIdentityAsync(); await app.StopAsync();
         var database = app.Services.GetRequiredService<AdminStore>().DatabasePath;

@@ -61,14 +61,13 @@ public static class SecurityReportRenderer
 
             Heading(T("Management summary"));
             _html.Append("<dl>");
-            Definition(T("Organization risk score (security prioritization)"), $"{Number(report.OrganizationRisk.Score)} / 100");
+            Definition(T("Current organization risk score (security prioritization)"), $"{Number(report.OrganizationRisk.Score)} / 100");
             Definition(T("Score method"), T(report.OrganizationRisk.Method));
             Definition(T("Enrolled endpoints in current snapshot"), Number(report.OrganizationRisk.EndpointCount));
             Definition(T("Endpoints tied at highest current risk"), Number(report.OrganizationRisk.HighestRiskEndpointCount));
             Definition(T("Retained alerts associated with selected period"), Number(report.Activity.AssociatedAlertCount));
             Definition(T("New retained alerts first observed during period"), Number(report.Activity.NewAlertCount));
             Definition(T("Distinct alerts with a resolved transition during period"), Number(report.Activity.ResolvedAlertCount));
-            Definition(T("Score trend"), T(SecurityReport.UnavailableTrend));
             _html.Append("</dl>");
             Paragraph(T(report.OrganizationRisk.Explanation));
             Paragraph(T("Higher scores prioritize recorded security findings. A zero score does not establish endpoint safety. Unknown or stale observations can conceal risks. Accepted and Investigating do not reduce remaining risk; Resolved changes the current score contribution but does not itself remediate an endpoint."));
@@ -155,9 +154,28 @@ public static class SecurityReportRenderer
                 Row(Severity(severity), Number(report.Policy.SeverityPoints[severity]));
             EndTable();
             Paragraph(T("Risk uses current policy, severity, configured confidence weight, asset criticality, exposure, observation age and current status, plus bounded correlation of configuration findings confirmed by the latest inventory, of endpoint telemetry findings confirmed by the latest telemetry report and of fresh runtime event detections. Confidence is not statistical probability. Age discounts do not prove remediation. Endpoint raw points and incident contributions are shown before the final score cap; correlation is additional to individual alert contributions. The organization score is the highest endpoint score, not a fleet average. Decimal values and timestamps use invariant formatting and UTC."));
+            if (report.OrganizationRiskHistory is { } measurements) RiskHistory(measurements);
             Paragraph(T("The report contains selected endpoint identities, typed configuration evidence and bounded CVE, version and feed identifiers. Authentication credentials, tokens, signing material, status actors and arbitrary raw evidence are excluded."));
             _html.Append("</main></body></html>");
             return _html.ToString();
+        }
+
+        private void RiskHistory(IReadOnlyList<ReportRiskMeasurement> measurements)
+        {
+            Heading(T("Retained organization risk measurements"));
+            if (measurements.Count == 0)
+            {
+                Paragraph(T("No retained organization risk measurements for the selected UTC period."));
+                return;
+            }
+
+            Paragraph(T("Each row shows the highest displayed endpoint score and the highest raw endpoint score recorded across the fleet at that time. Missing intervals have no retained measurement."));
+            StartTable(T("Recorded at (UTC)"), T("Recorded score"), T("Raw score"), T("Policy version"),
+                T("Policy fingerprint (SHA-256)"));
+            foreach (var point in measurements)
+                Row(Utc(point.CapturedUtc), $"{Number(point.Score)} / 100", Number(point.RawScore),
+                    point.PolicyVersion, point.PolicyFingerprint);
+            EndTable();
         }
 
         private void IncidentSection(string title, IReadOnlyList<ReportIncident> incidents, string empty)
