@@ -36,9 +36,25 @@
         <TextBlock Text="{loc:T 'Software catalog'}" FontSize="26" FontWeight="SemiBold" Style="{StaticResource Wrapped}" Margin="0,0,0,12"
                    AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="{loc:T 'Software catalog'}" />
         <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}" AutomationProperties.AutomationId="SoftwareCatalogTabs"
-                    Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}">
-            <TabItem Header="{loc:T 'Reported applications'}" AutomationProperties.AutomationId="SoftwareApplicationsTab">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.AutomationId="SoftwareCatalogScroll">
+                    Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                    HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+            <TabControl.Template>
+                <ControlTemplate TargetType="TabControl">
+                    <Grid ClipToBounds="True" KeyboardNavigation.TabNavigation="Local">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <TabPanel IsItemsHost="True" Margin="2,2,2,0" Panel.ZIndex="1" KeyboardNavigation.TabIndex="0" />
+                        <Border Grid.Row="1" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" KeyboardNavigation.TabIndex="1">
+                            <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"
+                                              HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </TabControl.Template>
+            <TabItem Header="{loc:T 'Reported applications'}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                     AutomationProperties.AutomationId="SoftwareApplicationsTab">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False"
+                              AutomationProperties.AutomationId="SoftwareCatalogScroll">
                     <StackPanel Margin="10,8,8,12">
                         <TextBlock Text="{loc:T 'Catalog counts come from reported machine-wide Windows applications.'}" Style="{StaticResource Hint}" />
                         <TextBlock Text="{Binding CoverageText}" Style="{StaticResource Wrapped}" Margin="0,0,0,8" AutomationProperties.AutomationId="SoftwareCoverage" />
@@ -120,8 +136,10 @@
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
-            <TabItem Header="{loc:T 'Software changes'}" AutomationProperties.AutomationId="SoftwareChangesTab">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.AutomationId="SoftwareChangesScroll">
+            <TabItem Header="{loc:T 'Software changes'}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                     AutomationProperties.AutomationId="SoftwareChangesTab">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False"
+                              AutomationProperties.AutomationId="SoftwareChangesScroll">
                     <StackPanel Margin="10,8,8,12">
                         <TextBlock Text="{Binding ChangesScopeText}" Style="{StaticResource Section}" AutomationProperties.AutomationId="SoftwareChangesScope" />
                         <TextBlock Text="{loc:T 'Changes compare complete reports. The times show when each report was collected.'}" Style="{StaticResource Hint}" />

@@ -161,7 +161,7 @@
 
 - [EXPANDED-06](tasks/EXPANDED-06-software-catalog.md) starts from merged risk history (`3f66a06`). The catalog projects already collected machine-wide software observations and records bounded version and architecture changes between consecutive complete reports. Older databases seed the catalog from stored telemetry in the background.
 - Native Desktop provides Polish and English fleet search, per-product versions and endpoints, coverage counters and a paged change feed. Local administrator routes deny the Agent network listener. See the [software catalog guide](../docs/SOFTWARE-CATALOG.md) and the [Polish pilot guide](../docs/pilot/KATALOG-OPROGRAMOWANIA.pl.md).
-- The focused Core integration suite passed with real HTTP ingestion, both legacy migration paths, retirement and the 25,000-row cap. The Agent suite passed with 82 telemetry checks, and 37 focused Desktop assertions passed. The native Windows test project cross-built with zero warnings or errors.
+- The full local regression passed on `97108be`, including 82 Agent telemetry checks and 37 Desktop catalog assertions. The focused Core integration suite passed with real HTTP ingestion, both legacy migration paths, retirement and the 25,000-row cap. The first native CI runs found the catalog tab viewport issue at 640 × 480. The adjusted layout reserves bounded scroll space for each tab. Its native test project cross-built with zero warnings or errors.
 
 ## 2026-11-25 — Expanded pilot 05: risk history and trends (merged)
 

@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 using SentinelAI.Contracts.SoftwareCatalog;
 using SentinelAI.Desktop;
 using SentinelAI.Desktop.Foundation;
@@ -52,8 +53,7 @@ internal static partial class Program
             Ensure(heading.IsVisible && heading.Text == title && page.Title == title && UIElementAutomationPeer.CreatePeerForElement(heading)?.GetName() == title,
                 "The software catalog did not expose its localized navigation and heading.");
             var scroll = SoftwareControl<ScrollViewer>(view, "SoftwareCatalogScroll");
-            Ensure(scroll.ViewportWidth > 0 && scroll.ViewportHeight > 0 && scroll.ScrollableHeight > 0 && scroll.ScrollableWidth == 0,
-                "The software catalog did not fit or scroll at 640×480.");
+            AssertSoftwareViewport(window, scroll, language);
             var next = SoftwareControl<Button>(view, "SoftwareNextProducts");
             next.BringIntoView();
             await FlushAsync();
@@ -101,6 +101,7 @@ internal static partial class Program
             var tabs = SoftwareControl<TabControl>(view, "SoftwareCatalogTabs");
             Ensure(tabs.SelectedIndex == 1 && Equals(((TabItem)tabs.SelectedItem).Header,
                 language == UiLanguage.Polish ? "Zmiany oprogramowania" : "Software changes"), "The changes tab lacked its localized heading.");
+            AssertSoftwareViewport(window, SoftwareControl<ScrollViewer>(view, "SoftwareChangesScroll"), language);
             SoftwareControl<Button>(view, "SoftwareShowFleetChanges").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitForAsync(() => client.LastProduct is null && model.Changes.Count == 1 && model.Changes[0].Application.Contains("Retired synthetic app", StringComparison.Ordinal),
                 "The native history could not return to fleet scope and show the retired application.");
@@ -132,6 +133,17 @@ internal static partial class Program
 
     private static T SoftwareControl<T>(DependencyObject view, string id) where T : FrameworkElement => Descendants<T>(view)
         .Single(control => AutomationProperties.GetAutomationId(control) == id);
+
+    private static void AssertSoftwareViewport(Window window, ScrollViewer scroll, UiLanguage language)
+    {
+        var viewport = new Size(scroll.ViewportWidth, scroll.ViewportHeight);
+        var extent = new Size(scroll.ExtentWidth, scroll.ExtentHeight);
+        var id = AutomationProperties.GetAutomationId(scroll);
+        var dpi = VisualTreeHelper.GetDpi(scroll).PixelsPerInchX;
+        Ensure(viewport.Width > 0 && viewport.Height > 0 && scroll.ScrollableHeight > 0 && scroll.ScrollableWidth == 0,
+            $"{id} did not fit or scroll at 640×480 ({language}, {dpi} DPI). Render={scroll.RenderSize}, viewport={viewport}, extent={extent}, scrollable={scroll.ScrollableWidth}×{scroll.ScrollableHeight}.");
+        AssertInsideWindow(window, scroll);
+    }
 
     private sealed class NativeSoftwareCatalogClient : ISoftwareCatalogClient
     {
