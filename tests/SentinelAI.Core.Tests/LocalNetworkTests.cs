@@ -282,7 +282,9 @@ internal static partial class LocalNetworkTests
                      (HttpMethod.Get, "/assets/app.js", false), (HttpMethod.Post, "/api/auth/login", false),
                      (HttpMethod.Get, "/api/admin/me", true), (HttpMethod.Get, "/api/admin/devices", true),
                      (HttpMethod.Get, "/api/admin/local-network", true), (HttpMethod.Post, "/api/admin/enrollment-tokens", true),
-                     (HttpMethod.Get, "/api/admin/license", true), (HttpMethod.Get, "/api/agent/heartbeat", false)
+                     (HttpMethod.Get, "/api/admin/license", true), (HttpMethod.Get, "/api/admin/software-catalog", true),
+                     (HttpMethod.Get, "/api/admin/software-catalog/changes", true),
+                     (HttpMethod.Get, "/api/agent/heartbeat", false)
                  })
         {
             using var request = new HttpRequestMessage(method, path);

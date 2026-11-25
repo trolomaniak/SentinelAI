@@ -1,0 +1,166 @@
+<UserControl x:Class="SentinelAI.Desktop.Views.SoftwareCatalogView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:SentinelAI.Desktop.Localization"
+             xmlns:contracts="clr-namespace:SentinelAI.Contracts.SoftwareCatalog;assembly=SentinelAI.Contracts"
+             AutomationProperties.AutomationId="SoftwareCatalogView">
+    <UserControl.Resources>
+        <Style x:Key="Wrapped" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock" BasedOn="{StaticResource Wrapped}">
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+            <Setter Property="Margin" Value="0,4,0,6" />
+        </Style>
+        <Style x:Key="Section" TargetType="TextBlock" BasedOn="{StaticResource Wrapped}">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,12,0,4" />
+        </Style>
+        <Style x:Key="Controls" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Margin" Value="0,0,8,8" />
+        </Style>
+        <Style x:Key="Rows" TargetType="ListBox">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+            <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+        </Style>
+        <BooleanToVisibilityConverter x:Key="VisibleWhenTrue" />
+    </UserControl.Resources>
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <TextBlock Text="{loc:T 'Software catalog'}" FontSize="26" FontWeight="SemiBold" Style="{StaticResource Wrapped}" Margin="0,0,0,12"
+                   AutomationProperties.AutomationId="PageHeading" AutomationProperties.Name="{loc:T 'Software catalog'}" />
+        <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}" AutomationProperties.AutomationId="SoftwareCatalogTabs"
+                    Background="{DynamicResource WindowBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}">
+            <TabItem Header="{loc:T 'Reported applications'}" AutomationProperties.AutomationId="SoftwareApplicationsTab">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.AutomationId="SoftwareCatalogScroll">
+                    <StackPanel Margin="10,8,8,12">
+                        <TextBlock Text="{loc:T 'Catalog counts come from reported machine-wide Windows applications.'}" Style="{StaticResource Hint}" />
+                        <TextBlock Text="{Binding CoverageText}" Style="{StaticResource Wrapped}" Margin="0,0,0,8" AutomationProperties.AutomationId="SoftwareCoverage" />
+                        <Label Content="{loc:T 'Application name or publisher'}" Target="{Binding ElementName=SoftwareSearch}" Padding="0,2,0,4" />
+                        <TextBox x:Name="SoftwareSearch" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"
+                                 KeyDown="OnSearchKeyDown" MaxLength="{x:Static contracts:SoftwareCatalogContract.MaximumQueryLength}"
+                                 AutomationProperties.AutomationId="SoftwareSearch" AutomationProperties.Name="{loc:T 'Application name or publisher'}" />
+                        <WrapPanel>
+                            <Button Content="{loc:T 'Search'}" Click="OnSearch" Style="{StaticResource Controls}" AutomationProperties.AutomationId="SoftwareSearchButton" />
+                            <Button Content="{loc:T 'Clear search'}" Click="OnClearSearch" Style="{StaticResource Controls}" AutomationProperties.AutomationId="SoftwareClearSearch" />
+                            <Button Content="{loc:T 'Refresh'}" Click="OnRefreshProducts" Style="{StaticResource Controls}"
+                                    IsEnabled="{Binding CanRefreshProducts}" AutomationProperties.AutomationId="SoftwareRefreshProducts" />
+                        </WrapPanel>
+                        <TextBlock Text="{Binding ProductsStatus}" Style="{StaticResource Hint}" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="SoftwareProductsStatus" />
+                        <TextBlock Text="{Binding ProductsPageText}" Style="{StaticResource Wrapped}" Margin="0,0,0,6" />
+                        <WrapPanel>
+                            <Button Content="{loc:T 'Previous'}" Click="OnPreviousProducts" Style="{StaticResource Controls}" IsEnabled="{Binding CanPreviousProducts}"
+                                    AutomationProperties.Name="{loc:T 'Previous applications page'}" AutomationProperties.AutomationId="SoftwarePreviousProducts" />
+                            <Button Content="{loc:T 'Next'}" Click="OnNextProducts" Style="{StaticResource Controls}" IsEnabled="{Binding CanNextProducts}"
+                                    AutomationProperties.Name="{loc:T 'Next applications page'}" AutomationProperties.AutomationId="SoftwareNextProducts" />
+                        </WrapPanel>
+                        <ListBox ItemsSource="{Binding Products}" SelectedItem="{Binding SelectedProduct, Mode=OneWay}" SelectionChanged="OnProductSelected"
+                                 Height="168" Style="{StaticResource Rows}" AutomationProperties.Name="{loc:T 'Reported applications'}" AutomationProperties.AutomationId="SoftwareProducts">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="AutomationProperties.Name" Value="{Binding Product.Name}" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="3,4">
+                                        <TextBlock Text="{Binding Product.Name}" FontWeight="SemiBold" Style="{StaticResource Wrapped}" />
+                                        <TextBlock Text="{Binding Publisher}" Style="{StaticResource Wrapped}" />
+                                        <TextBlock Text="{Binding Counts}" Style="{StaticResource Wrapped}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock Text="{loc:T 'Select an application to see the reporting computers.'}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource Hint}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding HasSelection}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <StackPanel Visibility="{Binding HasSelection, Converter={StaticResource VisibleWhenTrue}}">
+                            <TextBlock Text="{Binding SelectedProduct.Product.Name}" Style="{StaticResource Section}" AutomationProperties.AutomationId="SoftwareSelectedProduct" />
+                            <WrapPanel Margin="0,4,0,0">
+                                <Button Content="{loc:T 'Show application history'}" Click="OnShowProductChanges" Style="{StaticResource Controls}" AutomationProperties.AutomationId="SoftwareShowProductChanges" />
+                                <Button Content="{loc:T 'Refresh versions'}" Click="OnRefreshInstallations" Style="{StaticResource Controls}"
+                                        IsEnabled="{Binding CanRefreshInstallations}" AutomationProperties.AutomationId="SoftwareRefreshInstallations" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding InstallationsStatus}" Style="{StaticResource Hint}" AutomationProperties.LiveSetting="Polite" />
+                            <TextBlock Text="{Binding InstallationsPageText}" Style="{StaticResource Wrapped}" Margin="0,0,0,6" />
+                            <WrapPanel>
+                                <Button Content="{loc:T 'Previous'}" Click="OnPreviousInstallations" Style="{StaticResource Controls}" IsEnabled="{Binding CanPreviousInstallations}"
+                                        AutomationProperties.Name="{loc:T 'Previous reported versions page'}" AutomationProperties.AutomationId="SoftwarePreviousInstallations" />
+                                <Button Content="{loc:T 'Next'}" Click="OnNextInstallations" Style="{StaticResource Controls}" IsEnabled="{Binding CanNextInstallations}"
+                                        AutomationProperties.Name="{loc:T 'Next reported versions page'}" AutomationProperties.AutomationId="SoftwareNextInstallations" />
+                            </WrapPanel>
+                            <ListBox ItemsSource="{Binding Installations}" Height="168" Style="{StaticResource Rows}"
+                                     AutomationProperties.Name="{loc:T 'Reported versions by computer'}" AutomationProperties.AutomationId="SoftwareInstallations">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="AutomationProperties.Name" Value="{Binding Computer}" />
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="3,4">
+                                            <TextBlock Text="{Binding Computer}" FontWeight="SemiBold" Style="{StaticResource Wrapped}" />
+                                            <TextBlock Text="{Binding Version}" Style="{StaticResource Wrapped}" />
+                                            <TextBlock Text="{Binding Observation}" Style="{StaticResource Wrapped}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="{loc:T 'Software changes'}" AutomationProperties.AutomationId="SoftwareChangesTab">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.AutomationId="SoftwareChangesScroll">
+                    <StackPanel Margin="10,8,8,12">
+                        <TextBlock Text="{Binding ChangesScopeText}" Style="{StaticResource Section}" AutomationProperties.AutomationId="SoftwareChangesScope" />
+                        <TextBlock Text="{loc:T 'Changes compare complete reports. The times show when each report was collected.'}" Style="{StaticResource Hint}" />
+                        <WrapPanel>
+                            <Button Content="{loc:T 'Show all changes'}" Click="OnShowFleetChanges" Style="{StaticResource Controls}"
+                                    IsEnabled="{Binding CanShowFleetChanges}" AutomationProperties.AutomationId="SoftwareShowFleetChanges" />
+                            <Button Content="{loc:T 'Refresh changes'}" Click="OnRefreshChanges" Style="{StaticResource Controls}"
+                                    IsEnabled="{Binding CanRefreshChanges}" AutomationProperties.AutomationId="SoftwareRefreshChanges" />
+                        </WrapPanel>
+                        <TextBlock Text="{Binding ChangesStatus}" Style="{StaticResource Hint}" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="SoftwareChangesStatus" />
+                        <TextBlock Text="{Binding ChangesPageText}" Style="{StaticResource Wrapped}" Margin="0,0,0,6" />
+                        <WrapPanel>
+                            <Button Content="{loc:T 'Previous'}" Click="OnPreviousChanges" Style="{StaticResource Controls}" IsEnabled="{Binding CanPreviousChanges}"
+                                    AutomationProperties.Name="{loc:T 'Previous software changes page'}" AutomationProperties.AutomationId="SoftwarePreviousChanges" />
+                            <Button Content="{loc:T 'Next'}" Click="OnNextChanges" Style="{StaticResource Controls}" IsEnabled="{Binding CanNextChanges}"
+                                    AutomationProperties.Name="{loc:T 'Next software changes page'}" AutomationProperties.AutomationId="SoftwareNextChanges" />
+                        </WrapPanel>
+                        <ListBox ItemsSource="{Binding Changes}" Height="220" Style="{StaticResource Rows}" AutomationProperties.Name="{loc:T 'Software changes'}"
+                                 AutomationProperties.AutomationId="SoftwareChanges">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="AutomationProperties.Name" Value="{Binding Application}" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="3,4">
+                                        <TextBlock Text="{Binding Application}" FontWeight="SemiBold" Style="{StaticResource Wrapped}" />
+                                        <TextBlock Text="{Binding Observation}" Style="{StaticResource Wrapped}" />
+                                        <TextBlock Text="{Binding Times}" Style="{StaticResource Wrapped}" />
+                                        <TextBlock Text="{Binding Before}" Style="{StaticResource Wrapped}" />
+                                        <TextBlock Text="{Binding After}" Style="{StaticResource Wrapped}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</UserControl>

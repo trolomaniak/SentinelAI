@@ -194,6 +194,7 @@ internal static partial class Program
         await BackupViewsAsync();
         await NotificationsViewsAsync();
         await MonitoringCoverageViewsAsync();
+        await SoftwareCatalogViewsAsync();
         await OperationsOverviewViewsAsync();
         await RiskRegisterViewsAsync();
         await PolishViewsAsync();

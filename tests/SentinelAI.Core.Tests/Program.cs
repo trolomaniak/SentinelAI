@@ -192,6 +192,7 @@ try
     await NotificationTransportTests.RunAsync();
     await NotificationApiTests.VerifyAsync(username, password);
     await EndpointTelemetryApiTests.VerifyAsync(username, password);
+    await SoftwareCatalogApiTests.VerifyAsync(username, password);
     await AgentUpdateApiTests.VerifyAsync();
     await CentralUpdateTests.VerifyAsync();
     await VulnerabilityApiTests.VerifyAsync(username, password);

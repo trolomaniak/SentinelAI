@@ -105,6 +105,7 @@ public static class CoreHost
         builder.Services.AddSingleton<DefenderDetectionReadStore>();
         builder.Services.AddSingleton<MonitoringCoverageReadStore>();
         builder.Services.AddSingleton<OperationsOverviewReadStore>();
+        builder.Services.AddSingleton<SoftwareCatalogReadStore>();
         builder.Services.AddSingleton<AlertStore>();
         builder.Services.AddSingleton<INotificationCredentialProtection, WindowsNotificationCredentialProtection>();
         builder.Services.AddSingleton<NotificationStore>();
@@ -154,6 +155,7 @@ public static class CoreHost
             new AiGatewayClient(services.GetRequiredService<AiOptions>()));
         builder.Services.AddSingleton<AiExplanationService>();
         builder.Services.AddHostedService<AdminInitializationService>();
+        builder.Services.AddHostedService<SoftwareInventoryBackfillWorker>();
         builder.Services.AddHostedService<RiskHistoryWorker>();
         builder.Services.AddHostedService<NotificationWorker>();
         builder.Services.AddHostedService(services => services.GetRequiredService<BackupService>());
@@ -281,7 +283,8 @@ public static class CoreHost
             if (context.Request.Path.StartsWithSegments("/api/admin/notifications") ||
                 context.Request.Path.StartsWithSegments(MonitoringCoverageEndpoints.Route) ||
                 context.Request.Path.StartsWithSegments(OperationsOverviewEndpoints.Route) ||
-                context.Request.Path.StartsWithSegments(RiskHistoryEndpoints.Route))
+                context.Request.Path.StartsWithSegments(RiskHistoryEndpoints.Route) ||
+                context.Request.Path.StartsWithSegments(SoftwareCatalogEndpoints.Route))
             {
                 context.Response.Headers.CacheControl = "no-store";
                 if (!NotificationEndpoints.IsLocal(context))
@@ -316,6 +319,7 @@ public static class CoreHost
         app.MapMonitoringCoverageEndpoints();
         app.MapOperationsOverviewEndpoints();
         app.MapRiskHistoryEndpoints();
+        app.MapSoftwareCatalogEndpoints();
 
         app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
             .AllowAnonymous();

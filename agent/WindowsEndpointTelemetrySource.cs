@@ -237,13 +237,16 @@ public sealed class WindowsEndpointTelemetrySource : IEndpointTelemetrySource
                 continue;
             }
 
-            foreach (var name in uninstall.GetSubKeyNames().Take(MaximumUninstallKeysPerView))
+            var names = uninstall.GetSubKeyNames();
+            unreadable += Math.Clamp(names.Length - MaximumUninstallKeysPerView, 0, EndpointTelemetryContract.MaxSoftwareTotal);
+            foreach (var name in names.Take(MaximumUninstallKeysPerView))
             {
                 try
                 {
                     using var entry = uninstall.OpenSubKey(name);
                     if (entry is null)
                     {
+                        unreadable++;
                         continue;
                     }
 
