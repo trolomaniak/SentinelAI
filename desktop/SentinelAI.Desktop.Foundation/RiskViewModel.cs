@@ -11,7 +11,7 @@ public enum RiskDetailState { None, Loading, Ready, NotFound, Unavailable }
 /// all calculations and explanation factors. UI calls retain their synchronization context;
 /// the authentication owner calls Clear on sign-out and owns the shared client lifetime.
 /// </summary>
-public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
+public sealed partial class RiskViewModel : INotifyPropertyChanged, IDisposable
 {
     public const int PageSize = 50;
     private readonly object _gate = new();
@@ -34,10 +34,11 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
     private Pending? _detailPending;
     private bool _disposed;
 
-    public RiskViewModel(IRiskClient client)
+    public RiskViewModel(IRiskClient client, IRiskHistoryClient? historyClient = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         _client = client;
+        _historyClient = historyClient;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -78,7 +79,7 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public Task RefreshAsync() => BeginListLoad(0);
+    public Task RefreshAsync() => BeginListLoad(0, refreshHistory: true);
     public Task NextPageAsync()
     {
         lock (_gate) return CanNextPage ? BeginListLoad(_offset + PageSize) : Task.CompletedTask;
@@ -87,12 +88,19 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
     {
         lock (_gate) return CanPreviousPage ? BeginListLoad(_offset - PageSize) : Task.CompletedTask;
     }
-    private Task BeginListLoad(int offset)
+    private Task BeginListLoad(int offset, bool refreshHistory = false)
     {
         lock (_gate)
         {
             if (_disposed) return Task.CompletedTask;
-            if (_listPending is not null) return _listPending.Task;
+            var activateHistory = refreshHistory && !_historyActive && _historyClient is not null;
+            if (activateHistory) _historyActive = true;
+            if (_listPending is { } activeList)
+            {
+                if (activateHistory) BeginHistoryLoadLocked();
+                return activeList.Task;
+            }
+            var wasShowingDetail = _detailState != RiskDetailState.None;
             CloseDetailLocked();
             var pending = new Pending(++_listGeneration);
             _listPending = pending;
@@ -102,8 +110,10 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
             _listState = RiskListState.Loading;
             _listStatusText = T("Loading the current Core risk evaluation…");
             _errorText = string.Empty;
+            if (refreshHistory || wasShowingDetail) BeginHistoryLoadLocked();
             NotifyAll();
-            _ = LoadListAsync(pending, offset);
+            if (ListCurrent(pending)) _ = LoadListAsync(pending, offset);
+            else pending.Complete();
             return pending.Task;
         }
     }
@@ -157,6 +167,8 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
                 CloseDetailLocked();
                 _detailState = RiskDetailState.NotFound;
                 _detailStatusText = T("This endpoint is no longer on the current page. Refresh Risk.");
+                ClearHistoryLocked();
+                NotifyHistory();
                 NotifyAll();
                 return Task.CompletedTask;
             }
@@ -183,8 +195,10 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
         _detailState = RiskDetailState.Loading;
         _detailStatusText = T("Loading endpoint risk factors…");
         _errorText = string.Empty;
+        BeginHistoryLoadLocked();
         NotifyAll();
-        _ = LoadDetailAsync(pending, endpointId);
+        if (DetailCurrent(pending)) _ = LoadDetailAsync(pending, endpointId);
+        else pending.Complete();
         return pending.Task;
     }
     private async Task LoadDetailAsync(Pending pending, Guid endpointId)
@@ -273,6 +287,7 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
     private void ExpireLocked()
     {
         ClearLocked();
+        NotifyHistory();
         NotifyAll();
         SessionExpired?.Invoke(this, EventArgs.Empty);
     }
@@ -281,8 +296,10 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
         lock (_gate)
         {
             if (_disposed) return;
+            var wasShowingDetail = _detailState != RiskDetailState.None;
             CloseDetailLocked();
             _errorText = string.Empty;
+            if (wasShowingDetail) BeginHistoryLoadLocked();
             NotifyAll();
         }
     }
@@ -298,6 +315,9 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
     }
     private void ClearLocked()
     {
+        _historyActive = false;
+        _historyPeriodHours = DefaultHistoryPeriodHours;
+        ClearHistoryLocked();
         _listGeneration++;
         _listPending?.Cancel();
         _listPending = null;
@@ -317,6 +337,7 @@ public sealed class RiskViewModel : INotifyPropertyChanged, IDisposable
         {
             if (_disposed) return;
             ClearLocked();
+            NotifyHistory();
             NotifyAll();
         }
     }

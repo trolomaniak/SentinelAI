@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using SentinelAI.Contracts.Inventory;
+using SentinelAI.Core.History;
 using SentinelAI.Core.Reports;
 using SentinelAI.Rules;
 using SentinelAI.Rules.Vulnerabilities;
@@ -14,7 +15,11 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
     public const int MaximumAlertCount = 13000;
     private static readonly IReadOnlyDictionary<string, SecurityAlert> Catalog = CreateCatalog();
 
-    public async Task<SecurityReport> GenerateAsync(ReportPeriod period, CancellationToken cancellationToken = default)
+    public Task<SecurityReport> GenerateAsync(ReportPeriod period, CancellationToken cancellationToken = default) =>
+        GenerateAsync(period, cancellationToken, includeRiskHistory: true);
+
+    internal async Task<SecurityReport> GenerateAsync(ReportPeriod period, CancellationToken cancellationToken,
+        bool includeRiskHistory)
     {
         ArgumentNullException.ThrowIfNull(period);
         if (!period.IsValid) throw new ArgumentOutOfRangeException(nameof(period));
@@ -28,6 +33,10 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
         await CheckCapacityAsync(connection, transaction, cancellationToken);
         var snapshots = await ReadEndpointsAsync(connection, transaction, cancellationToken);
         var retained = await ReadAlertsAsync(connection, transaction, snapshots, period, cancellationToken);
+        var measurements = includeRiskHistory
+            ? await RiskHistoryStore.ReadReportPointsAsync(connection, transaction,
+                period.StartUtc, period.EndExclusiveUtc, now, cancellationToken)
+            : null;
         transaction.Commit();
 
         var endpoints = snapshots.Values.OrderBy(endpoint => endpoint.EndpointId).Select(endpoint =>
@@ -54,7 +63,11 @@ public sealed class SecurityReportReadStore(AdminStore admins, RiskScoringOption
             new ReportHealthSummary(endpoints.Count(endpoint => endpoint.Health == "healthy"),
                 endpoints.Count(endpoint => endpoint.Health == "warning"), endpoints.Count(endpoint => endpoint.Health == "offline"),
                 endpoints.Count(endpoint => endpoint.Health == "unknown")), activity, endpoints, periodIncidents,
-            findings, BuildRecommendations(findings, endpoints), options.Scorer.Policy, options.InventoryFreshForHours);
+            findings, BuildRecommendations(findings, endpoints), options.Scorer.Policy, options.InventoryFreshForHours)
+        {
+            OrganizationRiskHistory = measurements?.Select(point => new ReportRiskMeasurement(point.CapturedUtc,
+                point.Score, point.RawScore, point.PolicyVersion, point.PolicyFingerprint)).ToArray()
+        };
     }
 
     private static async Task CheckCapacityAsync(SqliteConnection connection, SqliteTransaction transaction,

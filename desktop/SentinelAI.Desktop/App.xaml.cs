@@ -81,7 +81,7 @@ public partial class App : Application
             _overview = new OperationsOverviewViewModel((IOperationsOverviewClient)authenticationClient);
             _devices = new DevicesViewModel((IDevicesClient)authenticationClient);
             _alerts = new AlertsViewModel((IAlertsClient)authenticationClient, (IDevicesClient)authenticationClient);
-            _risk = new RiskViewModel((IRiskClient)authenticationClient);
+            _risk = new RiskViewModel((IRiskClient)authenticationClient, (IRiskHistoryClient)authenticationClient);
             _reports = new ReportsViewModel((IReportsClient)authenticationClient, new WindowsReportSaveService(() => MainWindow));
             _license = new LicenseViewModel((ILicenseClient)authenticationClient);
             _localNetwork = new LocalNetworkViewModel((ILocalNetworkClient)authenticationClient);

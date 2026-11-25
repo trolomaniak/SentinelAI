@@ -199,6 +199,7 @@ public partial class MainWindow : Window
             if (_viewModel.CurrentPage.Id != PageId.Notifications) Notifications?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.MonitoringCoverage) MonitoringCoverage?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Reports) Reports?.Clear();
+            if (_viewModel.CurrentPage.Id != PageId.Risk) Risk?.LeaveHistory();
             if (_viewModel.CurrentPage.Id != PageId.Devices) DefenderDetections?.Clear();
             if (_viewModel.CurrentPage.Id != PageId.Alerts) AiExplanation?.SetAlert(null);
             SetPagePresentation();

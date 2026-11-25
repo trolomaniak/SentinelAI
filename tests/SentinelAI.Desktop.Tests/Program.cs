@@ -15,6 +15,7 @@ assertions += await AlertsViewModelTests.RunAsync();
 assertions += await AlertsViewModelConcurrencyTests.RunAsync();
 assertions += await HttpRiskReadsTests.RunAsync();
 assertions += await RiskViewModelTests.RunAsync();
+assertions += await RiskHistoryTests.RunAsync();
 assertions += await HttpReportRequestsTests.RunAsync();
 assertions += await ReportsViewModelTests.RunAsync();
 assertions += await ReportFileWriterTests.RunAsync();
