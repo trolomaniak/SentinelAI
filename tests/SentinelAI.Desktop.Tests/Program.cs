@@ -33,6 +33,7 @@ assertions += await DefenderDetectionTests.RunAsync();
 assertions += await BackupTests.RunAsync();
 assertions += await NotificationsTests.RunAsync();
 assertions += await MonitoringCoverageTests.RunAsync();
+assertions += await SoftwareCatalogTests.RunAsync();
 assertions += await OperationsOverviewTests.RunAsync();
 assertions += await RiskRegisterTests.RunAsync();
 assertions += await LocalizationTests.RunAsync();
@@ -66,7 +67,9 @@ void NavigationTests()
     using var client = new ControlledCoreClient();
     using var shell = new ShellViewModel(client, "1.2.3-test");
     Ensure(shell.Title == "SentinelAI" && shell.Version == "1.2.3-test", "The shell lost the application title or supplied version.");
-    Ensure(shell.Pages.Select(page => page.Id).SequenceEqual(Enum.GetValues<PageId>()), "Navigation must contain each assigned page exactly once in order.");
+    var navigationOrder = Enum.GetValues<PageId>().Where(id => id != PageId.SoftwareCatalog).ToList();
+    navigationOrder.Insert(navigationOrder.IndexOf(PageId.Devices) + 1, PageId.SoftwareCatalog);
+    Ensure(shell.Pages.Select(page => page.Id).SequenceEqual(navigationOrder), "Navigation must contain each assigned page exactly once in order.");
     Ensure(shell.CurrentPage.Id == PageId.Devices, "Startup must select the implemented Devices workspace.");
     Ensure(shell.Pages.All(page => !string.IsNullOrWhiteSpace(page.Title) && !string.IsNullOrWhiteSpace(page.Description)), "All navigation pages need a title and explanation.");
     Ensure(((ICollection<NavigationPage>)shell.Pages).IsReadOnly, "A caller can mutate the navigation collection.");

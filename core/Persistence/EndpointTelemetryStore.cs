@@ -58,6 +58,14 @@ public sealed class EndpointTelemetryStore(AdminStore admins, AlertStore alerts,
             );
             """;
         await create.ExecuteNonQueryAsync(cancellationToken);
+        await SoftwareInventoryWriter.InitializeAsync(connection, time.GetUtcNow(), cancellationToken);
+    }
+
+    internal async Task<string?> BackfillSoftwareInventoryBatchAsync(string afterEndpoint, CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        return await SoftwareInventoryWriter.BackfillBatchAsync(connection, afterEndpoint, cancellationToken);
     }
 
     /// <summary>
@@ -72,12 +80,15 @@ public sealed class EndpointTelemetryStore(AdminStore admins, AlertStore alerts,
         await connection.OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction(deferred: false);
         var endpoint = report.EndpointId.ToString("D");
+        var receivedUtc = time.GetUtcNow();
+        // A first live report can arrive before the background upgrade projection reaches this endpoint.
+        await SoftwareInventoryWriter.SeedLegacyBeforeAsync(connection, transaction, report, cancellationToken);
         await using var upsert = connection.CreateCommand();
         upsert.Transaction = transaction;
         upsert.CommandText = """
             INSERT INTO EndpointSecurityTelemetry (EndpointId, SchemaVersion, CollectedUtcTicks, ReceivedUtcTicks, ReportJson)
             SELECT $endpointId, $schemaVersion, $collectedUtcTicks, $receivedUtcTicks, $reportJson
-            WHERE EXISTS (SELECT 1 FROM EndpointEnrollments WHERE EndpointId = $endpointId)
+            WHERE EXISTS (SELECT 1 FROM EndpointEnrollments WHERE EndpointId = $endpointId AND RemovedUtcTicks IS NULL)
             ON CONFLICT (EndpointId) DO UPDATE SET
                 SchemaVersion = excluded.SchemaVersion,
                 CollectedUtcTicks = excluded.CollectedUtcTicks,
@@ -88,11 +99,12 @@ public sealed class EndpointTelemetryStore(AdminStore admins, AlertStore alerts,
         upsert.Parameters.AddWithValue("$endpointId", endpoint);
         upsert.Parameters.AddWithValue("$schemaVersion", report.SchemaVersion);
         upsert.Parameters.AddWithValue("$collectedUtcTicks", report.CollectedUtc.UtcDateTime.Ticks);
-        upsert.Parameters.AddWithValue("$receivedUtcTicks", time.GetUtcNow().UtcDateTime.Ticks);
+        upsert.Parameters.AddWithValue("$receivedUtcTicks", receivedUtc.UtcTicks);
         upsert.Parameters.AddWithValue("$reportJson", JsonSerializer.Serialize(report, EndpointTelemetryContract.Json));
         var stored = await upsert.ExecuteNonQueryAsync(cancellationToken) == 1;
         if (stored)
         {
+            await SoftwareInventoryWriter.RecordAsync(connection, transaction, report, receivedUtc, cancellationToken);
             var findings = rules.Evaluate(report).ToList();
             // TASK-030: the report's programs and the latest inventory's Windows release against the feed in use.
             if (vulnerabilities.Current is { } feed)

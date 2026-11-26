@@ -10,7 +10,8 @@ public enum PageId
     Reports,
     Notifications,
     MonitoringCoverage,
-    Settings
+    Settings,
+    SoftwareCatalog
 }
 
 public sealed record NavigationPage(PageId Id, string Title, string Description);

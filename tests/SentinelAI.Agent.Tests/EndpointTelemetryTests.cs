@@ -246,6 +246,9 @@ internal static class EndpointTelemetryTests
         var budget = EndpointTelemetryNormalizer.Software(many, byteBudget: 4096);
         Ensure(budget.Truncated && JsonSerializer.SerializeToUtf8Bytes(budget.Items, EndpointTelemetryContract.Json).Length <= 4096,
             "The application list must respect its byte budget.");
+        var cappedScan = EndpointTelemetryNormalizer.Software(Enumerable.Repeat(entries[0], 16_385));
+        Ensure(cappedScan is { TotalCount: 1, Truncated: false, SkippedCount: 1 } && EndpointTelemetryContract.IsValid(cappedScan),
+            "A bounded registry scan must report omitted candidates even when retained items fit the wire budget.");
     }
 
     // C1–C4: collection is bounded per section, classifies failures and never accumulates threads.

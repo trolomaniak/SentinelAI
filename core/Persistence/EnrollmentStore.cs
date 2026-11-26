@@ -222,6 +222,7 @@ public sealed class EnrollmentStore(AdminStore admins)
             if (await update.ExecuteNonQueryAsync(cancellationToken) != 1) return EndpointRemoval.NotFound;
         }
 
+        await SoftwareInventoryWriter.RemoveEndpointProjectionAsync(connection, transaction, endpointId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return EndpointRemoval.Removed;
     }

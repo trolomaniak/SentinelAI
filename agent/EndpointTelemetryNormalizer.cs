@@ -183,16 +183,22 @@ public static class EndpointTelemetryNormalizer
     /// system components and updates of another product are not applications and are not counted; an application
     /// whose name is unusable is counted in <see cref="InstalledSoftwareTelemetry.SkippedCount"/>. Items are added in
     /// sorted order until their serialized size reaches <paramref name="byteBudget"/>. Entries that could not be read
-    /// at all are counted as skipped.
+    /// at all are counted as skipped. If the scan bound is reached, the skipped count includes an uninspected entry.
     /// </summary>
     public static InstalledSoftwareTelemetry Software(IEnumerable<RawSoftwareEntry> entries,
         int byteBudget = EndpointTelemetryContract.SoftwareByteBudget, int unreadableEntries = 0)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        var skipped = Math.Max(0, unreadableEntries);
+        var skipped = Math.Clamp(unreadableEntries, 0, EndpointTelemetryContract.MaxSoftwareTotal);
         var applications = new HashSet<InstalledSoftwareItem>();
-        foreach (var entry in entries.Take(MaximumSoftwareEntriesScanned))
+        var scanned = 0;
+        foreach (var entry in entries)
         {
+            if (scanned++ == MaximumSoftwareEntriesScanned)
+            {
+                skipped++;
+                break;
+            }
             var name = entry.DisplayName?.Trim();
             if (string.IsNullOrEmpty(name) || AsInteger(entry.SystemComponent) == 1 ||
                 !string.IsNullOrWhiteSpace(entry.ParentKeyName) ||
