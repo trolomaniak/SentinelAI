@@ -16,6 +16,8 @@ Owner decisions of 2026-10-31 (`.agent/DECISIONS.md`):
 
 ## What Core reports
 
+The [Vulnerability Center](VULNERABILITY-CENTER.md) groups the same deterministic matches across active computers and shows fleet update priorities, affected observations and the limits of fleet coverage.
+
 For each enrolled computer, Desktop → Devices → a computer → **Vulnerabilities** shows:
 
 - **Findings.** For each finding: CVE, CVSS severity and score, whether it is known to be exploited (with the date CISA

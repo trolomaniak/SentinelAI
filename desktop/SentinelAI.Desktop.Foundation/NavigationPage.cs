@@ -11,7 +11,8 @@ public enum PageId
     Notifications,
     MonitoringCoverage,
     Settings,
-    SoftwareCatalog
+    SoftwareCatalog,
+    VulnerabilityCenter
 }
 
 public sealed record NavigationPage(PageId Id, string Title, string Description);

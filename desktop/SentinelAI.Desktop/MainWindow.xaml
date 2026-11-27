@@ -16,6 +16,9 @@
         <DataTemplate x:Key="SoftwareCatalogTemplate">
             <views:SoftwareCatalogView DataContext="{Binding SoftwareCatalog, RelativeSource={RelativeSource AncestorType=Window}}" />
         </DataTemplate>
+        <DataTemplate x:Key="VulnerabilityCenterTemplate">
+            <views:VulnerabilityCenterView DataContext="{Binding VulnerabilityCenter, RelativeSource={RelativeSource AncestorType=Window}}" />
+        </DataTemplate>
         <DataTemplate x:Key="AlertsTemplate">
             <views:AlertsView DataContext="{Binding Alerts, RelativeSource={RelativeSource AncestorType=Window}}" />
         </DataTemplate>
