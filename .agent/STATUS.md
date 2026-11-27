@@ -162,6 +162,7 @@
 - [EXPANDED-07](tasks/EXPANDED-07-vulnerability-center.md) starts from merged Software Catalog (`3fe3c03`). The fleet view groups the existing exact signed-feed matches by CVE and curated product, counts distinct affected computers and shows deterministic update priority, observed versions and source coverage.
 - Core computes a bounded local assessment from one inventory snapshot and one verified feed. Native Desktop uses its assessment ID for search, pagination and device drill-down, in English and Polish. See the [Vulnerability Center guide](../docs/VULNERABILITY-CENTER.md) and [Polish pilot guide](../docs/pilot/CENTRUM-PODATNOSCI.pl.md).
 - The focused Core suite passed with signed synthetic data, including endpoint parity, coverage, pinned paging, feed rotation, expiry and capacity. The existing rules suite passed, including 104 vulnerability checks. The portable Desktop suite passed 28 Vulnerability Center assertions. Core and the native Windows test project built with zero warnings or errors.
+- Both native WPF jobs passed on `07a9450`. One Windows Core job found a locked temporary database during Risk History fixture cleanup. The fixture now stops its test hosts before clearing SQLite pools and removing their data.
 
 ## 2026-11-26 — Expanded pilot 06: software catalog (merged)
 
