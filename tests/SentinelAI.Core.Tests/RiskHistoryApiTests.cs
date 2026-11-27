@@ -143,6 +143,7 @@ internal static class RiskHistoryApiTests
             Check(pastDay.Points.Select(point => point.CapturedUtc).SequenceEqual(new[] { Boundary, clock.UtcNow }),
                 "24-hour range did not filter points by elapsed UTC time");
             priorTime = clock.UtcNow;
+            await app.StopAsync();
         }
 
         await using var restart = Build(directory, clock, arguments:
@@ -160,6 +161,7 @@ internal static class RiskHistoryApiTests
             points[^1].PolicyVersion == "history-v2" && points[^1].Causes.Contains("policyChanged") && points[^1].RawScore < points[^2].RawScore &&
             (await ReadAsync(restartedClient, EndpointPath(secondary.EndpointId), newBearer)).Points.Count == 2,
             "policy changes rewrote older samples, lost restart comparisons or removed endpoint history");
+        await restart.StopAsync();
     }
 
     private static async Task VerifyRetentionAsync(string directory)
@@ -213,6 +215,7 @@ internal static class RiskHistoryApiTests
             await ScalarAsync(path, "SELECT COUNT(*) FROM RiskHistoryEndpointPoints;") == 3 &&
             (await store.ReadAsync(null, 2160, default)).Points.Single().ComparedWithUtc == clock.UtcNow.AddHours(-6),
             "oversized capture persisted partial rows or prevented a complete same-bucket retry");
+        await app.StopAsync();
     }
 
     private static async Task VerifyHostedCaptureAsync(string directory)
@@ -221,20 +224,25 @@ internal static class RiskHistoryApiTests
         var clock = new ManualTime(now);
         await using var app = Build(directory, clock, backgroundWorker: true);
         using var client = await StartAsync(app);
-        var store = app.Services.GetRequiredService<RiskHistoryStore>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (true)
+        try
         {
-            var point = (await store.ReadAsync(null, 24, timeout.Token)).Points.SingleOrDefault();
-            if (point is not null)
+            var store = app.Services.GetRequiredService<RiskHistoryStore>();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (true)
             {
-                Check(point.CapturedUtc == now && point.Score == 0 && point.EndpointCount == 0 &&
-                    point.GoverningEndpointId is null && point.Causes.SequenceEqual(new[] { "firstCapture" }),
-                    "hosted worker did not record an actual empty-fleet measurement");
-                return;
+                var point = (await store.ReadAsync(null, 24, timeout.Token)).Points.SingleOrDefault();
+                if (point is not null)
+                {
+                    Check(point.CapturedUtc == now && point.Score == 0 && point.EndpointCount == 0 &&
+                        point.GoverningEndpointId is null && point.Causes.SequenceEqual(new[] { "firstCapture" }),
+                        "hosted worker did not record an actual empty-fleet measurement");
+                    return;
+                }
+                await Task.Delay(10, timeout.Token);
             }
-            await Task.Delay(10, timeout.Token);
         }
+        // The capture can be visible before its worker has released the SQLite connection on Windows.
+        finally { await app.StopAsync(); }
     }
 
     private static WebApplication Build(string directory, ManualTime clock, bool backgroundWorker = false,

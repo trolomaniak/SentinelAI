@@ -284,6 +284,9 @@ internal static partial class LocalNetworkTests
                      (HttpMethod.Get, "/api/admin/local-network", true), (HttpMethod.Post, "/api/admin/enrollment-tokens", true),
                      (HttpMethod.Get, "/api/admin/license", true), (HttpMethod.Get, "/api/admin/software-catalog", true),
                      (HttpMethod.Get, "/api/admin/software-catalog/changes", true),
+                     (HttpMethod.Get, "/api/admin/vulnerability-center", true),
+                     (HttpMethod.Get, "/api/admin/vulnerability-center/CVE-2099-3101/example-viewer/devices" +
+                         "?assessment=00000000-0000-4000-8000-000000000001", true),
                      (HttpMethod.Get, "/api/agent/heartbeat", false)
                  })
         {

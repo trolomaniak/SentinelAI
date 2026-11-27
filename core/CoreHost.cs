@@ -134,6 +134,8 @@ public static class CoreHost
         builder.Services.AddSingleton<VulnerabilityFeedCache>();
         builder.Services.AddSingleton<VulnerabilityFeedStore>();
         builder.Services.AddSingleton<VulnerabilityService>();
+        builder.Services.AddSingleton<VulnerabilityCenterReadStore>();
+        builder.Services.AddSingleton<VulnerabilityCenterService>();
         // TASK-032: the operational Risk Register, kept apart from technical scoring.
         builder.Services.AddSingleton<RiskRegisterStore>();
         // The installation language (English or Polish), chosen in Setup and changeable in Desktop.
@@ -284,7 +286,8 @@ public static class CoreHost
                 context.Request.Path.StartsWithSegments(MonitoringCoverageEndpoints.Route) ||
                 context.Request.Path.StartsWithSegments(OperationsOverviewEndpoints.Route) ||
                 context.Request.Path.StartsWithSegments(RiskHistoryEndpoints.Route) ||
-                context.Request.Path.StartsWithSegments(SoftwareCatalogEndpoints.Route))
+                context.Request.Path.StartsWithSegments(SoftwareCatalogEndpoints.Route) ||
+                context.Request.Path.StartsWithSegments(VulnerabilityCenterEndpoints.Route))
             {
                 context.Response.Headers.CacheControl = "no-store";
                 if (!NotificationEndpoints.IsLocal(context))
@@ -320,6 +323,7 @@ public static class CoreHost
         app.MapOperationsOverviewEndpoints();
         app.MapRiskHistoryEndpoints();
         app.MapSoftwareCatalogEndpoints();
+        app.MapVulnerabilityCenterEndpoints();
 
         app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
             .AllowAnonymous();

@@ -28,6 +28,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IDisposable
             new NavigationPage(PageId.Overview, T("Overview"), T("Your local security workspace.")),
             new NavigationPage(PageId.Devices, T("Devices"), T("Endpoint inventory and connection health.")),
             new NavigationPage(PageId.SoftwareCatalog, T("Software catalog"), T("Reported Windows applications, versions and changes.")),
+            new NavigationPage(PageId.VulnerabilityCenter, T("Vulnerability center"), T("Fleet findings, affected computers and update guidance.")),
             new NavigationPage(PageId.Alerts, T("Alerts"), T("Security alerts and incident review.")),
             new NavigationPage(PageId.Risk, T("Risk"), T("Organization and endpoint risk.")),
             new NavigationPage(PageId.RiskRegister, T("Risk Register"), T("Business risks, owners, treatment and reviews.")),
